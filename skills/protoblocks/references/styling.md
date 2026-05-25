@@ -36,19 +36,32 @@ Then write Tailwind utility classes directly in `template.php`:
 <article class="flex flex-col gap-4 rounded-xl bg-white p-6 shadow">
 ```
 
+**Compilation is automatic — there is no separate build step you run.** The plugin ships its own Tailwind runtime: it manages a standalone Tailwind CLI binary and compiles the CSS for you. You write classes in `template.php`; the plugin scans all blocks, compiles, scopes, and serves the result. (You never run `npm`/`tailwindcss` yourself for this.)
+
 How it works:
-- A scanner reads all blocks' templates for Tailwind classes, compiles CSS via the Tailwind CLI, and caches the output to `wp-content/cache/proto-blocks/`.
+- The plugin uses a **bundled Tailwind CLI binary** (downloaded once from Tailwind's official releases, managed by the plugin; falls back to `npx @tailwindcss/cli` if available). Compilation requires PHP shell access (`exec()`).
+- A scanner reads all blocks' templates for Tailwind classes, compiles CSS, and caches the output to `wp-content/cache/proto-blocks/`.
 - The compiled CSS is **scoped to `.proto-blocks-scope`** so block utilities don't leak into the rest of the site. Selectors are rewritten (e.g. `.rounded-full` → `.proto-blocks-scope.rounded-full, .proto-blocks-scope .rounded-full`). Global at-rules (`:root`, keyframes, font-face, etc.) are not scoped.
-- Compilation mode is configurable: `cached` (compile once, serve cached) or `on_reload` (recompile each load, for development). Managed via the Tailwind admin settings / `TailwindManager`.
+
+### Two compilation modes (dev vs prod)
+
+Set in the plugin's Tailwind admin settings (stored in the `proto_blocks_tailwind` option):
+
+| Mode | Behavior | Use for |
+|------|----------|---------|
+| `on_reload` (**dev**) | Regenerates the Tailwind CSS on **every page load**, so new classes appear immediately. | Active development. |
+| `cached` (**prod**, default) | Compiles once and serves the cached CSS. New classes do **not** appear until a recompile is triggered. | Production. |
+
+So while iterating, use **dev (`on_reload`) mode** and your classes always reflect the current markup. In **prod (`cached`) mode**, after adding new classes trigger a recompile (clear the cache / re-save Tailwind settings) or they won't show.
 
 Manager API (programmatic):
 ```php
 \ProtoBlocks\Tailwind\Manager::getInstance()->isEnabled();
-\ProtoBlocks\Tailwind\Manager::getInstance()->enable();
+\ProtoBlocks\Tailwind\Manager::getInstance()->setMode('on_reload'); // 'cached' | 'on_reload'
 ```
-Settings live in the `proto_blocks_tailwind` option. An option exists to disable WordPress global styles when they conflict with Tailwind's reset.
+An option also exists to disable WordPress global styles when they conflict with Tailwind's reset.
 
-If new Tailwind classes don't apply, force a recompile (clear the proto-blocks cache, or use `on_reload` mode while developing).
+**First-time setup:** download the Tailwind binary once from the plugin's Tailwind settings page. Until the binary (or `npx`) is available, no Tailwind CSS is generated and classes have no effect — see Troubleshooting below.
 
 ## 3. Theme / editor styles
 
@@ -69,19 +82,19 @@ These are the two real authoring choices (theme styles are a complement, not an 
 | | Vanilla CSS (`style.css`) | Tailwind (`useTailwind: true`) |
 |---|---|---|
 | Where styles live | a `style.css` next to the block | utility classes inline in `template.php` |
-| Build step | none | yes — scanned + compiled by the plugin |
+| Build step | none | none you run — the plugin compiles automatically (bundled Tailwind runtime); one-time binary download |
 | Isolation | your own class names | auto-scoped to `.proto-blocks-scope` |
 | Editor/frontend parity | identical (same stylesheet both places) | identical (compiled CSS loaded both places) |
 | Best when | the block has a distinct, hand-crafted design; you want zero build; you're shipping the block standalone | you're building many blocks fast, reusing a design system / spacing scale, iterating in markup |
-| Watch out for | class-name collisions if not namespaced | classes only exist after a (re)compile; scoping means utilities don't leak — and won't apply outside the scope wrapper |
+| Watch out for | class-name collisions if not namespaced | binary must be downloaded once; in prod (`cached`) mode new classes need a recompile (dev `on_reload` mode regenerates each load); scoping means utilities don't apply outside the scope wrapper |
 
 **Decision guide:**
 - **Use vanilla CSS** for a one-off, visually distinctive block, when you want no toolchain, or when the block must be portable/exported cleanly. Co-locate `style.css`; namespace classes (`.my-block__title`).
-- **Use Tailwind** when you're producing a *set* of blocks and want consistent spacing/colors and fast iteration without round-tripping to a CSS file. Accept the compile step and the `.proto-blocks-scope` boundary.
+- **Use Tailwind** when you're producing a *set* of blocks and want consistent spacing/colors and fast iteration without round-tripping to a CSS file. Compilation is automatic (the plugin bundles the Tailwind runtime); you just download the binary once and pick dev/prod mode, and work within the `.proto-blocks-scope` boundary.
 - **Don't mix the two inside a single block** unless you have a reason — pick one as that block's primary styling method to keep it readable. Either way you can still pull in theme tokens via editor styles.
 - **Consistency beats preference:** match whatever the surrounding blocks in the project already use. The setup wizard records a project-wide default in `proto_blocks_component_style` — follow it.
 
-If you choose Tailwind and classes don't apply, the cause is almost always "not compiled yet" or "outside the scope wrapper" — see Troubleshooting and the Tailwind section above.
+If you choose Tailwind and classes don't apply, the cause is almost always (1) the Tailwind binary hasn't been downloaded in plugin settings, or (2) you're in prod (`cached`) mode and haven't recompiled — see the Tailwind section above and Troubleshooting.
 
 ## Choosing among all three
 

@@ -46,10 +46,21 @@ Symptom → cause → fix. Grouped by area.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Tailwind classes have no effect | `useTailwind` off, or class not yet compiled | Set `"useTailwind": true`; recompile (clear cache or use `on_reload` mode). |
+| Tailwind classes have no effect | See dedicated section below | Most often: binary not downloaded, or prod (`cached`) mode without a recompile. |
 | Tailwind styles leak / get overridden | Scoping to `.proto-blocks-scope` | Expected — utilities are scoped; ensure your markup is inside the scoped wrapper. |
 | `style.css` not loading | Wrong filename/location | Use `style.css` or `{block-name}.css` in the block folder. |
 | Editor preview looks different from front end | Theme editor styles not loaded | The plugin injects theme editor styles; confirm theme registers them. |
+
+### Tailwind classes aren't working
+
+Compilation is automatic (the plugin bundles its own Tailwind runtime), so when classes have no effect it's almost never your markup. Check these in order:
+
+1. **Is the Tailwind binary downloaded?** The plugin compiles using a standalone Tailwind CLI binary that must be downloaded **once** from the plugin's Tailwind settings page (it can fall back to `npx` if available, and needs PHP `exec()`/shell access). If it was never downloaded, **no CSS is generated at all** and every Tailwind class silently does nothing. → Open **Proto Blocks → Tailwind settings** and download the binary; confirm status shows it installed.
+2. **Are you in prod mode instead of dev mode?** In `cached` (prod) mode the CSS is compiled once and cached — newly added classes won't appear until you recompile. In `on_reload` (dev) mode the CSS regenerates on **every page load**, so changes show immediately. → While developing, switch to **dev (`on_reload`) mode**. In prod, trigger a recompile after adding classes (re-save Tailwind settings or `wp proto-blocks cache clear`).
+3. **Is `useTailwind` enabled on the block?** → Set `"useTailwind": true` in the block's `protoBlocks` config.
+4. **Is the element inside the scoped wrapper?** Compiled utilities are scoped to `.proto-blocks-scope`; markup outside that scope won't receive them. → Keep Tailwind-styled markup within the block's wrapper.
+
+Quick rule of thumb: **classes do nothing at all** → binary not downloaded (step 1). **Old classes work but new ones don't** → prod/`cached` mode, needs recompile (step 2).
 
 ## Interactivity
 
