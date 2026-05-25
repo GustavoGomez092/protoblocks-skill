@@ -80,4 +80,4 @@ A 4-step wizard runs after activation (welcome → choose styling approach vanil
 
 ## Admin: Preview Capture
 
-Auto-generates inserter thumbnails. The admin "Preview Capture" page renders each block in a hidden iframe, captures it to a PNG, and saves `preview.png` into the block's folder. The schema reader then auto-detects `preview.png`/`.jpg`/`.jpeg`/`.webp` as the block's `previewImage` for the inserter. You can also drop your own `preview.png` (≈400px wide) into a block folder.
+Auto-generates inserter thumbnails. The admin "Preview Capture" page renders each block in a hidden iframe, captures it to a PNG, and saves `preview.png` into the block's folder; the schema reader then auto-detects it. Full workflow (and the manual alternative) in `references/previews.md`.

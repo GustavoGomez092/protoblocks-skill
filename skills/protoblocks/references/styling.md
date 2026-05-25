@@ -62,8 +62,29 @@ $overlay = proto_blocks_hex_to_rgba($attributes['overlayColor'] ?? '#000000', 0.
 // "rgba(0, 0, 0, 0.5)"
 ```
 
-## Choosing an approach
+## Vanilla CSS vs Tailwind — which to choose
 
-- **Vanilla CSS** — most predictable, no build step, good for self-contained component styles.
-- **Tailwind** — fast iteration in markup; remember it's scoped to `.proto-blocks-scope` and needs compilation.
-- **Theme styles** — for inheriting global design tokens / typography in the editor.
+These are the two real authoring choices (theme styles are a complement, not an alternative). Pick **per block** — the `useTailwind` flag is per-block, so a project can mix both.
+
+| | Vanilla CSS (`style.css`) | Tailwind (`useTailwind: true`) |
+|---|---|---|
+| Where styles live | a `style.css` next to the block | utility classes inline in `template.php` |
+| Build step | none | yes — scanned + compiled by the plugin |
+| Isolation | your own class names | auto-scoped to `.proto-blocks-scope` |
+| Editor/frontend parity | identical (same stylesheet both places) | identical (compiled CSS loaded both places) |
+| Best when | the block has a distinct, hand-crafted design; you want zero build; you're shipping the block standalone | you're building many blocks fast, reusing a design system / spacing scale, iterating in markup |
+| Watch out for | class-name collisions if not namespaced | classes only exist after a (re)compile; scoping means utilities don't leak — and won't apply outside the scope wrapper |
+
+**Decision guide:**
+- **Use vanilla CSS** for a one-off, visually distinctive block, when you want no toolchain, or when the block must be portable/exported cleanly. Co-locate `style.css`; namespace classes (`.my-block__title`).
+- **Use Tailwind** when you're producing a *set* of blocks and want consistent spacing/colors and fast iteration without round-tripping to a CSS file. Accept the compile step and the `.proto-blocks-scope` boundary.
+- **Don't mix the two inside a single block** unless you have a reason — pick one as that block's primary styling method to keep it readable. Either way you can still pull in theme tokens via editor styles.
+- **Consistency beats preference:** match whatever the surrounding blocks in the project already use. The setup wizard records a project-wide default in `proto_blocks_component_style` — follow it.
+
+If you choose Tailwind and classes don't apply, the cause is almost always "not compiled yet" or "outside the scope wrapper" — see Troubleshooting and the Tailwind section above.
+
+## Choosing among all three
+
+- **Vanilla CSS** — most predictable, no build step, good for self-contained / portable blocks.
+- **Tailwind** — fast iteration across many blocks; scoped to `.proto-blocks-scope`, needs compilation.
+- **Theme styles** — not a primary method; use to inherit global design tokens / typography into the editor preview alongside either of the above.

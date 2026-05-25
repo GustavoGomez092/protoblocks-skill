@@ -16,6 +16,8 @@ Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML
 - `template.php` → plain PHP/HTML. Reads values from `$attributes`. Marks editable elements with `data-proto-field`, repeaters with `data-proto-repeater`.
 - Fields and controls both become block attributes, readable as `$attributes['name']`.
 
+**Design principle — model the fewest, richest regions.** Don't chop one authored area into many fields. A region of "heading + paragraph + list" is **one wysiwyg field** (or an inner-blocks slot), not three fields. Discrete fields are for distinct, individually-placed/styled slots. See `references/composition.md` before designing a block.
+
 ## When to Use
 
 - Creating a new Proto-Blocks block (scaffold `block.json` + `template.php`).
@@ -143,15 +145,17 @@ wp proto-blocks export <name> --output=<path>
 
 Load these as needed — do not read all of them up front.
 
+- `references/composition.md` — **read before designing a block's fields.** When to use discrete fields vs one wysiwyg vs an inner-blocks slot vs a repeater; avoiding field proliferation.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, every key, defaults, validation errors vs warnings, attribute generation.
 - `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
 - `references/controls.md` — each control type, options, conditional visibility (`conditions.visible`), `affects`.
 - `references/templates.md` — template variables, the `data-proto-*` system, escaping, preview vs frontend detection.
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
-- `references/styling.md` — vanilla CSS, Tailwind (`useTailwind`, scoping to `.proto-blocks-scope`, theme tokens), editor styles.
+- `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
 - `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions.
+- `references/previews.md` — generating inserter thumbnails (Preview Capture admin tool) or supplying your own `preview.png`.
 - `references/examples.md` — the bundled example blocks and what each demonstrates, with full canonical samples.
-- `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, setup wizard, preview capture.
+- `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, setup wizard.
 - `references/troubleshooting.md` — symptom → cause → fix for common problems.
 
 ## Common Mistakes
