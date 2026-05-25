@@ -1,0 +1,23 @@
+{
+  "name": "protoblocks-skill",
+  "displayName": "Proto-Blocks Skill",
+  "description": "Build, scaffold, and debug Proto-Blocks: PHP-template Gutenberg blocks defined in block.json with data-proto-* fields, controls, repeaters, inner blocks, and Tailwind",
+  "version": "1.0.0",
+  "author": {
+    "name": "Gustavo Gomez",
+    "email": "gustavogomez092@gmail.com"
+  },
+  "homepage": "https://github.com/GustavoGomez092/protoblocks-skill",
+  "repository": "https://github.com/GustavoGomez092/protoblocks-skill",
+  "license": "MIT",
+  "keywords": [
+    "wordpress",
+    "gutenberg",
+    "proto-blocks",
+    "blocks",
+    "php-templates",
+    "block.json",
+    "tailwind"
+  ],
+  "skills": "./skills/"
+}

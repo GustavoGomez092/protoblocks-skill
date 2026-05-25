@@ -1,0 +1,20 @@
+{
+  "name": "protoblocks",
+  "description": "Skill for building WordPress Gutenberg blocks with the Proto-Blocks plugin",
+  "owner": {
+    "name": "Gustavo Gomez",
+    "email": "gustavogomez092@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "protoblocks-skill",
+      "description": "Build, scaffold, and debug Proto-Blocks: PHP-template Gutenberg blocks defined in block.json with data-proto-* fields, controls, repeaters, inner blocks, and Tailwind",
+      "version": "1.0.0",
+      "source": "./",
+      "author": {
+        "name": "Gustavo Gomez",
+        "email": "gustavogomez092@gmail.com"
+      }
+    }
+  ]
+}
