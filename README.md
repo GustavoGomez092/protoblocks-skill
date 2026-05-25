@@ -127,12 +127,6 @@ protoblocks-skill/
 - Frontend interactivity: plain JS, ES modules, and the WordPress Interactivity API — with the complete Accordion and a Tabs pattern inline.
 - WP-CLI, hooks/filters, block discovery, category, preview capture, demo blocks, debug mode, troubleshooting.
 
-## Accuracy & status
-
-This is a strong v1. Its guidance is grounded in the Proto-Blocks plugin source (with file references) and verified at the **documentation level** — isolated agents successfully built and debugged blocks using only the skill.
-
-It has **not** been validated against a live WordPress install. Treat generated blocks as "should work," and smoke-test them in a real site running the Proto-Blocks plugin before shipping — especially inner-blocks blocks, where the plugin's own README and its bundled `hero` example disagree on the exact form (this skill teaches the README's prescribed `"inner-blocks"` + `$innerBlocksContent`). If you confirm runtime behavior, open an issue/PR so the skill can be locked to it.
-
 ## Keeping it in sync
 
 When the Proto-Blocks plugin gains field/control types, schema keys, CLI commands, or features, update the relevant `references/*.md` and `SKILL.md` quick-reference tables. The plugin's `examples/` folder is always the authoritative source for working block code.
