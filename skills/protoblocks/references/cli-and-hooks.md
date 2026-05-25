@@ -81,3 +81,33 @@ A 4-step wizard runs after activation (welcome → choose styling approach vanil
 ## Admin: Preview Capture
 
 Auto-generates inserter thumbnails. The admin "Preview Capture" page renders each block in a hidden iframe, captures it to a PNG, and saves `preview.png` into the block's folder; the schema reader then auto-detects it. Full workflow (and the manual alternative) in `references/previews.md`.
+
+## Block category
+
+Proto-Blocks registers a custom inserter category that appears at the **top** of the block inserter.
+- Defaults: title "Proto Blocks", slug `proto-blocks`, icon `layout` (dashicon).
+- Rename in admin (Proto-Blocks → System Status → General Settings) or via filters: `proto_blocks_category_title`, `proto_blocks_category_icon`, `proto_blocks_category_slug`. If you change the slug, update each block's `"category"` to match.
+
+## Demo blocks
+
+The 9 example blocks (see `examples.md`) can be copied into the active theme's `proto-blocks/` directory:
+- **Install:** Proto-Blocks admin → "Install Demo Blocks to Theme" (or the Setup Wizard). They're great editable references.
+- **Remove:** Proto-Blocks admin → "Remove Demo Blocks" (your own blocks are untouched).
+- They can also be registered in place (not copied) via `PROTO_BLOCKS_EXAMPLE_BLOCKS`.
+
+## Editor preview system
+
+The editor preview is **server-rendered**, not React-rendered:
+1. The PHP template is rendered server-side via AJAX (`admin-ajax.php`).
+2. The HTML is sent to the editor; `data-proto-field` elements are swapped for React editing components.
+3. Changing a **control** (select/toggle/range/…) triggers a **full preview re-render**.
+4. Editing a **field** (text/image/link) updates **inline** without a full refresh (faster).
+
+Implication: `data-wp-*` interactivity runs on the **frontend**, not in the editor preview — verify interactive behavior on the front end.
+
+## Debug mode
+
+```php
+define('PROTO_BLOCKS_DEBUG', true); // wp-config.php
+```
+Enables PHP error logging for registration/rendering, JS console logs for preview/attribute changes, and detailed errors in AJAX responses. Disable in production.

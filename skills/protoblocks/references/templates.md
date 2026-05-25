@@ -8,10 +8,12 @@
 |----------|------|-------|
 | `$attributes` | array | All field + control values, plus core attributes (`align`, `anchor`, `className`, `backgroundColor`, `textColor`, `fontSize`, `style`, `innerBlocksContent`). **Hyphenated attribute keys are converted to underscores** for PHP safety. |
 | `$block` | `WP_Block`\|null | The block instance on the frontend; **`null` in editor preview**. Use it to branch on context. |
-| `$content` | string | Inner blocks content. Equivalent to `$attributes['innerBlocksContent']`. |
+| `$innerBlocksContent` | string | The nested-blocks HTML for an `inner-blocks` field. Same value as `$attributes['innerBlocksContent']`. **Echo this, not `$content`.** Always `?? ''`. |
 | `$template` | object | Helper: `$template->has_value($name)` (true if attribute exists and non-empty), `$template->get($name, $default)`. |
 
-In preview, each control name is also exposed as a variable with its default value, `$content` is `''`, and `$block` is `null`.
+> **`$content` is not passed to the template.** WordPress's render content is stored as `$attributes['innerBlocksContent']` and exposed as `$innerBlocksContent`. A template that echoes `$content` for inner blocks produces empty output (and an `Undefined variable` warning). The bundled `hero` example pre-defines `$content = $content ?? ''` and echoes it — that's the legacy pattern; use `$innerBlocksContent ?? ''` instead.
+
+In preview, each control name is also exposed as a variable with its default value, and `$block` is `null`.
 
 ## Detecting editor preview vs frontend
 
@@ -33,7 +35,7 @@ if (empty($attributes['items']) && $is_preview) {
 | `data-proto-field="name"` | element ↔ field `name` | Put on the element that displays the field. **Render it even when the value is empty**, or it can't be edited. |
 | `data-proto-repeater="name"` | container ↔ repeater field `name` | On the wrapping element of a repeater. |
 | `data-proto-repeater-item` | one per repeated item | On each item element inside the repeater container. |
-| `data-proto-inner-blocks` | inner blocks slot | Alternative to a `data-proto-field` for an inner-blocks region. |
+| `data-proto-inner-blocks` | inner blocks slot | Marks where nested blocks render. Use **this**, not `data-proto-field`, for an `inner-blocks` field; echo `$innerBlocksContent ?? ''` inside it. |
 
 How it works:
 1. The Parser scans the rendered template for these attributes to discover fields/repeaters and their types/tags.
@@ -76,7 +78,7 @@ You can pass `data-proto-repeater` through it too:
  * Template for proto-blocks/my-block
  * @var array         $attributes
  * @var WP_Block|null $block
- * @var string        $content
+ * @var string        $innerBlocksContent  (for inner-blocks fields; NOT $content)
  */
 $title   = $attributes['title'] ?? '';
 $body    = $attributes['body'] ?? '';

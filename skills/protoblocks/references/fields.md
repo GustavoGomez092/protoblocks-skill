@@ -4,7 +4,7 @@ Fields are editable content regions. They are declared under `protoBlocks.fields
 
 There are six built-in field types: `text`, `wysiwyg`, `image`, `link`, `repeater`, `inner-blocks`.
 
-> Note on the inner-blocks type string: the schema accepts both `"inner-blocks"` and `"innerblocks"`. The internal `__protoType` is `innerblocks`. Either spelling works in `block.json`; `inner-blocks` is the documented form.
+> **Inner-blocks type string — must be hyphenated.** Use `"type": "inner-blocks"`. The editor's HTML-to-React parser matches `config.type === 'inner-blocks'` (hyphenated) to inject the nested-blocks slot; the non-hyphenated `"innerblocks"` is **silently skipped** — the block renders as a leaf with no `+` appender and no drop target. (The bundled `hero` example still uses the legacy `"innerblocks"` spelling; prefer the hyphenated form.)
 
 ---
 
@@ -179,16 +179,24 @@ A slot for free-form nested WordPress blocks (paragraphs, images, etc.). **Only 
 
 | Config | Default | Meaning |
 |--------|---------|---------|
-| `allowedBlocks` | `[]` | Permitted block names. |
-| `template` | `[]` | Default inner block template. |
+| `allowedBlocks` | `[]` (all) | Whitelist of block names. Omit to allow every block. |
+| `template` | `[]` | Default blocks inserted when the parent is first added. Format: `[blockName, attrs?, innerTemplate?]`. |
 | `templateLock` | `false` | `all` \| `insert` \| `contentOnly` \| `false`. |
 | `orientation` | `vertical` | `horizontal` \| `vertical`. |
-| `renderAppender` | `default` | `default` \| `button` \| `false`. |
+| `renderAppender` | `default` | `default` (plus button) \| `button` \| `false`. |
 
-**Value:** serialized block HTML string. In the template, output the inner content with `$content` (a.k.a. `$attributes['innerBlocksContent']`), and bind the slot with `data-proto-field` or `data-proto-inner-blocks`:
+**Template binding — three things must line up:**
+1. Field `"type": "inner-blocks"` (hyphenated — see note at top of this file).
+2. The container element carries the **`data-proto-inner-blocks`** attribute (not `data-proto-field`).
+3. You echo **`$innerBlocksContent`** — *not* `$content`. The engine stores WP's render content as `$attributes['innerBlocksContent']` and exposes it as `$innerBlocksContent`; plain `$content` is **not** passed to the template and echoing it produces empty output. Always null-coalesce (a fresh/empty instance leaves it undefined).
+
 ```php
-<div data-proto-field="innerContent"><?php echo $content; ?></div>
+<div class="my-block__body" data-proto-inner-blocks>
+  <?php echo $innerBlocksContent ?? ''; ?>
+</div>
 ```
+
+For container/wrapper blocks (group-like), also add `supports.layout` (e.g. `{ "default": { "type": "constrained" } }`) so the editor shows native Layout controls (content/wide width, justification). See `composition.md` for when to choose inner-blocks over typed fields, and `troubleshooting.md` for the "not nestable / renders empty" fixes.
 
 ---
 

@@ -63,6 +63,54 @@ An option also exists to disable WordPress global styles when they conflict with
 
 **First-time setup:** download the Tailwind binary once from the plugin's Tailwind settings page. Until the binary (or `npx`) is available, no Tailwind CSS is generated and classes have no effect — see Troubleshooting below.
 
+### Themed colors (admin-configurable)
+
+Tailwind blocks get three built-in color scales whose base values are set in **Proto-Blocks → Tailwind Settings**:
+
+| Scale | Utilities | CSS variable | Default |
+|-------|-----------|--------------|---------|
+| `primary-50`…`primary-950` | `bg-primary-600`, `text-primary-500`, `border-primary-700`, … | `--tw-color-primary-*` | blue |
+| `secondary-50`…`secondary-950` | `bg-secondary-500`, `text-secondary-600`, … | `--tw-color-secondary-*` | teal |
+| `accent-50`…`accent-950` | `bg-accent-500`, … | `--tw-color-accent-*` | red |
+
+```php
+<button class="bg-primary-600 hover:bg-primary-700 text-white">Click me</button>
+<span class="text-secondary-500">Secondary</span>
+```
+Using these instead of hard-coded hex keeps blocks on-brand and re-themeable from the admin. (The bundled `tl-hero` uses `bg-primary-500 hover:bg-primary-400`.)
+
+### Theme design tokens (`tailwind-theme.css`, Tailwind v4)
+
+Proto-Blocks compiles **Tailwind v4** at runtime and reads design tokens from a CSS file **in your active theme**, not the database — so your palette/fonts/shadows live in version control. Default location:
+
+```
+wp-content/themes/<active-theme>/tailwind-theme.css
+```
+
+The file holds a single Tailwind v4 `@theme { … }` block; anything declared there becomes a utility on the next compile:
+
+```css
+/* themes/your-theme/tailwind-theme.css */
+@theme {
+  --color-brand:     #D1001D;
+  --color-brand-700: #A0001A;
+  --font-display:    "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --shadow-glow:     0 38px 41.5px rgba(208,0,29,0.10);
+}
+```
+→ generates `bg-brand`, `text-brand`, `border-brand`, `bg-brand-700`, `font-display`, `shadow-glow`, etc., usable in any block template.
+
+- **Create it:** Tailwind Settings → "Create starter file" writes a minimal `tailwind-theme.css` into the active theme (button hidden once it exists).
+- **Relocate it:** `add_filter('proto_blocks_theme_css_path', fn() => WP_CONTENT_DIR . '/design-tokens.css');` (useful for monorepos).
+- **Force a recompile from CLI:** `wp eval 'ProtoBlocks\Core\Plugin::getInstance()->getTailwindManager()->compile();'`
+
+### Scoped preflight
+
+Tailwind's reset would clobber WordPress theme defaults globally, so Proto-Blocks emits its preflight wrapped in `:where(.proto-blocks-scope)` at **zero specificity**. Result: resets apply only inside rendered blocks; your theme's styles still win outside blocks; author utility classes always beat preflight. Opt out if your theme has its own reset:
+```php
+add_filter('proto_blocks_preflight', '__return_false');
+```
+
 ## 3. Theme / editor styles
 
 The plugin adds the theme's editor styles into the block editor iframe (via `add_editor_style`) so previews match the front end. Design tokens/theme CSS can be surfaced this way. Keep block-specific rules in the block's own `style.css`.

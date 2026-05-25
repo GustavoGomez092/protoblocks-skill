@@ -21,6 +21,7 @@ Symptom → cause → fix. Grouped by area.
 | Inline formatting toolbar missing/limited on a text field | `format` restricts it | Set `"format": "standard"` or `"full"` on the text field. |
 | Control doesn't appear in sidebar | Field/control name collision (field wins) or unknown type | Rename so field and control don't share a name; check the control type. |
 | Conditional control never shows | Condition references wrong control/value | `conditions.visible` keys are other control names; scalar = equality, array = membership. |
+| Control change has no effect on output | Attribute name mismatch (case-sensitive) | Names are camelCase and must match exactly: `$attributes['imagePosition']` ↔ `block.json` `imagePosition` (not `image_position`). |
 
 ## Templates / output
 
@@ -32,6 +33,16 @@ Symptom → cause → fix. Grouped by area.
 | `$block` errors in editor | Code assumes frontend context | `$block` is `null` in preview — guard with `$is_preview = !isset($block) || $block === null;`. |
 | Underscore vs hyphen attribute name | Hyphenated keys are underscored in `$attributes` | Read the underscored form in PHP. |
 | `data-proto-*` visible in page source | (shouldn't happen) | They're stripped on render; if visible, the element wasn't processed — check the attribute spelling. |
+
+## Inner blocks
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Not nestable — no `+` appender, treated as a leaf | Field type spelled `innerblocks` (no hyphen) — the editor parser only matches `inner-blocks` | Use `"type": "inner-blocks"` (hyphenated). |
+| Not nestable — no slot | Template has no `data-proto-inner-blocks` element | Add a container with `data-proto-inner-blocks`. |
+| Was nestable, now isn't | Stale saved instance (inserted before the field existed / while misspelled) | Delete the existing block and re-insert a fresh one — the editor reads stored markup. |
+| Renders empty on the frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead (`$content` is never passed). |
+| Container/wrapper feels off (no layout controls) | Missing `supports.layout` | Add `supports.layout.default = { "type": "constrained" }` for group-like blocks. |
 
 ## Repeaters
 
@@ -66,8 +77,8 @@ Quick rule of thumb: **classes do nothing at all** → binary not downloaded (st
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `view.js` not running | Not detected / wrong type | Plain script → `view.js`; ES module → use `viewScriptModule`; Interactivity API → set `protoBlocks.interactivity`. |
-| `data-wp-*` directives ignored | Interactivity API not enabled / WP too old | Enable `protoBlocks.interactivity`; requires WP 6.5+. |
+| `view.js` not running | Not detected / wrong type | Plain script → `"viewScript"`; ES module → `"viewScriptModule"`; Interactivity API → `"viewScriptModule"` + `supports.interactivity: true`. |
+| `data-wp-*` directives ignored | Interactivity runtime not enabled / WP too old | Add `supports.interactivity: true` (this enables the runtime) and load the store via `viewScriptModule`; optionally declare `protoBlocks.interactivity.store` for managed registration. Requires WP 6.5+. |
 | Interactivity store not found | Namespace mismatch | `data-wp-interactive` namespace must match the `store('namespace', ...)` id. |
 
 ## Quick diagnostic order

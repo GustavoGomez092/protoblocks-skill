@@ -4,19 +4,21 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 
 ## Control types
 
-| Type | Data type | Value | Notes |
-|------|-----------|-------|-------|
-| `text` | string | string | Single-line input. |
-| `textarea` | string | string | Multi-line input. |
-| `select` | string | option key | **Requires `options`.** Dropdown. |
-| `toggle` | boolean | `true`/`false` | On/off switch. |
-| `checkbox` | boolean | `true`/`false` | Renders like a toggle. |
-| `range` | number | number | Slider. Expects `min`/`max` (and optional `step`). |
-| `number` | number | number | Numeric input; optional `min`/`max`/`step`. |
-| `color` | string | color string | Color picker (alpha enabled). |
-| `color-palette` | string | color string | Theme color palette swatches. |
-| `radio` | string | option key | Radio buttons; requires `options`. |
-| `image` | object | `{ id, url, alt }` | Media picker in the sidebar. |
+| Type | Data type | Value | Notes | Seen in |
+|------|-----------|-------|-------|---------|
+| `text` | string | string | Single-line input. | — |
+| `textarea` | string | string | Multi-line input. | cta (description) |
+| `select` | string | option key | **Requires `options`.** Dropdown. | card, testimonial, accordion, hero, stats, cta |
+| `toggle` | boolean | `true`/`false` | On/off switch. | card, testimonial, accordion, stats, tl-* |
+| `checkbox` | boolean | `true`/`false` | Renders like a toggle. | cta (showIcon, fullWidth) |
+| `range` | number | number | Slider. Expects `min`/`max` (+ optional `step`). | testimonial (rating 0–5), hero (overlayOpacity), stats (numberSize) |
+| `number` | number | number | Numeric input; optional `min`/`max`/`step`. | hero (minHeight), stats (columns) |
+| `color` | string | color string | Full color picker (alpha enabled). | hero (backgroundColor) |
+| `color-palette` | string | color string | Theme palette swatches. | hero (textColor), cta (bg/text color) |
+| `radio` | string | option key | Radio buttons; requires `options`. | hero (contentAlignment), cta (buttonStyle) |
+| `image` | object | `{ id, url, alt }` | Media picker in the sidebar (a *setting*, e.g. a background). | hero (backgroundImage) |
+
+(Open the named example's `block.json` for the exact, working config of each control.)
 
 > The `image` **control** value is `{ id, url, alt }` — fewer keys than the `image` **field** (`{ id, url, alt, caption, size }`, see `fields.md`). Don't conflate them: a field is editable content in the block body; a control is a sidebar setting.
 

@@ -33,7 +33,7 @@ digraph composition {
 |-----|------|--------------|
 | **Discrete field** (`text`, `image`, `link`) | A single, structurally-fixed slot you place and style **individually**: the block's main title (`h2`), a hero image, a CTA button. One field per *genuine* slot. | the field's own value |
 | **One `wysiwyg` field** | A region that is **flowing rich text** — headings, paragraphs, lists, bold, links — authored as one blob, where you don't need to position or style the parts separately. | HTML string (`wp_kses_post`) |
-| **`inner-blocks` slot** | The region should be **open-ended composition**: the author inserts arbitrary core/Proto blocks (paragraph, image, columns, quote, embed), now or in the future. Reuses existing blocks' editing UX instead of rebuilding it. **One per block.** | serialized blocks (`$content`) |
+| **`inner-blocks` slot** | The region should be **open-ended composition**: the author inserts arbitrary core/Proto blocks (paragraph, image, columns, quote, embed), now or in the future. Reuses existing blocks' editing UX instead of rebuilding it. **One per block.** | `$innerBlocksContent` (echo via `data-proto-inner-blocks`) |
 | **`repeater`** | A **list of same-shaped items** (cards, stats, nav links, accordion rows), each a set of sub-fields. | array of item objects |
 
 ## The headline rule (your example)
@@ -64,7 +64,7 @@ Both hold rich content; choose by **how open-ended** the region is and **what ca
 | Content | inline rich text: headings, paragraphs, lists, bold, links | any allowed **blocks**: images, columns, embeds, quotes, other Proto-Blocks |
 | Authoring feel | one rich-text box | the full block editor, inside your block |
 | Limit | none on count | **one inner-blocks field per block** |
-| Output | `wp_kses_post($value)` | `$content` (serialized blocks) |
+| Output | `wp_kses_post($value)` | `echo $innerBlocksContent ?? ''` inside a `data-proto-inner-blocks` element |
 | Reach for it when | "rich prose lives here" | "the author composes a section from blocks" |
 
 Because you only get **one** inner-blocks slot per block, spend it on the region that genuinely needs free composition. Use `wysiwyg` for the rest.

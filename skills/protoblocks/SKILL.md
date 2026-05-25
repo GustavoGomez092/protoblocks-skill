@@ -100,7 +100,7 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 | `image` | `{ id, url, alt, caption, size }` | `data-proto-field` |
 | `link` | `{ url, text, target, rel, title }` | `data-proto-field` |
 | `repeater` | array of `{ id, ...fields }` | `data-proto-repeater` + `data-proto-repeater-item` |
-| `inner-blocks` | string (serialized blocks) | `data-proto-field` (one per block) |
+| `inner-blocks` | nested blocks → `$innerBlocksContent` | `data-proto-inner-blocks` (one per block; type must be hyphenated) |
 
 ### Control types (`protoBlocks.controls`)
 `text`, `textarea`, `select`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`. Select/radio require `options`; range expects `min`/`max`.
@@ -118,7 +118,7 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 |----------|-------|
 | `$attributes` | All field + control + core values. Hyphenated keys become underscored. |
 | `$block` | `WP_Block` on frontend, **`null` in editor preview** — check it to detect preview |
-| `$content` | Inner blocks content (also `$attributes['innerBlocksContent']`) |
+| `$innerBlocksContent` | Nested-blocks HTML for an `inner-blocks` field. **Echo this, not `$content`** (`$content` is not passed). Always `?? ''`. |
 | `$template` | Helper: `$template->has_value($name)`, `$template->get($name, $default)` |
 
 ### WP-CLI
@@ -137,7 +137,7 @@ wp proto-blocks export <name> --output=<path>
 2. **Always provide defaults**: `$attributes['x'] ?? ''` — attributes can be missing.
 3. **Mark editable elements even when empty.** A field is only editable in the editor if its element carries `data-proto-field`. Render the element (with the attribute) even when the value is empty, or it can't be edited.
 4. **`data-proto-repeater` name must match the repeater field name** in `block.json`.
-5. **One `inner-blocks` field per block** (WordPress limitation).
+5. **Inner blocks:** type must be hyphenated **`"inner-blocks"`** (plain `innerblocks` is silently skipped), bind with **`data-proto-inner-blocks`**, echo **`$innerBlocksContent ?? ''`** (not `$content`), and only **one per block**.
 6. **`select` controls must define `options`** or the block fails validation. Use `{ "key", "label" }` pairs.
 7. **Clear the cache after template changes** if you don't see updates: `wp proto-blocks cache clear`. Parsed templates are cached (validated against template + `block.json` mtime); an object cache or OPcache layer can still serve stale output, so clear explicitly when in doubt.
 
@@ -145,6 +145,8 @@ wp proto-blocks export <name> --output=<path>
 
 Load these as needed — do not read all of them up front.
 
+- `references/authoring-workflow.md` — **start here to build a block.** End-to-end clean workflow: scaffold → schema → template → style → preview → validate, with a quick-start checklist.
+- `references/recipes.md` — "I want to build X" → the fields/controls/pattern for common modules (hero, card grid, FAQ/accordion, stats, pricing, tabs, CTA, nav, logo wall, feature grid).
 - `references/composition.md` — **read before designing a block's fields.** When to use discrete fields vs one wysiwyg vs an inner-blocks slot vs a repeater; avoiding field proliferation.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, every key, defaults, validation errors vs warnings, attribute generation.
 - `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
@@ -154,8 +156,8 @@ Load these as needed — do not read all of them up front.
 - `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
 - `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions.
 - `references/previews.md` — generating inserter thumbnails (Preview Capture admin tool) or supplying your own `preview.png`.
-- `references/examples.md` — the bundled example blocks and what each demonstrates, with full canonical samples.
-- `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, setup wizard.
+- `references/examples.md` — the 9 bundled example blocks (6 vanilla + 3 Tailwind), a capability matrix, and full canonical samples (CTA, Stats, Hero, Tailwind Hero).
+- `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, block category, setup wizard, demo blocks, debug mode, editor preview system.
 - `references/troubleshooting.md` — symptom → cause → fix for common problems.
 
 ## Common Mistakes
@@ -169,3 +171,6 @@ Load these as needed — do not read all of them up front.
 | Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
 | Tailwind classes ignored | Binary not downloaded, or prod (`cached`) mode without recompile, or `useTailwind` off | Download the Tailwind binary in plugin settings; use dev (`on_reload`) mode while iterating; set `"useTailwind": true` (`references/styling.md`) |
 | HTML stripped from wysiwyg | Escaped with `esc_html` instead of `wp_kses_post` | Use `wp_kses_post()` for HTML/wysiwyg values |
+| Inner blocks not nestable (no `+`) | Type spelled `innerblocks`, or no `data-proto-inner-blocks` marker, or stale saved instance | Use `"inner-blocks"` (hyphen) + `data-proto-inner-blocks`; re-insert a fresh block |
+| Inner blocks render empty on frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead |
+| Control change has no effect | Attribute name mismatch (case-sensitive) | Names are camelCase and case-sensitive — `$attributes['imagePosition']` must match `block.json` exactly |
