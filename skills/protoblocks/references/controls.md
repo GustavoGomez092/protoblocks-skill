@@ -8,7 +8,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 |------|-----------|-------|-------|---------|
 | `text` | string | string | Single-line input. | — |
 | `textarea` | string | string | Multi-line input. | cta (description) |
-| `select` | string | option key | **Requires `options`.** Dropdown. | card, testimonial, accordion, hero, stats, cta |
+| `select` | string | option key | **Requires `options`** (static) **or `optionsSource`** (server-loaded — see [Dynamic options](#dynamic--server-provided-options)). Dropdown. | card, testimonial, accordion, hero, stats, cta, dynamic-select |
 | `toggle` | boolean | `true`/`false` | On/off switch. | card, testimonial, accordion, stats, tl-* |
 | `checkbox` | boolean | `true`/`false` | Renders like a toggle. | cta (showIcon, fullWidth) |
 | `range` | number | number | Slider. Expects `min`/`max` (+ optional `step`). | testimonial (rating 0–5), hero (overlayOpacity), stats (numberSize) |
@@ -22,7 +22,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 
 > The `image` **control** value is `{ id, url, alt }` — fewer keys than the `image` **field** (`{ id, url, alt, caption, size }`, see `fields.md`). Don't conflate them: a field is editable content in the block body; a control is a sidebar setting.
 
-> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. `select` without `options` is a hard error.
+> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` with neither `options` nor `optionsSource` is a hard error.
 
 ## Config options
 
@@ -70,6 +70,107 @@ $showIcon = $attributes['showIcon'] ?? false;
 $showBio = $attributes['showBio'] ?? true;   // control default: true
 ```
 Using `?? false` against a `"default": true` toggle silently hides the element on a fresh block.
+
+## Dynamic / server-provided options
+
+A `select` whose choices come from the site's data (existing pages, categories, users) or from a value only the server knows should declare an **`optionsSource`** instead of a static `options` array. The control fetches its options live in the editor over REST and renders an async dropdown (spinner while loading), so newly created content appears without rebuilding the block.
+
+A `select` is "dynamic" the moment it has an `optionsSource`. `options` is then optional and ignored. `sourceArgs` is an optional object forwarded to the provider (only keys the provider allow-lists are passed through). The **stored value is the option key** (e.g. a post ID as a string) — read it like any other control and resolve it in the template.
+
+### Built-in sources
+
+| `optionsSource` | Returns | `sourceArgs` (defaults) | Option key |
+|-----------------|---------|--------------------------|------------|
+| `wp:posts` | Published posts of a type | `post_type` (`post`), `per_page` (50), `search` | post ID |
+| `wp:terms` | Terms of a taxonomy | `taxonomy` (`category`), `per_page` (100), `search` | term ID |
+| `wp:users` | Site users | `per_page` (50), `search` | user ID |
+
+`per_page` is clamped server-side to **1–200**.
+
+### Examples by type
+
+**Relate to a page (or any post type):**
+```json
+"relatedPage": {
+  "type": "select", "label": "Related Page",
+  "optionsSource": "wp:posts",
+  "sourceArgs": { "post_type": "page", "per_page": 50 }
+}
+```
+
+**Pick a taxonomy term:**
+```json
+"category": {
+  "type": "select", "label": "Category",
+  "optionsSource": "wp:terms",
+  "sourceArgs": { "taxonomy": "category" }
+}
+```
+
+**Pick a user (e.g. an author):**
+```json
+"author": {
+  "type": "select", "label": "Author",
+  "optionsSource": "wp:users"
+}
+```
+
+**Custom static table** — a developer registers the source (see below), the block just references it:
+```json
+"currency": {
+  "type": "select", "label": "Currency",
+  "optionsSource": "currencies"
+}
+```
+
+### Reading the value in `template.php`
+
+The attribute holds the chosen key; resolve it to whatever you need:
+```php
+$relatedPage = $attributes['relatedPage'] ?? '';
+$pageTitle   = $relatedPage ? get_the_title( (int) $relatedPage ) : '';
+
+$category = $attributes['category'] ?? '';
+$termName = '';
+if ($category) {
+    $term = get_term( (int) $category );
+    if ($term instanceof \WP_Term) { $termName = $term->name; }
+}
+```
+
+### Registering a custom provider (PHP)
+
+To expose your own data (an external API, plugin settings, a static list), register a provider on the `proto_blocks_register_options_providers` action. The name you give it is the value authors put in `optionsSource`. The callback returns a `{ key, label }[]` list (a `key => label` map also works and is normalized). The optional 3rd `register()` argument allow-lists which `sourceArgs` keys reach the callback (omit it to allow all):
+
+```php
+add_action('proto_blocks_register_options_providers', function ($providers) {
+    // Static table → "optionsSource": "currencies"
+    $providers->register('currencies', function (array $args): array {
+        return [
+            ['key' => 'usd', 'label' => 'US Dollar'],
+            ['key' => 'eur', 'label' => 'Euro'],
+        ];
+    });
+
+    // Computed, with a whitelisted arg → "optionsSource": "product_categories"
+    $providers->register('product_categories', function (array $args): array {
+        $terms = get_terms([
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => empty($args['include_empty']),
+        ]);
+        return is_wp_error($terms) ? [] : array_map(
+            fn($t) => ['key' => (string) $t->term_id, 'label' => $t->name],
+            $terms
+        );
+    }, ['include_empty']);   // only `include_empty` from sourceArgs is forwarded
+});
+```
+
+### How it works at runtime
+
+- The editor calls `GET /wp-json/proto-blocks/v1/controls/options?source=<id>&args=<json>` (capability: `edit_posts`) and renders the result as the dropdown options.
+- Unknown source → HTTP 400 (`proto_blocks_unknown_source`); a throwing provider → HTTP 500. The control shows a "Could not load options." message on failure.
+- A working example block ships in the plugin's `examples/dynamic-select/` (a `wp:posts` + `wp:terms` demo).
 
 ## Conditional visibility (`conditions`)
 

@@ -54,6 +54,39 @@ In Claude Code:
 
 ---
 
+## Updating (if already installed)
+
+The skill is distributed from a git marketplace, so updating is two steps: refresh the marketplace, then pull the new plugin version.
+
+### Claude Code
+
+```
+/plugin marketplace update protoblocks      # fetch latest commits from the marketplace repo
+/plugin uninstall protoblocks-skill@protoblocks
+/plugin install protoblocks-skill@protoblocks
+/reload-plugins                             # activate the update (no full restart needed)
+```
+
+There is no single `/plugin update` command today — reinstalling is the supported way to move to the latest version. After it completes, Claude Code prompts for `/reload-plugins` (run it if not prompted).
+
+**Prefer hands-off?** Enable auto-update for the marketplace: run `/plugin` → **Marketplaces** tab → select `protoblocks` → **Enable auto-update**. Claude Code then refreshes the marketplace and updates installed plugins at startup, prompting `/reload-plugins` when something changed.
+
+> Use the `plugin@marketplace` form (`protoblocks-skill@protoblocks`) for `install`/`uninstall`, and the bare marketplace name (`protoblocks`) for `marketplace update`.
+
+### Manual install
+
+If you copied the skill into `~/.claude/skills/` instead of using the marketplace, update by re-pulling and re-copying:
+
+```bash
+git clone https://github.com/GustavoGomez092/protoblocks-skill.git
+rm -rf ~/.claude/skills/protoblocks
+cp -r protoblocks-skill/skills/protoblocks ~/.claude/skills/protoblocks
+```
+
+(Or `git pull` in your existing clone, then re-run the `cp -r` step.)
+
+---
+
 ## Uninstall
 
 ### Claude Code
