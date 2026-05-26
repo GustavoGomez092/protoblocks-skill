@@ -169,7 +169,7 @@ Load these as needed — do not read all of them up front.
 | Template edits don't show | Template output cached | `wp proto-blocks cache clear` |
 | Repeater items don't render/add | Missing `data-proto-repeater` / `data-proto-repeater-item`, or name mismatch | Match container `data-proto-repeater="x"` to field `x`; one `data-proto-repeater-item` per item |
 | Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
-| Tailwind classes ignored | Binary not downloaded, or prod (`cached`) mode without recompile, or `useTailwind` off | Download the Tailwind binary in plugin settings; use dev (`on_reload`) mode while iterating; set `"useTailwind": true` (`references/styling.md`) |
+| Tailwind classes ignored | No first compile yet, prod (`cached`) mode without recompile, or `useTailwind` off | Run a first compile — shell host: download the Tailwind binary; managed host (WP Engine): click **Compile CSS** (browser engine, no binary/exec). Use dev (`on_reload`) mode while iterating; set `"useTailwind": true` (`references/styling.md`) |
 | HTML stripped from wysiwyg | Escaped with `esc_html` instead of `wp_kses_post` | Use `wp_kses_post()` for HTML/wysiwyg values |
 | Inner blocks not nestable (no `+`) | Type spelled `innerblocks`, or no `data-proto-inner-blocks` marker, or stale saved instance | Use `"inner-blocks"` (hyphen) + `data-proto-inner-blocks`; re-insert a fresh block |
 | Inner blocks render empty on frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead |
