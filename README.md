@@ -73,6 +73,8 @@ There is no single `/plugin update` command today — reinstalling is the suppor
 
 > Use the `plugin@marketplace` form (`protoblocks-skill@protoblocks`) for `install`/`uninstall`, and the bare marketplace name (`protoblocks`) for `marketplace update`.
 
+> **Maintainers — bump the version every release.** The install cache is keyed by the `version` in `.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`. If you push content changes without bumping that version, `marketplace update` + reinstall sees "already at 1.x" and keeps serving the **stale cached copy** — the new content never lands. Bump both `version` fields (e.g. `1.0.0` → `1.1.0`) in the same commit as any skill content change.
+
 ### Manual install
 
 If you copied the skill into `~/.claude/skills/` instead of using the marketplace, update by re-pulling and re-copying:
