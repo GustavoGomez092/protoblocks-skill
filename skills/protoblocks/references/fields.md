@@ -116,6 +116,8 @@ URL + display text with target/rel controls.
 
 The link field can wrap inline children (e.g. an icon next to the text).
 
+**Inside a repeater**, a `link` sub-field that is *not* bound to an inline `data-proto-field` element (e.g. the whole item is the `<a>`, or it's an icon-only link with no text) is editable from the item's overlay toolbar instead of inline. See `repeaters.md` → *Item-level link editing*.
+
 ---
 
 ## repeater

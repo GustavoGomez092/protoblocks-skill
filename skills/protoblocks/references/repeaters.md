@@ -99,9 +99,37 @@ Pull the object into a local variable first (`$link = $item['url']`) so you neve
 
 ## How the editor handles repeaters
 
-- Drag-and-drop reordering, plus per-item duplicate / remove, and "add between items" buttons.
+- Drag-and-drop reordering, plus per-item duplicate / remove, and an "add between" (`+`) button.
 - New items use the existing markup as a template (the first item acts as a stub while a new one loads).
 - Items render using the real template markup, so styling matches the frontend.
+- Each item shows a floating overlay toolbar (drag / link / duplicate / remove) on hover; it's absolutely positioned and never participates in the item's layout.
+- **The "add between" button is teleported and flow-aware.** It renders through a portal into the editor's top-level popover layer, not inside the item — so an item with `overflow: hidden` (rounded corners, inner shadows) can't clip it. Its placement follows the rendered flow direction: items in a **row** get the `+` on the **right edge**; **stacked** items get it on the **bottom edge** (measured from geometry, so flex rows, grids, and wrapped grids all place it correctly). Nothing to configure.
+
+### Item-level link editing (whole-card & icon-only links)
+
+When a repeater declares a `link` sub-field, how you edit it depends on the markup:
+
+- **Inline** — if the element carrying the link is bound with `data-proto-field="<linkField>"` (so it has editable link text), edit it inline as usual via the link-settings popover.
+- **Toolbar** — if the item **is** or **contains** an `<a>` but the link field is **not** bound to an inline `data-proto-field` element, a link button appears in the item's overlay toolbar. It opens a URL + "open in new tab" popover. This is how you make a **whole-card link** (the entire item is the `<a>`) or an **icon-only link** (an `<a>` with no text node) editable — there's nothing inline to bind, so the URL is edited from the toolbar. The toolbar control is suppressed when the link is already bound inline, so a field never gets two editors.
+
+```php
+<!-- Whole-card link: the item IS the <a>, no inner data-proto-field for the
+     link → its URL is editable from the item's toolbar. -->
+<a data-proto-repeater-item class="card"
+   href="<?php echo esc_url($item['cardLink']['url'] ?? '#'); ?>"
+   <?php echo !empty($item['cardLink']['target']) ? 'target="' . esc_attr($item['cardLink']['target']) . '"' : ''; ?>>
+  <span data-proto-field="title"><?php echo esc_html($item['title'] ?? ''); ?></span>
+</a>
+```
+
+Declared as a normal `link` sub-field:
+
+```json
+"fields": {
+  "title":    { "type": "text" },
+  "cardLink": { "type": "link" }
+}
+```
 
 ## Min / max
 

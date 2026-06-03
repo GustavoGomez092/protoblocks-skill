@@ -52,6 +52,8 @@ Symptom → cause → fix. Grouped by area.
 | Can't add / reorder items | Missing `data-proto-repeater` on container | Add it (directly or via `get_block_wrapper_attributes`). |
 | Sub-field not editable | `data-proto-field` missing inside item | Add it inside the item markup, matching a sub-field name. |
 | New items render blank | Parser couldn't read item structure | Ensure the first item renders full markup for every sub-field. |
+| Whole-card / icon-only link has no URL field | The `link` sub-field isn't bound to an inline `data-proto-field` element (nothing to edit inline) | Use the link button in the item's overlay toolbar — it edits the URL for items that *are* / contain an `<a>` but have no inline link binding. See `repeaters.md` → Item-level link editing. |
+| "+" add button clipped / cut off by an item | (shouldn't happen) | The add button is teleported out of the item via a portal; if it looks clipped, you're on a pre-2.5.0 plugin — update. |
 
 ## Styling
 
