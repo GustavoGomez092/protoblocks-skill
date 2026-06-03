@@ -9,7 +9,7 @@ description: Use when building, scaffolding, or debugging WordPress Gutenberg bl
 
 Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML templates instead of React**. A block is a folder containing a `block.json` (with a `protoBlocks` config) and a `template.php`. The same PHP template renders both the editor preview and the frontend. Editable regions are marked with `data-proto-*` HTML attributes — the plugin wires those to editor UI automatically.
 
-**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 1.0.0.
+**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.4.0.
 
 **Core mental model:**
 - `block.json` → declares `fields` (editable content) and `controls` (inspector settings) under a `protoBlocks` key.
@@ -151,7 +151,7 @@ Load these as needed — do not read all of them up front.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, every key, defaults, validation errors vs warnings, attribute generation.
 - `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
 - `references/controls.md` — each control type, options, conditional visibility (`conditions.visible`), `affects`.
-- `references/templates.md` — template variables, the `data-proto-*` system, escaping, preview vs frontend detection.
+- `references/templates.md` — template variables, the `data-proto-*` system, escaping, preview vs frontend detection, and the `data-proto-animate` scroll-reveal convention (2.4.0+).
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
 - `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
 - `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions.

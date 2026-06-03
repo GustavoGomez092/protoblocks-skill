@@ -15,6 +15,8 @@
 
 In preview, each control name is also exposed as a variable with its default value, and `$block` is `null`.
 
+> **Plugin 2.4.0+:** the renderer now actually passes `$block` to the template — the real `WP_Block` on the frontend, `null` in the editor preview. (Before 2.4.0 it was never passed, so `$block` was always `null` and `$is_preview` was always `true`; any frontend-only branch silently never ran.)
+
 ## Detecting editor preview vs frontend
 
 ```php
@@ -26,6 +28,27 @@ if (empty($attributes['items']) && $is_preview) {
         ['id' => 'preview-1', 'title' => 'Example item'],
     ];
 }
+```
+
+## Scroll-reveal animations (`data-proto-animate`)
+
+The plugin ships a frontend reveal runtime (2.4.0+) that owns a safe-by-default
+reveal lifecycle. Mark an element `data-proto-animate="pending"` (emit it only on
+the frontend, gated by `$is_preview`) and the runtime reveals it
+(`data-proto-animate="done"`) when it scrolls into view. Use `"manual"` instead
+when your block's own `view.js` drives the motion — the runtime then only
+backstops it. The runtime **guarantees content is never left hidden**: scroll-in,
+`prefers-reduced-motion` (instant), JS-disabled (`<noscript>`), and a watchdog for
+failed/absent block JS all reveal it. Legacy `data-animate` is accepted as an
+alias. Full guide: the plugin's `docs/animation.md`.
+
+```php
+<section <?php echo get_block_wrapper_attributes(['class' => 'my-block']); ?>
+  <?php echo $is_preview ? '' : 'data-proto-animate="pending"'; ?>>
+```
+```css
+.my-block[data-proto-animate="pending"] { opacity: 0; transform: translateY(16px); }
+.my-block[data-proto-animate="done"]    { opacity: 1; transform: none; transition: opacity .6s, transform .6s; }
 ```
 
 ## The `data-proto-*` system
