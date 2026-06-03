@@ -12,7 +12,15 @@ The plugin also auto-detects a `view.js` (or `{block-name}.js`) in the block fol
 
 ## Scroll-reveal animations (`data-proto-animate`)
 
-For entrance/scroll-reveal animations, don't hand-roll an IntersectionObserver — the plugin ships a reveal runtime (2.4.0+) that owns the lifecycle and **guarantees content is never left hidden** (scroll-in, `prefers-reduced-motion`, no-JS `<noscript>`, and a watchdog). If your `view.js` drives the motion itself (e.g. a GSAP timeline), mark the root `data-proto-animate="manual"` (emitted only on the frontend, gated by `$is_preview`) so the runtime skips it and only backstops it; set `data-proto-animate="done"` when your animation runs. For CSS-only reveals, use `"pending"` and let the runtime flip it. See `references/templates.md` and the plugin's `docs/animation.md`.
+For entrance/scroll-reveal animations, don't hand-roll an IntersectionObserver — the plugin ships a reveal runtime (2.4.0+) that owns the lifecycle and **guarantees content is never left hidden** (scroll-in, `prefers-reduced-motion`, no-JS `<noscript>`, and a watchdog). If your `view.js` drives the motion itself (e.g. a GSAP timeline), mark the root `data-proto-animate="manual"` (emitted only on the frontend, gated by `$is_preview`) so the runtime skips it and only backstops it; set `data-proto-animate="done"` when your animation runs. For CSS-only reveals, use `"pending"` and let the runtime flip it.
+
+To start a `view.js` animation exactly when an element comes into view without wiring your own IntersectionObserver, listen for the bubbling `proto-blocks:reveal` CustomEvent the runtime dispatches on each element when it flips to `done`:
+
+```js
+el.addEventListener('proto-blocks:reveal', () => { /* animate now */ });
+```
+
+See `references/templates.md` and the plugin's `docs/animation.md`.
 
 ## 1. Plain JavaScript
 

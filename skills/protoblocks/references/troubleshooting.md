@@ -83,6 +83,15 @@ Quick rule of thumb: **classes do nothing at all** → no first compile yet (ste
 | `data-wp-*` directives ignored | Interactivity runtime not enabled / WP too old | Add `supports.interactivity: true` (this enables the runtime) and load the store via `viewScriptModule`; optionally declare `protoBlocks.interactivity.store` for managed registration. Requires WP 6.5+. |
 | Interactivity store not found | Namespace mismatch | `data-wp-interactive` namespace must match the `store('namespace', ...)` id. |
 
+## Scroll-reveal animations (`data-proto-animate`)
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Content stuck invisible on the frontend | Element marked `data-proto-animate="manual"` (or `"pending"`) but block JS never set it to `done` and the watchdog hasn't fired | The runtime backstops within ~2s of load for in/above-viewport elements; if permanent, your `view.js` errored before setting `data-proto-animate="done"` — check the console. For CSS-only reveals use `"pending"` (the runtime flips it), not `"manual"`. |
+| Content hidden until clicked/scrolled, no animation in editor | Working as intended — the attribute is gated by `$is_preview`, so it's frontend-only; the editor shows the resting state | None. Verify the template emits the attribute only when `!$is_preview`. |
+| Reveal never animates (snaps in) | `prefers-reduced-motion` is on, or the `done` rule has no `transition` | Reduced motion intentionally reveals instantly. Otherwise put the `transition` on the `[data-proto-animate="done"]` rule. |
+| Legacy `data-animate` block not revealing | Fine — `data-animate` is an accepted alias | Migrate to `data-proto-animate` when convenient; both are handled by the runtime. |
+
 ## Quick diagnostic order
 
 1. `wp proto-blocks list` — is the block registered?
