@@ -2,7 +2,7 @@
 
 Fields are editable content regions. They are declared under `protoBlocks.fields` in `block.json` and bound to template elements with `data-proto-field="name"` (repeaters and inner-blocks have their own bindings). Each field becomes a block attribute readable as `$attributes['name']`.
 
-There are six built-in field types: `text`, `wysiwyg`, `image`, `link`, `repeater`, `inner-blocks`.
+There are seven built-in field types: `text`, `wysiwyg`, `image`, `video`, `link`, `repeater`, `inner-blocks`.
 
 > **Inner-blocks type string — must be hyphenated.** Use `"type": "inner-blocks"`. The editor's HTML-to-React parser matches `config.type === 'inner-blocks'` (hyphenated) to inject the nested-blocks slot; the non-hyphenated `"innerblocks"` is **silently skipped** — the block renders as a leaf with no `+` appender and no drop target. (The bundled `hero` example still uses the legacy `"innerblocks"` spelling; prefer the hyphenated form.)
 
@@ -86,6 +86,38 @@ WordPress media-library image.
 ```
 
 Sanitization: `id`→absint, `url`→`esc_url_raw`, `alt`→`sanitize_text_field`, `caption`→`wp_kses_post`, `size`→`sanitize_key`.
+
+---
+
+## video
+
+WordPress media-library video — the picker is filtered to **video** attachments. Use it for a self-hosted video source (e.g. an MP4).
+
+```json
+"clip": { "type": "video", "allowedTypes": ["video"] }
+```
+
+| Config | Default | Meaning |
+|--------|---------|---------|
+| `allowedTypes` | `["video"]` | MIME types the media modal accepts (e.g. `["video"]`, or narrow to `["video/mp4"]`). |
+| `required` | `false` | — |
+
+**Value shape:**
+```php
+[ 'id' => int|null, 'url' => string, 'mime' => string ]
+```
+
+**Template** — bind `data-proto-field` to a `<video>` (or `<source>`) to write `src` (and `type` on a `<source>`), or just read the URL:
+```php
+<?php $clip = $attributes['clip'] ?? []; ?>
+<?php if (!empty($clip['url'])) : ?>
+  <video data-proto-field="clip" src="<?php echo esc_url($clip['url']); ?>" controls></video>
+<?php endif; ?>
+```
+
+Sanitization: `id`→absint, `url`→`esc_url_raw`, `mime`→`sanitize_text_field`.
+
+> `video` exists as **both** a field (inline, bound via `data-proto-field`) and a **control** (a media picker in the inspector sidebar — see `controls.md`). Use the **control** form when the picker should live in the sidebar rather than inline in the block body (e.g. a "video source" setting that has no natural inline element).
 
 ---
 

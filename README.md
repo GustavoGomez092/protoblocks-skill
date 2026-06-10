@@ -152,14 +152,14 @@ protoblocks-skill/
 
 ## What it covers
 
-- All field types (text, wysiwyg, image, link, repeater, inner-blocks) — config, value shapes, sanitization, custom field registration.
-- All control types (text, textarea, select, toggle, checkbox, range, number, color, color-palette, radio, image) + conditional visibility.
+- All field types (text, wysiwyg, image, video, link, repeater, inner-blocks) — config, value shapes, sanitization, custom field registration.
+- All control types (text, textarea, select, toggle, checkbox, range, number, color, color-palette, radio, image, video) + conditional rendering & composition (`conditions.visible`).
 - The full `block.json` / `protoBlocks` schema, defaults, and validation (errors vs warnings).
 - Template authoring: variables, the `data-proto-*` system, escaping, editor-preview detection, caching.
 - Repeaters (ids, min/max, nested object sub-fields) and inner blocks (correct hyphenated type + `$innerBlocksContent`).
 - Composition judgment (avoiding field proliferation), an authoring workflow, and recipes for ~14 module types.
 - Styling: vanilla CSS vs Tailwind (automatic compilation, dev/prod modes), themed colors, `tailwind-theme.css` `@theme` tokens, scoped preflight.
-- Frontend interactivity: plain JS, ES modules, and the WordPress Interactivity API — with the complete Accordion and a Tabs pattern inline.
+- Frontend interactivity: plain JS, ES modules, and the WordPress Interactivity API — with the complete Accordion and a Tabs pattern inline — plus loading JS in the editor for third-party embeds (e.g. HubSpot forms) via `enqueue_block_assets`.
 - WP-CLI, hooks/filters, block discovery, category, preview capture, demo blocks, debug mode, troubleshooting.
 
 ## Keeping it in sync

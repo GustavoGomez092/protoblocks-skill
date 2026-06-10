@@ -268,6 +268,70 @@ store('proto-blocks/accordion', {
 
 Things to notice you can reuse anywhere: server-rendered `aria-expanded`/`hidden` initial values so the block reads correctly before JS runs; `data-wp-class--is-open` for CSS state; the `allowMultiple` toggle control threaded into context to change behavior; unique per-instance ids for ARIA wiring.
 
+## Loading JS in the editor (interactive embeds)
+
+A block's `view.js` / `viewScript` runs on the **front end only** — it does *not* run in the editor, and the editor preview is server-rendered HTML with no per-block JS. So a block that embeds a third-party widget (a HubSpot form, Calendly, a map) shows nothing in the editor unless you also load that widget's script into the editor.
+
+**The hook that reaches the editor canvas is `enqueue_block_assets`.** In WP 6.3+/7.0 the editor canvas is an **iframe**, and assets enqueued on `enqueue_block_assets` load in **both** the front end and that canvas iframe. (`enqueue_block_editor_assets` loads only in the editor *parent* document, which cannot reach the block previews inside the iframe.)
+
+Two things make a third-party embed render in the editor:
+
+1. **Output the embed target in the editor too.** Render the same container in `template.php` for both editor and front end (don't swap it for a placeholder), so the script has something to fill.
+2. **Enqueue a small loader on `enqueue_block_assets`** that boots the widget. Because the editor injects (and re-renders) block previews *after* load, scan with a `MutationObserver` and load the third-party script idempotently.
+
+```php
+// functions.php (or an inc/ file)
+add_action('enqueue_block_assets', function () {
+    $rel = '/assets/js/my-embeds.js';
+    wp_enqueue_script(
+        'my-embeds',
+        get_stylesheet_directory_uri() . $rel,
+        [],
+        (string) filemtime(get_stylesheet_directory() . $rel),
+        true
+    );
+});
+```
+
+```js
+// assets/js/my-embeds.js — example: HubSpot forms (.hs-form-frame[data-portal-id])
+(function () {
+  function loadPortal(portal) {
+    if (!portal || document.getElementById('hsforms-embed-' + portal)) return;
+    var s = document.createElement('script');
+    s.id = 'hsforms-embed-' + portal;
+    s.src = 'https://js.hsforms.net/forms/embed/' + portal + '.js';
+    s.defer = true;
+    document.head.appendChild(s);
+  }
+  function inEditor() {
+    return !!document.body &&
+      document.body.classList.contains('block-editor-iframe__body');
+  }
+  function scan() {
+    var frames = document.querySelectorAll('.hs-form-frame[data-portal-id]');
+    if (!frames.length) return;
+    // In the editor the embed is a visual preview only: make it non-interactive
+    // so clicking it selects the block (instead of the iframe swallowing clicks).
+    if (inEditor() && !window.__pbEmbedEditorCss) {
+      window.__pbEmbedEditorCss = true;
+      var st = document.createElement('style');
+      st.textContent = '.hs-form-frame, .hs-form-frame * { pointer-events: none !important; }';
+      document.head.appendChild(st);
+    }
+    frames.forEach(function (f) { loadPortal(f.getAttribute('data-portal-id')); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan);
+  else scan();
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+})();
+```
+
+Key points:
+- **Detect the editor** via the `block-editor-iframe__body` class on the canvas `<body>` (present only inside the editor iframe).
+- **Cross-origin iframe embeds aren't usefully interactive in the editor** — and if left interactive they *swallow clicks*, so you can't select the block. Set `pointer-events: none` on the embed in the editor (above) so it's visible but clicking it selects the block. It stays fully interactive on the front end.
+- Keep the loader **idempotent** (guard the injected `<script>`/`<style>` by id/flag) — both `enqueue_block_assets` and the `MutationObserver` invoke it repeatedly.
+
 ## Editor note
 
-The editor preview is server-rendered; interactivity runs on the **frontend**. To verify `data-wp-*` behavior, view the block on the front end, not in the editor.
+For `view.js` / Interactivity API behavior, the editor preview is server-rendered and your `view.js` does **not** run there — verify `data-wp-*` behavior on the front end. The one way to run JS in the editor canvas is the `enqueue_block_assets` loader pattern above (for third-party embeds), not the block's `view.js`.

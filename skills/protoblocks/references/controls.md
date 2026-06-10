@@ -17,10 +17,13 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 | `color-palette` | string | color string | Theme palette swatches. | hero (textColor), cta (bg/text color) |
 | `radio` | string | option key | Radio buttons; requires `options`. | hero (contentAlignment), cta (buttonStyle) |
 | `image` | object | `{ id, url, alt }` | Media picker in the sidebar (a *setting*, e.g. a background). | hero (backgroundImage) |
+| `video` | object | `{ id, url, mime }` | Media picker in the sidebar, filtered to **video**. Optional `allowedTypes` (defaults `["video"]`). | — |
 
 (Open the named example's `block.json` for the exact, working config of each control.)
 
-> The `image` **control** value is `{ id, url, alt }` — fewer keys than the `image` **field** (`{ id, url, alt, caption, size }`, see `fields.md`). Don't conflate them: a field is editable content in the block body; a control is a sidebar setting.
+> The `image` **control** value is `{ id, url, alt }` — fewer keys than the `image` **field** (`{ id, url, alt, caption, size }`, see `fields.md`). The `video` **control** value is `{ id, url, mime }`. Don't conflate fields and controls: a field is editable content in the block body (bound via `data-proto-field`); a control is a sidebar setting (read in PHP).
+>
+> **`image` and `video` are available as both field types and control types.** Use the **control** form when the media picker should live in the inspector sidebar — for example a "video source" with no natural inline element. A field renders inline and *only* shows where its `data-proto-field` element is in the template; if there's no inline element for it, it won't appear anywhere, so reach for the control.
 
 > Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` with neither `options` nor `optionsSource` is a hard error.
 
@@ -172,9 +175,9 @@ add_action('proto_blocks_register_options_providers', function ($providers) {
 - Unknown source → HTTP 400 (`proto_blocks_unknown_source`); a throwing provider → HTTP 500. The control shows a "Could not load options." message on failure.
 - A working example block ships in the plugin's `examples/dynamic-select/` (a `wp:posts` + `wp:terms` demo).
 
-## Conditional visibility (`conditions`)
+## Conditional rendering (`conditions`)
 
-Show or enable a control based on other control values. Two condition keys are recognized: `visible` and `enabled`.
+Show a control only when other attributes have certain values. Declare a `conditions.visible` object on the control; it is evaluated **live in the editor**, and the control renders (or is hidden) as the values change.
 
 ```json
 "borderWidth": {
@@ -183,17 +186,51 @@ Show or enable a control based on other control values. Two condition keys are r
 }
 ```
 
-Evaluation rules:
-- All entries in the `conditions.visible` object must pass (AND logic).
-- **Scalar value** → strict equality: the control shows when `otherControl === value`.
-- **Array value** → membership: shows when the array includes the other control's current value.
+(`enabled` is also accepted by the schema validator, but `visible` is the key that actually gates rendering today — prefer `visible`.)
+
+### Evaluation rules
+- **Multiple keys → AND.** Every entry in the `conditions.visible` object must pass for the control to show.
+- **Scalar value → strict equality:** passes when `attributes[key] === value`.
+- **Array value → membership (OR):** passes when the array includes the current value of `attributes[key]`.
+- Keys reference **any other attribute** — another control *or* a field. There is no compile-time check that the key exists; it is resolved at runtime in the editor.
 
 ```json
 "conditions": { "visible": { "layout": ["horizontal", "overlay"] } }
 ```
 (shows when `layout` is `horizontal` OR `overlay`.)
 
-There is no compile-time check that the referenced control exists — it is evaluated at runtime in the editor.
+### Composing conditions
+
+Combine the two rules to express real logic — AND across keys, OR within an array:
+
+```json
+// visible only when source is youtube OR vimeo, AND advanced mode is on
+"conditions": { "visible": { "source": ["youtube", "vimeo"], "advanced": true } }
+```
+
+The canonical pattern is a single "switch" control that the others condition on, so each input only appears for the relevant choice:
+
+```json
+"controls": {
+  "source":    { "type": "select", "label": "Video source", "default": "youtube",
+                 "options": [
+                   { "key": "youtube", "label": "YouTube" },
+                   { "key": "vimeo",   "label": "Vimeo" },
+                   { "key": "mp4",     "label": "Self-hosted" }
+                 ] },
+
+  "videoUrl":  { "type": "text",  "label": "Video URL / ID",
+                 "conditions": { "visible": { "source": ["youtube", "vimeo"] } } },
+
+  "videoFile": { "type": "video", "label": "Video file",
+                 "conditions": { "visible": { "source": ["mp4"] } } },
+
+  "poster":    { "type": "image", "label": "Poster image",
+                 "conditions": { "visible": { "source": ["mp4"] } } }
+}
+```
+
+There is **no** OR-across-different-keys and **no** negation/comparison operator. To express those, model the inputs so the rule fits AND + membership — e.g. add one `mode`/`source` select and switch on it, rather than combining unrelated booleans. Keep a single control as the switch and condition the rest on it.
 
 ## Sanitization
 

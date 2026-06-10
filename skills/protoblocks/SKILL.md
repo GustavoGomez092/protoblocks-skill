@@ -9,7 +9,7 @@ description: Use when building, scaffolding, or debugging WordPress Gutenberg bl
 
 Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML templates instead of React**. A block is a folder containing a `block.json` (with a `protoBlocks` config) and a `template.php`. The same PHP template renders both the editor preview and the frontend. Editable regions are marked with `data-proto-*` HTML attributes — the plugin wires those to editor UI automatically.
 
-**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.5.0.
+**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.8.0.
 
 **Core mental model:**
 - `block.json` → declares `fields` (editable content) and `controls` (inspector settings) under a `protoBlocks` key.
@@ -21,7 +21,7 @@ Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML
 ## When to Use
 
 - Creating a new Proto-Blocks block (scaffold `block.json` + `template.php`).
-- Adding fields (text, image, link, wysiwyg, repeater, inner-blocks) or controls (select, toggle, range, color, etc.).
+- Adding fields (text, image, video, link, wysiwyg, repeater, inner-blocks) or controls (select, toggle, range, color, image/video picker, etc.), including conditional controls.
 - Debugging: block not appearing, preview not updating, field not editable, repeater issues, Tailwind not applying.
 - Writing `template.php` markup with correct `data-proto-*` bindings and escaping.
 
@@ -98,12 +98,13 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 | `text` | string | `data-proto-field` |
 | `wysiwyg` | string (HTML) | `data-proto-field` |
 | `image` | `{ id, url, alt, caption, size }` | `data-proto-field` |
+| `video` | `{ id, url, mime }` | `data-proto-field` (media-library video; also a control) |
 | `link` | `{ url, text, target, rel, title }` | `data-proto-field` |
 | `repeater` | array of `{ id, ...fields }` | `data-proto-repeater` + `data-proto-repeater-item` |
 | `inner-blocks` | nested blocks → `$innerBlocksContent` | `data-proto-inner-blocks` (one per block; type must be hyphenated) |
 
 ### Control types (`protoBlocks.controls`)
-`text`, `textarea`, `select`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`. Select/radio require `options` **or** (for `select`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`.
+`text`, `textarea`, `select`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`. Select/radio require `options` **or** (for `select`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker.
 
 ### `data-proto-*` attributes
 | Attribute | Purpose |
@@ -150,11 +151,11 @@ Load these as needed — do not read all of them up front.
 - `references/composition.md` — **read before designing a block's fields.** When to use discrete fields vs one wysiwyg vs an inner-blocks slot vs a repeater; avoiding field proliferation.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, every key, defaults, validation errors vs warnings, attribute generation.
 - `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
-- `references/controls.md` — each control type, options, conditional visibility (`conditions.visible`), `affects`.
+- `references/controls.md` — each control type (incl. `video`), options, **conditional rendering & composition** (`conditions.visible`), `affects`.
 - `references/templates.md` — template variables, the `data-proto-*` system, escaping, preview vs frontend detection, and the `data-proto-animate` scroll-reveal convention (2.4.0+).
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
 - `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
-- `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions.
+- `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions, and **loading JS in the editor** for third-party embeds (e.g. HubSpot forms) via `enqueue_block_assets`.
 - `references/previews.md` — generating inserter thumbnails (Preview Capture admin tool) or supplying your own `preview.png`.
 - `references/examples.md` — the 9 bundled example blocks (6 vanilla + 3 Tailwind), a capability matrix, and full canonical samples (CTA, Stats, Hero, Tailwind Hero).
 - `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, block category, setup wizard, demo blocks, debug mode, editor preview system.
