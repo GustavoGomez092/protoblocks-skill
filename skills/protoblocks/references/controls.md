@@ -9,6 +9,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 | `text` | string | string | Single-line input. | — |
 | `textarea` | string | string | Multi-line input. | cta (description) |
 | `select` | string | option key | **Requires `options`** (static) **or `optionsSource`** (server-loaded — see [Dynamic options](#dynamic--server-provided-options)). Dropdown. | card, testimonial, accordion, hero, stats, cta, dynamic-select |
+| `multiselect` | array | list of option keys | **Requires `options` or `optionsSource`** — same contract as `select`. Stores an ordered `string[]`; drag to reorder. | — |
 | `toggle` | boolean | `true`/`false` | On/off switch. | card, testimonial, accordion, stats, tl-* |
 | `checkbox` | boolean | `true`/`false` | Renders like a toggle. | cta (showIcon, fullWidth) |
 | `range` | number | number | Slider. Expects `min`/`max` (+ optional `step`). | testimonial (rating 0–5), hero (overlayOpacity), stats (numberSize) |
@@ -25,7 +26,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 >
 > **`image` and `video` are available as both field types and control types.** Use the **control** form when the media picker should live in the inspector sidebar — for example a "video source" with no natural inline element. A field renders inline and *only* shows where its `data-proto-field` element is in the template; if there's no inline element for it, it won't appear anywhere, so reach for the control.
 
-> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` with neither `options` nor `optionsSource` is a hard error.
+> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` or `multiselect` with neither `options` nor `optionsSource` is a hard error.
 
 ## Config options
 
@@ -48,7 +49,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 |--------|-----------|---------|
 | `label` | all | Sidebar label (auto-generated from name if omitted). |
 | `default` | all | Initial value. |
-| `options` | select, radio, color-palette | Array of `{ "key", "label" }` (a `{ key: label }` map is also accepted). |
+| `options` | select, multiselect, radio, color-palette | Array of `{ "key", "label" }` (a `{ key: label }` map is also accepted). |
 | `min` / `max` / `step` | range, number | Numeric bounds and increment. |
 | `help` | all | Helper text under the control. |
 | `affects` | all | Field names this control influences (hint to the editor). |
@@ -168,6 +169,40 @@ add_action('proto_blocks_register_options_providers', function ($providers) {
     }, ['include_empty']);   // only `include_empty` from sourceArgs is forwarded
 });
 ```
+
+### Multiselect
+
+`multiselect` takes the identical config to `select` but stores an **ordered
+array of keys**. The author picks with a token field (searching the server as
+they type, so a catalogue past `per_page` is still reachable) and drags to
+reorder.
+
+```json
+"featuredProducts": {
+  "type": "multiselect", "label": "Featured products",
+  "optionsSource": "wp:posts",
+  "sourceArgs": { "post_type": "product", "per_page": 200 }
+}
+```
+
+```php
+$ids = $attributes['featuredProducts'] ?? [];
+
+$products = $ids ? get_posts([
+    'post_type'      => 'product',
+    'post__in'       => array_map('intval', $ids),
+    'orderby'        => 'post__in',   // <- keeps the author's drag order
+    'posts_per_page' => count($ids),
+]) : [];
+```
+
+**`orderby => 'post__in'` is load-bearing.** Omit it and WordPress returns date
+order, discarding the ordering the author just dragged into place.
+
+Two options sharing a label render disambiguated — `Half Size Oven (#18282)` —
+but the stored value is always the bare key. A key whose post was deleted stays
+visible as a bare token so it can be removed, and simply yields no row in the
+query.
 
 ### How it works at runtime
 
