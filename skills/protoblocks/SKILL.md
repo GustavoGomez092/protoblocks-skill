@@ -104,7 +104,7 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 | `inner-blocks` | nested blocks → `$innerBlocksContent` | `data-proto-inner-blocks` (one per block; type must be hyphenated) |
 
 ### Control types (`protoBlocks.controls`)
-`text`, `textarea`, `select`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`. Select/radio require `options` **or** (for `select`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker.
+`text`, `textarea`, `select`, `multiselect`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`. Select/radio require `options` **or** (for `select` and `multiselect`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. `multiselect` stores an **ordered array of keys** and is drag-reorderable — read it with `orderby => 'post__in'` (see `references/controls.md` → Multiselect). Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker.
 
 ### `data-proto-*` attributes
 | Attribute | Purpose |
@@ -139,7 +139,7 @@ wp proto-blocks export <name> --output=<path>
 3. **Mark editable elements even when empty.** A field is only editable in the editor if its element carries `data-proto-field`. Render the element (with the attribute) even when the value is empty, or it can't be edited.
 4. **`data-proto-repeater` name must match the repeater field name** in `block.json`.
 5. **Inner blocks:** type must be hyphenated **`"inner-blocks"`** (plain `innerblocks` is silently skipped), bind with **`data-proto-inner-blocks`**, echo **`$innerBlocksContent ?? ''`** (not `$content`), and only **one per block**.
-6. **`select` controls must define `options`** (use `{ "key", "label" }` pairs) **or** an `optionsSource` (server-loaded options — see `references/controls.md`). A `select` with neither fails validation.
+6. **`select` and `multiselect` controls must define `options`** (use `{ "key", "label" }` pairs) **or** an `optionsSource` (server-loaded options — see `references/controls.md`). Either type with neither fails validation.
 7. **Clear the cache after template changes** if you don't see updates: `wp proto-blocks cache clear`. Parsed templates are cached (validated against template + `block.json` mtime); an object cache or OPcache layer can still serve stale output, so clear explicitly when in doubt.
 
 ## Detailed References

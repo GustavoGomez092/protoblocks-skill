@@ -9,6 +9,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 | `text` | string | string | Single-line input. | — |
 | `textarea` | string | string | Multi-line input. | cta (description) |
 | `select` | string | option key | **Requires `options`** (static) **or `optionsSource`** (server-loaded — see [Dynamic options](#dynamic--server-provided-options)). Dropdown. | card, testimonial, accordion, hero, stats, cta, dynamic-select |
+| `multiselect` | array | list of option keys | **Requires `options` or `optionsSource`** — same contract as `select`. Stores an ordered `string[]`; drag to reorder. | — |
 | `toggle` | boolean | `true`/`false` | On/off switch. | card, testimonial, accordion, stats, tl-* |
 | `checkbox` | boolean | `true`/`false` | Renders like a toggle. | cta (showIcon, fullWidth) |
 | `range` | number | number | Slider. Expects `min`/`max` (+ optional `step`). | testimonial (rating 0–5), hero (overlayOpacity), stats (numberSize) |
@@ -168,6 +169,40 @@ add_action('proto_blocks_register_options_providers', function ($providers) {
     }, ['include_empty']);   // only `include_empty` from sourceArgs is forwarded
 });
 ```
+
+### Multiselect
+
+`multiselect` takes the identical config to `select` but stores an **ordered
+array of keys**. The author picks with a token field (searching the server as
+they type, so a catalogue past `per_page` is still reachable) and drags to
+reorder.
+
+```json
+"featuredProducts": {
+  "type": "multiselect", "label": "Featured products",
+  "optionsSource": "wp:posts",
+  "sourceArgs": { "post_type": "product", "per_page": 200 }
+}
+```
+
+```php
+$ids = $attributes['featuredProducts'] ?? [];
+
+$products = $ids ? get_posts([
+    'post_type'      => 'product',
+    'post__in'       => array_map('intval', $ids),
+    'orderby'        => 'post__in',   // <- keeps the author's drag order
+    'posts_per_page' => count($ids),
+]) : [];
+```
+
+**`orderby => 'post__in'` is load-bearing.** Omit it and WordPress returns date
+order, discarding the ordering the author just dragged into place.
+
+Two options sharing a label render disambiguated — `Half Size Oven (#18282)` —
+but the stored value is always the bare key. A key whose post was deleted stays
+visible as a bare token so it can be removed, and simply yields no row in the
+query.
 
 ### How it works at runtime
 
