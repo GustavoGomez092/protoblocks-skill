@@ -9,7 +9,7 @@ description: Use when building, scaffolding, or debugging WordPress Gutenberg bl
 
 Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML templates instead of React**. A block is a folder containing a `block.json` (with a `protoBlocks` config) and a `template.php`. The same PHP template renders both the editor preview and the frontend. Editable regions are marked with `data-proto-*` HTML attributes — the plugin wires those to editor UI automatically.
 
-**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.8.0.
+**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.10.0.
 
 **Core mental model:**
 - `block.json` → declares `fields` (editable content) and `controls` (inspector settings) under a `protoBlocks` key.
@@ -104,7 +104,7 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 | `inner-blocks` | nested blocks → `$innerBlocksContent` | `data-proto-inner-blocks` (one per block; type must be hyphenated) |
 
 ### Control types (`protoBlocks.controls`)
-`text`, `textarea`, `select`, `multiselect`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`. Select/radio require `options` **or** (for `select` and `multiselect`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. `multiselect` stores an **ordered array of keys** and is drag-reorderable — read it with `orderby => 'post__in'` (see `references/controls.md` → Multiselect). Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker.
+`text`, `textarea`, `select`, `multiselect`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`, `gallery`. Select/radio require `options` **or** (for `select` and `multiselect`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. `multiselect` stores an **ordered array of keys** and is drag-reorderable — read it with `orderby => 'post__in'` (see `references/controls.md` → Multiselect). Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker. `gallery` is the **multi**-image control (`[{ id, url, alt }]`, drag to reorder): reach for it instead of a repeater of image fields whenever the images ARE the layout — a repeater injects its editing chrome into the block's markup, so the canvas stops matching the front end (see `references/controls.md` → Gallery).
 
 ### `data-proto-*` attributes
 | Attribute | Purpose |

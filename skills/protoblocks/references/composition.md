@@ -10,14 +10,18 @@ Fields are not free. Each one is a fixed slot the author must fill in a fixed or
 digraph composition {
     rankdir=TB;
     node [shape=box];
+    q0 [shape=diamond, label="Is it a list of\nIMAGES ONLY?"];
     q1 [shape=diamond, label="Is it a LIST of\nsame-shaped items?"];
     q2 [shape=diamond, label="Is it one flowing\nrich-text region\n(heading + prose + list)?"];
     q3 [shape=diamond, label="Should the author drop in\narbitrary blocks (image, columns,\nembed, other blocks) — now or later?"];
+    gallery [label="GALLERY CONTROL\n(sidebar; no markup chrome)"];
     repeater [label="REPEATER\n(sub-fields per item)"];
     wysiwyg [label="ONE WYSIWYG field"];
     inner [label="INNER-BLOCKS slot\n(one per block)"];
     fields [label="DISCRETE FIELD(S)\none per real slot"];
 
+    q0 -> gallery [label="yes"];
+    q0 -> q1 [label="no"];
     q1 -> repeater [label="yes"];
     q1 -> q2 [label="no"];
     q2 -> wysiwyg [label="yes"];
@@ -27,14 +31,15 @@ digraph composition {
 }
 ```
 
-## The four tools
+## The five tools
 
 | Use | When | Value in PHP |
 |-----|------|--------------|
 | **Discrete field** (`text`, `image`, `link`) | A single, structurally-fixed slot you place and style **individually**: the block's main title (`h2`), a hero image, a CTA button. One field per *genuine* slot. | the field's own value |
 | **One `wysiwyg` field** | A region that is **flowing rich text** — headings, paragraphs, lists, bold, links — authored as one blob, where you don't need to position or style the parts separately. | HTML string (`wp_kses_post`) |
 | **`inner-blocks` slot** | The region should be **open-ended composition**: the author inserts arbitrary core/Proto blocks (paragraph, image, columns, quote, embed), now or in the future. Reuses existing blocks' editing UX instead of rebuilding it. **One per block.** | `$innerBlocksContent` (echo via `data-proto-inner-blocks`) |
-| **`repeater`** | A **list of same-shaped items** (cards, stats, nav links, accordion rows), each a set of sub-fields. | array of item objects |
+| **`repeater`** | A **list of same-shaped items** (cards, stats, nav links, accordion rows), each a set of sub-fields **the author edits in place**. | array of item objects |
+| **`gallery` control** | A list of **images and nothing else** (slider, logo wall, photo band). Lives in the inspector, so the block's markup stays free of editing chrome — which is what keeps the editor preview honest for layouts computed from the item count or positions. | array of `{ id, url, alt }` |
 
 ## The headline rule (your example)
 
@@ -84,5 +89,6 @@ You probably have too many fields if:
 - Three or more `text`/`wysiwyg` fields always appear together, in document order, and none is individually styled or controlled → collapse into one `wysiwyg`.
 - You're adding a new field every time the client wants "one more thing in that section" → that section wants an `inner-blocks` slot.
 - A repeater item has a single rich sub-field doing heading+body+list → that sub-field should be a `wysiwyg` (or the item is really an inner-block).
+- A repeater item's only sub-field is an **image** → that is a `gallery` control, not a repeater. The repeater's add/remove/drag chrome renders *inside* the block, so the canvas shows furniture the page does not; any layout derived from the item count or each item's position then cannot be judged in the editor at all.
 
 Fewer, richer regions = a block that's easier to author, restyle, and evolve.

@@ -59,9 +59,14 @@ Each entry gives: **fields** (editable content), **controls** (sidebar settings)
 - **Pattern:** multiple repeaters + toggle-gated sections. **Example:** `tl-footer`.
 
 ### Logo wall / partner grid
-- **Fields:** `logos` (repeater of `{ image, link? }`).
+- **Fields:** `logos` (repeater of `{ image, link? }`) — **only if each logo needs its own link**.
 - **Controls:** `columns` (number), `grayscale` (toggle).
-- **Pattern:** image-only repeater; toggle adds a filter class.
+- **Pattern:** toggle adds a filter class.
+- **Images alone?** Drop the repeater and use a `gallery` control (`[{ id, url, alt }]`). The repeater's add/remove/drag chrome renders *inside* the block, so the canvas stops matching the page — see `composition.md`.
+
+### Image carousel / slider / photo band
+- **Controls:** `images` (**gallery** — the whole list, in the sidebar), plus the layout knobs (`speed`, `height`, spacing ranges).
+- **Pattern:** never a repeater here. The layout is computed from how many images there are and where each sits, so any editing chrome injected between them makes the editor preview a different thing from the page — and the layout controls become impossible to judge. Keep the markup identical on both sides and, if the positions are scripted, render the first frame in PHP so the canvas shows the real geometry without running the view script.
 
 ### Rich content section / freeform
 - **Fields:** one `body` (**inner-blocks**) — let authors compose paragraphs, images, columns, embeds.

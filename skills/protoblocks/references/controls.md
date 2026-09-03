@@ -19,12 +19,21 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 | `radio` | string | option key | Radio buttons; requires `options`. | hero (contentAlignment), cta (buttonStyle) |
 | `image` | object | `{ id, url, alt }` | Media picker in the sidebar (a *setting*, e.g. a background). | hero (backgroundImage) |
 | `video` | object | `{ id, url, mime }` | Media picker in the sidebar, filtered to **video**. Optional `allowedTypes` (defaults `["video"]`). | — |
+| `gallery` | array | `[{ id, url, alt }]` | **Multi**-image picker in the sidebar. Core's media modal in gallery mode + a sortable strip. No config beyond `label`. See [Gallery](#gallery). | — |
 
 (Open the named example's `block.json` for the exact, working config of each control.)
 
 > The `image` **control** value is `{ id, url, alt }` — fewer keys than the `image` **field** (`{ id, url, alt, caption, size }`, see `fields.md`). The `video` **control** value is `{ id, url, mime }`. Don't conflate fields and controls: a field is editable content in the block body (bound via `data-proto-field`); a control is a sidebar setting (read in PHP).
 >
 > **`image` and `video` are available as both field types and control types.** Use the **control** form when the media picker should live in the inspector sidebar — for example a "video source" with no natural inline element. A field renders inline and *only* shows where its `data-proto-field` element is in the template; if there's no inline element for it, it won't appear anywhere, so reach for the control.
+
+> **Need several images? Use `gallery`, not a repeater of image fields.** A
+> repeater renders its add/remove/drag chrome *inside* the block's markup, so
+> the canvas shows furniture the front end does not have — which breaks the
+> preview for any block whose layout is computed from the item count or from
+> each item's position (carousels, bands, masonry). A control lives in the
+> sidebar and leaves the rendered markup identical on both sides. Keep the
+> repeater when each row is *content* the author edits in place.
 
 > Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` or `multiselect` with neither `options` nor `optionsSource` is a hard error.
 
@@ -203,6 +212,43 @@ Two options sharing a label render disambiguated — `Half Size Oven (#18282)` �
 but the stored value is always the bare key. A key whose post was deleted stays
 visible as a bare token so it can be removed, and simply yields no row in the
 query.
+
+### Gallery
+
+`gallery` stores an **ordered list of images**: the multiple-value counterpart
+to the `image` control, storing that same `{ id, url, alt }` shape per item.
+There is nothing to configure — the media library is the source.
+
+```json
+"images": { "type": "gallery", "label": "Images" }
+```
+
+```php
+<?php foreach (($attributes['images'] ?? []) as $image) : ?>
+    <?php
+    // From the id so WordPress emits srcset; the stored url is the fallback
+    // for an attachment deleted since it was chosen.
+    if (! empty($image['id'])) {
+        echo wp_get_attachment_image((int) $image['id'], 'large', false, [
+            'alt' => esc_attr($image['alt'] ?? ''),
+        ]);
+    }
+    ?>
+<?php endforeach; ?>
+```
+
+No `data-proto-*` binding — the list lives in the inspector, so the markup
+carries no editing furniture.
+
+`url` is a **generated size** (`large`, falling back through `medium_large`
+and `medium` to the original), because the sidebar renders these as thumbnails
+and a page of full-size originals is a slow inspector.
+
+Authoring: core's media modal in gallery mode (so reordering inside the modal
+works as it does in core's Gallery block), reopening **edits** the current
+selection rather than starting over, and a sortable strip in the sidebar
+reorders by drag or by keyboard. Duplicates of one attachment collapse to the
+first — two items with one identity are indistinguishable to drag-and-drop.
 
 ### How it works at runtime
 
