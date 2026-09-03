@@ -78,7 +78,7 @@ The SchemaValidator distinguishes hard errors from non-blocking warnings.
 
 **Errors (block is invalid / throws):**
 - Block `name` is missing.
-- A `select` control has no `options`.
+- A `select` or `multiselect` control has no `options`.
 
 **Warnings (logged, block still loads):**
 - Block `name` not in `namespace/block-name` format.

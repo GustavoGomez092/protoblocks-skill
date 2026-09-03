@@ -26,7 +26,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 >
 > **`image` and `video` are available as both field types and control types.** Use the **control** form when the media picker should live in the inspector sidebar — for example a "video source" with no natural inline element. A field renders inline and *only* shows where its `data-proto-field` element is in the template; if there's no inline element for it, it won't appear anywhere, so reach for the control.
 
-> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` with neither `options` nor `optionsSource` is a hard error.
+> Validation note: the SchemaValidator only *warns* on control types outside a core subset, so custom/extra control types load fine. A `select` or `multiselect` with neither `options` nor `optionsSource` is a hard error.
 
 ## Config options
 
@@ -49,7 +49,7 @@ Controls are settings that appear in the editor's **inspector sidebar** (not inl
 |--------|-----------|---------|
 | `label` | all | Sidebar label (auto-generated from name if omitted). |
 | `default` | all | Initial value. |
-| `options` | select, radio, color-palette | Array of `{ "key", "label" }` (a `{ key: label }` map is also accepted). |
+| `options` | select, multiselect, radio, color-palette | Array of `{ "key", "label" }` (a `{ key: label }` map is also accepted). |
 | `min` / `max` / `step` | range, number | Numeric bounds and increment. |
 | `help` | all | Helper text under the control. |
 | `affects` | all | Field names this control influences (hint to the editor). |
