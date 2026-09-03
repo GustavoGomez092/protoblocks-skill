@@ -19,7 +19,7 @@ Inline editable text (uses the editor's RichText under the hood).
 | Config | Default | Meaning |
 |--------|---------|---------|
 | `tagName` | `div` | Element tag to render. |
-| `format` | `standard` | Allowed inline formats: `plain` (none), `simple` (bold, italic), `standard` (bold, italic, link), `full` (all). |
+| `format` | `standard` | Allowed inline formats: `plain` (none), `simple` (bold, italic), `standard` (bold, italic, link), `full` (everything a `wysiwyg` field allows — adds **text colour**, underline, inline image, strikethrough, sub/superscript, inline code, keyboard). See [Colouring part of a heading](#colouring-part-of-a-heading). |
 | `maxLength` | — | Max characters. |
 | `required` | `false` | — |
 
@@ -29,6 +29,40 @@ Inline editable text (uses the editor's RichText under the hood).
 ```php
 <h3 data-proto-field="title"><?php echo esc_html($attributes['title'] ?? ''); ?></h3>
 ```
+
+
+### Colouring part of a heading
+
+A heading that needs one phrase in a brand colour — *Built on <span>30 years</span>
+of quality* — is a `text` field with `"format": "full"`, not a `wysiwyg`:
+
+```json
+"heading": { "type": "text", "tagName": "h2", "format": "full" }
+```
+
+The author selects the phrase and picks **⌄ (More) → Highlight → Text** in the
+block toolbar. Swatches come from the theme's `theme.json` palette, so define
+one or the brand colour will not be on offer.
+
+**Two things bite here.** Both are one-liners, and neither is obvious from the
+failure:
+
+1. **Escape with `wp_kses_post()`, never `esc_html()`.** The field now carries
+   markup, and `esc_html` prints the `<mark>` tag as visible text.
+2. **Kill the yellow.** Colouring text writes a `<mark>`, which browsers paint
+   with a yellow highlight. Core suppresses that with an inline
+   `background-color: rgba(0,0,0,0)` — which `wp_kses_post()` strips, so the
+   yellow returns on the front end. One theme rule fixes it everywhere:
+
+   ```css
+   mark.has-inline-color { background-color: transparent; }
+   ```
+
+   Put it in a stylesheet passed to `add_editor_style()` as well, or the editor
+   and the front end will disagree.
+
+Requires plugin **2.9.1+**. Before that, `full` omitted `core/text-color` and
+the Highlight option simply was not in the menu.
 
 ---
 
