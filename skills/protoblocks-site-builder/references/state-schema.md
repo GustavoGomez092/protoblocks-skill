@@ -1,0 +1,74 @@
+# Build state schema
+
+## Files
+
+| Path (under `wp-content/themes/<fork>/.protoblocks/`) | Purpose |
+|---|---|
+| `build.json` | The state. Versioned with the theme repo. |
+| `build.json.bak` | Last valid copy, refreshed on each write. Used by `restore`. |
+| `build.json.lock` | Write lock (stale after 30 s). Ignored by git. |
+| `.gitignore` | Created by `init`: `artifacts/`, `build.json.bak`, `build.json.lock`, `build.json.tmp-*`. |
+| `artifacts/` | Design crops, screenshots, composites. Not versioned. |
+
+## Shape
+
+Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each page needs `slug`, `status`, `sections`; each section `n`, `anchor`, `status`. Other keys are free-form.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "site": {
+    "localSiteId": "…", "path": ".../app/public", "url": "https://acme.local",
+    "wp": { "mode": "local-wrapper|native", "wrapper": ".protoblocks/wp" },
+    "theme": { "slug": "acme", "forkedFrom": "proto-blocks-theme@1.1.3" },
+    "tokens": { "colors": {…}, "fonts": {…}, "type": {…}, "radii": {…}, "shadows": {…} },
+    "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
+    "qa": { "mismatchMax": 0.08, "heightDeltaMax": 0.03, "maxIterations": 5 },
+    "navigation": { "primary": 123, "footer": [124, 125], "pendingLinks": [{ "label": "Pricing", "page": "pricing" }] },
+    "parts": { "header": { "block": "site-header", "status": "done" }, "footer": { … } }
+  },
+  "library": {
+    "media-text": { "purpose": "…", "fields": […], "controls": […], "variants": ["imagePosition"], "usedOn": ["home", "about"], "baseline": "artifacts/…png" }
+  },
+  "pages": [{
+    "slug": "home", "postId": 42, "status": "building|seo|done",
+    "design": { "source": "figma|penpot|image|url", "ref": "…", "frames": [{ "breakpoint": "desktop", "width": 1440, "scale": 2, "image": "…" }] },
+    "contentHash": "sha256 of last post_content written",
+    "sections": [{
+      "n": 1, "anchor": "pb-s1", "label": "Hero", "decision": "new|reuse|extend",
+      "block": "hero-split", "attrs": {…}, "inner": [],
+      "crops": { "desktop": "…", "mobile": "…" },
+      "qa": [{ "iteration": 1, "breakpoint": "desktop", "mismatch": 0.14, "heightDelta": 0.05, "pass": false }],
+      "motion": { "presets": ["split-lines", "fade-up"], "check": "pass" },
+      "status": "planned|building|verifying|animating|done|skipped"
+    }],
+    "seo": { "focusKeyword": { "value": "…", "inferred": true, "why": "…" }, … , "audit": {…} }
+  }]
+}
+```
+
+## Enums and defaults
+
+| Field | Values |
+|---|---|
+| `site.wp.mode` | `local-wrapper`, `native` |
+| page `status` | `planning`, `building`, `seo`, `done` |
+| section `status` | `planned`, `building`, `verifying`, `animating`, `done`, `skipped` |
+| section `decision` | `new`, `reuse`, `extend` |
+
+QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax` 0.08, `heightDeltaMax` 0.03, `maxIterations` 5.
+
+## CLI
+
+`node "$PB/lib/state.mjs" <cmd> <themeDir> [path] [json]`. Paths are dotted; array indexes are numbers (`pages.0.sections.2.qa`). Output is JSON on stdout.
+
+| Command | Behavior |
+|---|---|
+| `init <themeDir> <site.json>` | Creates `build.json` from the `site` object (a file path, not inline JSON) plus QA defaults, and `.gitignore`. Fails `[EEXISTS]` if state exists. |
+| `get <themeDir> [path]` | Prints the value; no path prints everything; missing path prints `null`. |
+| `set <themeDir> <path> <json>` | Sets a value (creates intermediate objects), prints the new value. |
+| `append <themeDir> <path> <json>` | Pushes onto an array (creates it if absent); `[EINVALID]` if not an array. |
+| `validate <themeDir>` | Prints `{"valid": true}` or fails. |
+| `restore <themeDir>` | Replaces `build.json` with the valid `build.json.bak`. `[ENOBACKUP]` if none. |
+
+Exit codes: 0 success, 1 error (message `[CODE] ...` on stderr), 64 usage error. Error codes: `ENOSTATE`, `EEXISTS`, `EPARSE` (not JSON), `EINVALID` (schema violation, including a rejected `set`/`append`), `ENOBACKUP`, `ELOCKED` (lock held over 10 s). `set`/`append` take the lock, validate the result, and write atomically, so a rejected write leaves state unchanged.
