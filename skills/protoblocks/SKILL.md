@@ -1,6 +1,6 @@
 ---
 name: protoblocks
-description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind.
+description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind. For turning a whole design into pages or a site, use protoblocks-site-builder.
 ---
 
 # Proto-Blocks
@@ -9,7 +9,7 @@ description: Use when building, scaffolding, or debugging WordPress Gutenberg bl
 
 Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML templates instead of React**. A block is a folder containing a `block.json` (with a `protoBlocks` config) and a `template.php`. The same PHP template renders both the editor preview and the frontend. Editable regions are marked with `data-proto-*` HTML attributes — the plugin wires those to editor UI automatically.
 
-**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.10.0.
+**Requirements:** WordPress 6.3+, PHP 8.0+. Current plugin version: 2.10.1.
 
 **Core mental model:**
 - `block.json` → declares `fields` (editable content) and `controls` (inspector settings) under a `protoBlocks` key.
@@ -158,6 +158,7 @@ Load these as needed — do not read all of them up front.
 - `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions, and **loading JS in the editor** for third-party embeds (e.g. HubSpot forms) via `enqueue_block_assets`.
 - `references/previews.md` — generating inserter thumbnails (Preview Capture admin tool) or supplying your own `preview.png`.
 - `references/examples.md` — the 9 bundled example blocks (6 vanilla + 3 Tailwind), a capability matrix, and full canonical samples (CTA, Stats, Hero, Tailwind Hero).
+- `references/theme.md` — the proto-blocks-theme starter: builder canvas, Taxi page transitions (wrapper, lifecycle events, script re-run rules), animation globals, token file, required plugins.
 - `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, block category, setup wizard, demo blocks, debug mode, editor preview system.
 - `references/troubleshooting.md` — symptom → cause → fix for common problems.
 

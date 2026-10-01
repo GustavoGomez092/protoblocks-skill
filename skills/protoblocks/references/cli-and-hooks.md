@@ -13,11 +13,23 @@ Registered under `wp proto-blocks`:
 | `wp proto-blocks cache stats` | — | Show cache statistics. |
 | `wp proto-blocks export <name>` | `--output=<path>` | Export a block to a standalone directory. |
 
+**`--dir=plugin` gotcha:** it writes to `wp-content/plugins/proto-blocks-custom/`, which is **not** a discovery path (`Discovery::getBlockPaths()` only scans the theme/child-theme `proto-blocks/`, the bundled examples, and `proto_blocks_paths`), so the block never appears. Use `--dir=theme` (the default), or add that directory via the `proto_blocks_paths` filter.
+
 ```bash
 wp proto-blocks create hero --title="Hero" --fields="title:text,content:wysiwyg,image:image"
 wp proto-blocks validate
 wp proto-blocks cache clear
 ```
+
+### Compiling Tailwind from the CLI
+
+In plugin 2.10.1 there is no `wp proto-blocks tailwind` command. Compile with:
+
+```bash
+wp eval 'ProtoBlocks\Core\Plugin::getInstance()->getTailwindManager()->compile();'
+```
+
+`compile()` returns `['success' => bool, 'message' => ...]` and fails if Tailwind is not enabled; the `wp eval` call prints nothing, so check the Tailwind settings page or the generated CSS. Fixed in the next release (unreleased PR #3): a new `wp proto-blocks tailwind <compile|status|enable>` command (`status --format=json`; `compile` errors when Tailwind is not enabled).
 
 ## Block discovery
 

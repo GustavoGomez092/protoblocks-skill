@@ -70,21 +70,18 @@ An option also exists to disable WordPress global styles when they conflict with
 
 Either way, until a first compile has run, no Tailwind CSS exists and classes have no effect — see Troubleshooting below.
 
-### Themed colors (admin-configurable)
+### Brand colors need tokens (no defaults)
 
-Tailwind blocks get three built-in color scales whose base values are set in **Proto-Blocks → Tailwind Settings**:
+The Tailwind v4 input has **no built-in `primary-*`, `secondary-*` or `accent-*` scales** (verified against 2.10.1: nothing in `includes/Tailwind/` defines them). Classes like `bg-primary-500` / `hover:bg-primary-400` (used by the bundled `tl-hero` and other `tl-*` examples) generate nothing until the active theme defines them in `tailwind-theme.css`:
 
-| Scale | Utilities | CSS variable | Default |
-|-------|-----------|--------------|---------|
-| `primary-50`…`primary-950` | `bg-primary-600`, `text-primary-500`, `border-primary-700`, … | `--tw-color-primary-*` | blue |
-| `secondary-50`…`secondary-950` | `bg-secondary-500`, `text-secondary-600`, … | `--tw-color-secondary-*` | teal |
-| `accent-50`…`accent-950` | `bg-accent-500`, … | `--tw-color-accent-*` | red |
-
-```php
-<button class="bg-primary-600 hover:bg-primary-700 text-white">Click me</button>
-<span class="text-secondary-500">Secondary</span>
+```css
+@theme {
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+}
 ```
-Using these instead of hard-coded hex keeps blocks on-brand and re-themeable from the admin. (The bundled `tl-hero` uses `bg-primary-500 hover:bg-primary-400`.)
+Prefer token-based utilities over hard-coded hex so blocks stay re-themeable.
 
 ### Theme design tokens (`tailwind-theme.css`, Tailwind v4)
 
@@ -108,8 +105,8 @@ The file holds a single Tailwind v4 `@theme { … }` block; anything declared th
 → generates `bg-brand`, `text-brand`, `border-brand`, `bg-brand-700`, `font-display`, `shadow-glow`, etc., usable in any block template.
 
 - **Create it:** Tailwind Settings → "Create starter file" writes a minimal `tailwind-theme.css` into the active theme (button hidden once it exists).
-- **Relocate it:** `add_filter('proto_blocks_theme_css_path', fn() => WP_CONTENT_DIR . '/design-tokens.css');` (useful for monorepos).
-- **Force a recompile from CLI:** `wp eval 'ProtoBlocks\Core\Plugin::getInstance()->getTailwindManager()->compile();'`
+- **Relocate it:** (path filter `proto_blocks_theme_css_path`, default `get_stylesheet_directory()/tailwind-theme.css`) `add_filter('proto_blocks_theme_css_path', fn() => WP_CONTENT_DIR . '/design-tokens.css');` (useful for monorepos).
+- **Force a recompile from CLI:** there is no Tailwind WP-CLI command in 2.10.1; use `wp eval 'ProtoBlocks\Core\Plugin::getInstance()->getTailwindManager()->compile();'` (fails if Tailwind is not enabled). Fixed in the next release: `wp proto-blocks tailwind <compile|status|enable>`.
 
 ### Scoped preflight
 

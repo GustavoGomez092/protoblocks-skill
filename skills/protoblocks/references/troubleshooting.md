@@ -10,6 +10,7 @@ Symptom → cause → fix. Grouped by area.
 | Block not in inserter | Folder not under a discovered path | Put it in `theme/proto-blocks/{name}/`, or add the path via `proto_blocks_paths`. |
 | Wrong block name | Relying on the default | Default is `proto-blocks/{folder}`. Set `name` explicitly as `namespace/block-name`. |
 | "Validation error" | `name` missing, or a `select` control without `options` | Add `name`; give every select/radio `options`. Run `wp proto-blocks validate`. |
+| Block created with `wp proto-blocks create --dir=plugin` never appears | It was written to `wp-content/plugins/proto-blocks-custom/`, which is not a discovery path | Re-create with `--dir=theme` (default), or add that directory via the `proto_blocks_paths` filter. |
 | Edited block.json ignored | Template/schema cached | `wp proto-blocks cache clear`. |
 
 ## Editing in the editor
@@ -41,7 +42,8 @@ Symptom → cause → fix. Grouped by area.
 | Not nestable — no `+` appender, treated as a leaf | Field type spelled `innerblocks` (no hyphen) — the editor parser only matches `inner-blocks` | Use `"type": "inner-blocks"` (hyphenated). |
 | Not nestable — no slot | Template has no `data-proto-inner-blocks` element | Add a container with `data-proto-inner-blocks`. |
 | Was nestable, now isn't | Stale saved instance (inserted before the field existed / while misspelled) | Delete the existing block and re-insert a fresh one — the editor reads stored markup. |
-| Renders empty on the frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead (`$content` is never passed). |
+| Renders empty on the frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead (`$content` is never passed). The bundled `hero` example does this wrong in 2.10.1 (fixed in the next release). |
+| `wp proto-blocks validate` warns `unknown type "inner-blocks"` | In 2.10.1 the PHP `SchemaValidator` only lists `innerblocks`, while the editor only recognizes `inner-blocks` | Keep `inner-blocks` and ignore that specific warning; it is harmless. Fixed in the next release (`inner-blocks` canonical, `innerblocks` a warning legacy alias). |
 | Container/wrapper feels off (no layout controls) | Missing `supports.layout` | Add `supports.layout.default = { "type": "constrained" }` for group-like blocks. |
 
 ## Repeaters
@@ -60,6 +62,8 @@ Symptom → cause → fix. Grouped by area.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Tailwind classes have no effect | See dedicated section below | Most often: no first compile yet (shell host: binary not downloaded; managed host like WP Engine: hit **Compile CSS** to run the browser engine), or prod (`cached`) mode without a recompile. |
+| `primary-*` / `secondary-*` classes (e.g. in `tl-*` examples) have no effect | Tailwind v4 input has no default brand tokens | Define `--color-primary-*` etc. in the active theme's `tailwind-theme.css` `@theme {}` block (see `styling.md`). |
+| No `wp proto-blocks tailwind` command | Not in 2.10.1 | `wp eval 'ProtoBlocks\Core\Plugin::getInstance()->getTailwindManager()->compile();'` (next release adds the command). |
 | Tailwind styles leak / get overridden | Scoping to `.proto-blocks-scope` | Expected — utilities are scoped; ensure your markup is inside the scoped wrapper. |
 | `style.css` not loading | Wrong filename/location | Use `style.css` or `{block-name}.css` in the block folder. |
 | Editor preview looks different from front end | Theme editor styles not loaded | The plugin injects theme editor styles; confirm theme registers them. |
