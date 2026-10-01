@@ -19,16 +19,36 @@ function pluginState(wp, slug) {
 export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease } = {}) {
   const plugins = [];
 
-  const rel = await fetchRelease(PROTO_BLOCKS_REPO);
+  let rel = null;
+  let releaseError = null;
+  try {
+    rel = await fetchRelease(PROTO_BLOCKS_REPO);
+  } catch (e) {
+    if (e.code !== 'ERELEASE') throw e;
+    releaseError = e;
+  }
+
   const pb = pluginState(wp, 'proto-blocks');
-  if (!pb.installed || compareVersions(pb.version, rel.version) < 0) {
-    wp.check(['plugin', 'install', rel.zipUrl, '--force', '--activate']);
-    plugins.push({ slug: 'proto-blocks', action: pb.installed ? 'updated' : 'installed', version: rel.version });
-  } else if (!pb.active) {
-    wp.check(['plugin', 'activate', 'proto-blocks']);
-    plugins.push({ slug: 'proto-blocks', action: 'activated', version: pb.version });
+  if (releaseError) {
+    // Offline mode: if proto-blocks not installed, rethrow
+    if (!pb.installed) throw releaseError;
+    // If installed, activate if needed and report with warning
+    if (!pb.active) {
+      wp.check(['plugin', 'activate', 'proto-blocks']);
+      plugins.push({ slug: 'proto-blocks', action: 'activated', version: pb.version, warning: `could not check for updates: ${releaseError.message}` });
+    } else {
+      plugins.push({ slug: 'proto-blocks', action: 'ok', version: pb.version, warning: `could not check for updates: ${releaseError.message}` });
+    }
   } else {
-    plugins.push({ slug: 'proto-blocks', action: 'ok', version: pb.version });
+    if (!pb.installed || compareVersions(pb.version, rel.version) < 0) {
+      wp.check(['plugin', 'install', rel.zipUrl, '--force', '--activate']);
+      plugins.push({ slug: 'proto-blocks', action: pb.installed ? 'updated' : 'installed', version: rel.version });
+    } else if (!pb.active) {
+      wp.check(['plugin', 'activate', 'proto-blocks']);
+      plugins.push({ slug: 'proto-blocks', action: 'activated', version: pb.version });
+    } else {
+      plugins.push({ slug: 'proto-blocks', action: 'ok', version: pb.version });
+    }
   }
 
   for (const slug of WPORG_PLUGINS) {
@@ -45,14 +65,31 @@ export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease } = 
   }
 
   const options = [];
-  wp.check(['option', 'update', 'proto_blocks_wizard_completed', '1']);
-  options.push('proto_blocks_wizard_completed');
-  wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['enable']);
+
+  // Check and update proto_blocks_wizard_completed
+  const wizardCurrent = wp.run(['option', 'get', 'proto_blocks_wizard_completed']).stdout.trim();
+  if (wizardCurrent !== '1') {
+    wp.check(['option', 'update', 'proto_blocks_wizard_completed', '1']);
+    options.push('proto_blocks_wizard_completed');
+  }
+
+  // Enable Tailwind
+  const tailwindResult = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['enable']);
   options.push('proto_blocks_tailwind.enabled');
-  if (wp.run(['option', 'get', 'permalink_structure']).stdout.trim() !== '/%postname%/') {
+
+  // Check if component_style was set by tailwind enable
+  const componentStyleCurrent = wp.run(['option', 'get', 'proto_blocks_component_style']).stdout.trim();
+  if (componentStyleCurrent === 'tailwind') {
+    options.push('proto_blocks_component_style');
+  }
+
+  // Check and update permalink_structure
+  const permalinkCurrent = wp.run(['option', 'get', 'permalink_structure']).stdout.trim();
+  if (permalinkCurrent !== '/%postname%/') {
     wp.check(['rewrite', 'structure', '/%postname%/']);
     options.push('permalink_structure');
   }
+
   return { plugins, options };
 }
 
