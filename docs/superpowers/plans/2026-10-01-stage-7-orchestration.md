@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-01-site-builder-design.md` (§2.2 pipeline, §2.3 state/resume, §7 page completion, §2.1 commands/agents, §11 testing, §12 stage 7)
 
-**Builds on:** all previous stages. Key interfaces: `loadState/updateState` (1), `runPreflight` (1), `setupSite`, `applyTokens`, `upsertMenu`, `partMarkup/writePart` (2), `checkSection`, `shoot`, `diffImages`, `launchBrowser/openPage`, `visual-qa` agent (3), `addFrame`, `cropSections`, `runGates`, `buildPage`, `prepareCheck`, `recordVerdict`, `recordUse` (4), `installMotion`, `setProfile`, `motionCheck`, `recordMotion` (5), `applySeo`, `ogImage`, `seoAudit`, `recordAudit`, `serveSite` (6).
+**Builds on:** all previous stages. Key interfaces: `loadState/updateState` (1), `runPreflight` (1), `setupSite`, `applyTokens`, `upsertMenu`, `partMarkup/writePart` (2), `checkSection`, `shoot`, `diffImages`, `launchBrowser/openPage`, `visual-qa` agent (3), `addFrame`, `cropSections`, `runGates`, `buildPage`, `prepareCheck`, `recordVerdict`, `recordUse` (4), `installMotion`, `setProfile`, `motionCheck`, `recordMotion` (5), `applySeo`, `ogImage`, `seoAudit`, `recordAudit`, `normalizeJsonld`, `jsonldSupported` (6).
 
 ## Global Constraints
 

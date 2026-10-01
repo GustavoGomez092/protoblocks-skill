@@ -12,7 +12,7 @@
 
 **Builds on:**
 - Stage 1: `state.mjs` (`loadState`, `updateState(themeDir, fn, {timeoutMs}?)`, `getPath`, `setPath`, `appendPath`, `statePath`, `DEFAULT_QA`), `exec.mjs`.
-- Stage 2: `wp.mjs` (`createWp`, `loadRuntime`, `WP_SCRIPTS_DIR`, `WpError`), `tests/integration/helpers.mjs` (`itest`, `testWp`, `PUBLIC`, `SITE_URL`, `useItestTheme(wp)` → activates the throwaway `pb-itest` theme and returns its dir, `restoreTheme(wp)`). The test site is the developer's Local site "Proto Blocks": tests that add blocks or files to a theme MUST do so in `pb-itest` (via `useItestTheme`) and call `restoreTheme(wp)` in `finally`. Never write into the developer's active theme checkout. Delete created pages and attachments at the end of each test, `navigation.mjs` (`refreshMenus`), `blocks.mjs` (`serializeAttrs`, `blockComment`), test theme fork `pb-itest` active on `tests/.site`.
+- Stage 2: `wp.mjs` (`createWp`, `loadRuntime`, `WP_SCRIPTS_DIR`, `WpError`), `tests/integration/helpers.mjs` (`itest`, `testWp`, `PUBLIC`, `SITE_URL`, `useItestTheme(wp)` → activates the throwaway `pb-itest` theme and returns its dir, `restoreTheme(wp)`). The test site is the developer's Local site "Proto Blocks": tests that add blocks or files to a theme MUST do so in `pb-itest` (via `useItestTheme`) and call `restoreTheme(wp)` in `finally`. Never write into the developer's active theme checkout. Delete created pages and attachments at the end of each test, `navigation.mjs` (`refreshMenus`), `blocks.mjs` (`serializeAttrs`, `blockComment`). 
 - Stage 3: `scripts/qa/` (`shoot`, `diffImages`, `cropRanges`, `findCuts`, `checkSection`), `agents/visual-qa.md` (writes `<iterDir>/verdict.json`), `tests/qa/helpers.mjs`.
 
 ## Global Constraints
