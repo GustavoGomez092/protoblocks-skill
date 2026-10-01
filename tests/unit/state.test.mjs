@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   initState, loadState, saveState, restoreState, updateState, validate,
   getPath, setPath, appendPath, statePath, StateError, DEFAULT_QA,
 } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
-const CLI = new URL('../../skills/protoblocks-site-builder/scripts/lib/state.mjs', import.meta.url).pathname;
+const CLI = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/lib/state.mjs', import.meta.url));
 let theme;
 const site = { url: 'http://acme.local', path: '/x/app/public', wp: { mode: 'local-wrapper', wrapper: '/x/wp' } };
 
@@ -96,4 +97,68 @@ test('CLI set with an invalid value exits non-zero and explains why', () => {
   const r = spawnSync(process.execPath, [CLI, 'set', theme, 'site.wp.mode', '"docker"'], { encoding: 'utf8' });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /\$\.site\.wp\.mode: must be one of/);
+});
+
+test('CLI get on missing path prints JSON null, not undefined', () => {
+  const siteFile = path.join(theme, 'site.json');
+  fs.writeFileSync(siteFile, JSON.stringify(site));
+  execFileSync(process.execPath, [CLI, 'init', theme, siteFile]);
+  const out = execFileSync(process.execPath, [CLI, 'get', theme, 'nope.deeper'], { encoding: 'utf8' });
+  assert.equal(out.trim(), 'null');
+  assert.equal(JSON.parse(out), null);
+});
+
+test('saveState does not overwrite .bak if current file is corrupt', () => {
+  const s = initState(theme, site);
+  updateState(theme, (st) => { st.site.url = 'http://v2.local'; });
+  const bakPath = statePath(theme) + '.bak';
+  const bakBefore = JSON.parse(fs.readFileSync(bakPath, 'utf8'));
+  assert.equal(bakBefore.site.url, 'http://acme.local');
+  fs.writeFileSync(statePath(theme), '{"corrupt": "json'); // corrupt the build.json
+  const validState = { schemaVersion: 1, site: { ...site, qa: DEFAULT_QA }, library: {}, pages: [] };
+  saveState(theme, validState);
+  const bakAfter = JSON.parse(fs.readFileSync(bakPath, 'utf8'));
+  assert.equal(bakAfter.site.url, 'http://acme.local', 'backup should not change when current file is corrupt');
+});
+
+test('updateState times out when lock is held beyond timeout and rejects with ELOCKED', () => {
+  initState(theme, site);
+  const lockPath = path.join(path.dirname(statePath(theme)), 'build.json.lock');
+  fs.writeFileSync(lockPath, '');
+  assert.throws(
+    () => updateState(theme, (s) => {}, { timeoutMs: 100 }),
+    (e) => e instanceof StateError && e.code === 'ELOCKED'
+  );
+});
+
+test('updateState succeeds when lock is stale (older than 30s)', () => {
+  initState(theme, site);
+  const lockPath = path.join(path.dirname(statePath(theme)), 'build.json.lock');
+  fs.writeFileSync(lockPath, '');
+  const staleTime = Date.now() - 60000; // 60 seconds in the past
+  fs.utimesSync(lockPath, staleTime / 1000, staleTime / 1000);
+  updateState(theme, (s) => { s.site.url = 'http://changed.local'; });
+  assert.equal(loadState(theme).site.url, 'http://changed.local');
+});
+
+test('initState gitignore includes build.json.lock', () => {
+  const s = initState(theme, site);
+  const gi = fs.readFileSync(path.join(theme, '.protoblocks/.gitignore'), 'utf8');
+  assert.match(gi, /build\.json\.bak/);
+  assert.match(gi, /build\.json\.lock/);
+});
+
+test('CLI init without site file exits 64 with usage message', () => {
+  const r = spawnSync(process.execPath, [CLI, 'init', theme], { encoding: 'utf8' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /Usage:/);
+});
+
+test('CLI set without path exits 64 with usage message', () => {
+  const siteFile = path.join(theme, 'site.json');
+  fs.writeFileSync(siteFile, JSON.stringify(site));
+  execFileSync(process.execPath, [CLI, 'init', theme, siteFile]);
+  const r = spawnSync(process.execPath, [CLI, 'set', theme], { encoding: 'utf8' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /Usage:/);
 });

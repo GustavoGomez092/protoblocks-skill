@@ -131,7 +131,15 @@ export function saveState(themeDir, state) {
   assertValid(state);
   const file = statePath(themeDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
+  if (fs.existsSync(file)) {
+    try {
+      const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+      validate(current); // only copy to .bak if current file is valid JSON and passes validation
+      fs.copyFileSync(file, `${file}.bak`);
+    } catch (e) {
+      // current file is corrupt, don't overwrite .bak
+    }
+  }
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
   fs.renameSync(tmp, file);
@@ -151,15 +159,52 @@ export function initState(themeDir, site) {
   if (fs.existsSync(statePath(themeDir))) throw new StateError(`State already exists at ${statePath(themeDir)}`, 'EEXISTS');
   const state = { schemaVersion: SCHEMA_VERSION, site: { ...site, qa: { ...DEFAULT_QA, ...(site.qa ?? {}) } }, library: {}, pages: [] };
   saveState(themeDir, state);
-  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.tmp-*\n');
+  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.lock\nbuild.json.tmp-*\n');
   return state;
 }
 
-export function updateState(themeDir, fn) {
-  const state = loadState(themeDir);
-  const next = fn(state) ?? state;
-  saveState(themeDir, next);
-  return next;
+function waitForLock(lockPath, endTime) {
+  while (true) {
+    try {
+      return fs.openSync(lockPath, 'wx');
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const now = Date.now();
+      if (now > endTime) throw new StateError(`Lock timeout on ${lockPath}`, 'ELOCKED');
+      const stat = fs.statSync(lockPath);
+      const lockAge = now - stat.mtimeMs;
+      if (lockAge > 30000) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (e2) {
+          if (e2.code !== 'ENOENT') throw e2;
+        }
+      }
+    }
+  }
+}
+
+export function updateState(themeDir, fn, opts = {}) {
+  const { timeoutMs = 10000 } = opts;
+  const lockPath = path.join(stateDir(themeDir), 'build.json.lock');
+  const endTime = Date.now() + timeoutMs;
+  let lockFd;
+  try {
+    lockFd = waitForLock(lockPath, endTime);
+    const state = loadState(themeDir);
+    const next = fn(state) ?? state;
+    saveState(themeDir, next);
+    return next;
+  } finally {
+    if (lockFd !== undefined) {
+      fs.closeSync(lockFd);
+      try {
+        fs.unlinkSync(lockPath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+    }
+  }
 }
 
 const segs = (dotted) => (dotted === '' ? [] : dotted.split('.'));
@@ -197,16 +242,34 @@ export function appendPath(o, dotted, value) {
 
 function main(argv) {
   const [cmd, themeDir, p, json] = argv;
-  const out = (v) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
+  const out = (v) => process.stdout.write(`${JSON.stringify(v === undefined ? null : v, null, 2)}\n`);
   if (!cmd || !themeDir) {
     process.stderr.write('Usage: node state.mjs <init|get|set|append|validate|restore> <themeDir> [path] [json]\n');
     process.exit(64);
   }
   switch (cmd) {
-    case 'init': return out(initState(themeDir, JSON.parse(fs.readFileSync(p, 'utf8'))));
+    case 'init': {
+      if (!p) {
+        process.stderr.write('Usage: node state.mjs <init|get|set|append|validate|restore> <themeDir> [path] [json]\n');
+        process.exit(64);
+      }
+      return out(initState(themeDir, JSON.parse(fs.readFileSync(p, 'utf8'))));
+    }
     case 'get': return out(getPath(loadState(themeDir), p ?? ''));
-    case 'set': return out(getPath(updateState(themeDir, (s) => { setPath(s, p, JSON.parse(json)); }), p));
-    case 'append': return out(getPath(updateState(themeDir, (s) => { appendPath(s, p, JSON.parse(json)); }), p));
+    case 'set': {
+      if (!p || !json) {
+        process.stderr.write('Usage: node state.mjs <init|get|set|append|validate|restore> <themeDir> [path] [json]\n');
+        process.exit(64);
+      }
+      return out(getPath(updateState(themeDir, (s) => { setPath(s, p, JSON.parse(json)); }), p));
+    }
+    case 'append': {
+      if (!p || !json) {
+        process.stderr.write('Usage: node state.mjs <init|get|set|append|validate|restore> <themeDir> [path] [json]\n');
+        process.exit(64);
+      }
+      return out(getPath(updateState(themeDir, (s) => { appendPath(s, p, JSON.parse(json)); }), p));
+    }
     case 'validate': loadState(themeDir); return out({ valid: true });
     case 'restore': return out(restoreState(themeDir));
     default:
