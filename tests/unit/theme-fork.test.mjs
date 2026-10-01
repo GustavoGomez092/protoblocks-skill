@@ -241,45 +241,42 @@ test('slugify format: rejects invalid formats', () => {
   }
 });
 
+const FORK_MOD = '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
+
+async function withTmpRoot(fn) {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-themezip-test-'));
+  try { await fn(tmpRoot); } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
+}
+
 test('fetchThemeZip cleanup: no temp dir created if fetchRelease throws', async () => {
-  const tmpBefore = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
-  
-  const failingFetchRelease = () => {
-    const err = new Error('release fetch failed');
-    err.code = 'ERELEASE';
-    throw err;
-  };
-  
-  try {
-    await (await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs')).fetchThemeZip({ fetchRelease: failingFetchRelease });
-    assert.fail('should have thrown ERELEASE');
-  } catch (e) {
-    assert.equal(e.code, 'ERELEASE', 'should throw ERELEASE from fetchRelease');
-  }
-  
-  const tmpAfter = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
-  assert.equal(tmpAfter, tmpBefore, 'no pb-themezip dir created when fetchRelease throws');
+  await withTmpRoot(async (tmpRoot) => {
+    const { fetchThemeZip } = await import(FORK_MOD);
+    const fetchRelease = () => { const err = new Error('release fetch failed'); err.code = 'ERELEASE'; throw err; };
+    await assert.rejects(() => fetchThemeZip({ fetchRelease, tmpRoot }), (e) => e.code === 'ERELEASE');
+    assert.deepEqual(fs.readdirSync(tmpRoot), []);
+  });
 });
 
 test('fetchThemeZip cleanup: removes dir if downloadImpl throws', async () => {
-  const tmpBefore = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
-  
-  const fakeRel = { version: '1.0.0', zipUrl: 'https://example.com/test.zip' };
-  const fetchReleaseOk = () => Promise.resolve(fakeRel);
-  
-  const failingDownload = () => {
-    const err = new Error('download failed');
-    err.code = 'EDOWNLOAD';
-    throw err;
-  };
-  
-  try {
-    await (await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs')).fetchThemeZip({ fetchRelease: fetchReleaseOk, downloadImpl: failingDownload });
-    assert.fail('should have thrown EDOWNLOAD');
-  } catch (e) {
-    assert.equal(e.code, 'EDOWNLOAD', 'should throw EDOWNLOAD from downloadImpl');
-  }
-  
-  const tmpAfter = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
-  assert.equal(tmpAfter, tmpBefore, 'pb-themezip dir cleaned up after downloadImpl throws');
+  await withTmpRoot(async (tmpRoot) => {
+    const { fetchThemeZip } = await import(FORK_MOD);
+    const fetchRelease = () => Promise.resolve({ version: '1.0.0', zipUrl: 'https://example.com/test.zip' });
+    const downloadImpl = () => { const err = new Error('download failed'); err.code = 'EDOWNLOAD'; throw err; };
+    await assert.rejects(() => fetchThemeZip({ fetchRelease, downloadImpl, tmpRoot }), (e) => e.code === 'EDOWNLOAD');
+    assert.deepEqual(fs.readdirSync(tmpRoot), []);
+  });
+});
+
+test('fetchThemeZip success: zipFile lives in tmpRoot and cleanup() empties it', async () => {
+  await withTmpRoot(async (tmpRoot) => {
+    const { fetchThemeZip } = await import(FORK_MOD);
+    const fetchRelease = () => Promise.resolve({ version: '1.0.0', zipUrl: 'https://example.com/test.zip' });
+    const downloadImpl = async (_url, dest) => { fs.writeFileSync(dest, 'zip'); return dest; };
+    const { zipFile, forkedFrom, cleanup } = await fetchThemeZip({ fetchRelease, downloadImpl, tmpRoot });
+    assert.ok(fs.existsSync(zipFile));
+    assert.ok(path.resolve(zipFile).startsWith(path.resolve(tmpRoot) + path.sep));
+    assert.equal(forkedFrom, 'proto-blocks-theme@1.0.0');
+    cleanup();
+    assert.deepEqual(fs.readdirSync(tmpRoot), []);
+  });
 });

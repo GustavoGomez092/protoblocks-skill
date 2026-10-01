@@ -145,9 +145,9 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
   return { themeDir, slug, reused: false, forkedFrom };
 }
 
-export async function fetchThemeZip({ fetchRelease = fetchLatestRelease, downloadImpl = download } = {}) {
+export async function fetchThemeZip({ fetchRelease = fetchLatestRelease, downloadImpl = download, tmpRoot = os.tmpdir() } = {}) {
   const rel = await fetchRelease(THEME_REPO);
-  const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-themezip-'));
+  const zipDir = fs.mkdtempSync(path.join(tmpRoot, 'pb-themezip-'));
   try {
     const zipFile = path.join(zipDir, `proto-theme-${rel.version}.zip`);
     await downloadImpl(rel.zipUrl, zipFile);
