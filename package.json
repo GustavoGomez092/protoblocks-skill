@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/unit/*.test.mjs"
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs"
   },
   "engines": { "node": ">=18" }
 }
