@@ -82,7 +82,7 @@ Rules that keep it editable and safe:
 ## 4. Style it
 
 - **Vanilla:** add `style.css` (auto-enqueued). Namespace classes (`.feature__heading`).
-- **Tailwind:** set `"useTailwind": true` and write utilities in the template; use themed `primary-*`/`secondary-*`/`accent-*` and `tailwind-theme.css` tokens. See `styling.md`.
+- **Tailwind:** set `"useTailwind": true` and write utilities in the template; use tokens from the theme's `tailwind-theme.css` (`@theme`). Classes like `primary-*` work only if the theme defines them. See `styling.md`.
 
 ## 5. Add a preview image (optional)
 

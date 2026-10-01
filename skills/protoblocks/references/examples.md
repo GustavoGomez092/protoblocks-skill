@@ -11,7 +11,7 @@ The plugin ships **9 example blocks** (6 vanilla CSS + 3 Tailwind), all marked `
 | **card** | image, title(h3), content(wysiwyg), link | layout(select), imagePosition(select, conditional), showLink(toggle) | image+link+wysiwyg, conditional control visibility, block supports, conditional class builder |
 | **testimonial** | quote(wysiwyg), authorName(cite), authorTitle(span), authorImage(image, thumbnail) | style(select), showAvatar(toggle), rating(range 0–5), showRating(toggle) | range control, multiple toggles, loop-rendered stars, style variants via BEM class |
 | **accordion** | items(repeater: title, content) | allowMultiple(toggle), firstOpen(toggle), iconPosition(select) | repeater, Interactivity API (`data-wp-*` + store), drag/duplicate/min-max, preview seeding |
-| **hero** (caution: in 2.10.1 its template echoes `$content`, so nested blocks render empty on the frontend; change it to `$innerBlocksContent ?? ''`. Fixed in the next release.) | title(h1), subtitle(p), innerContent(inner-blocks) | backgroundImage(image), backgroundColor(color), overlayOpacity(range), textColor(color-palette), contentAlignment(radio), minHeight(number), verticalAlignment(select) | inner-blocks, color + color-palette, radio, number, image-in-inspector, overlay via `proto_blocks_hex_to_rgba()` |
+| **hero** (see note below) | title(h1), subtitle(p), innerContent(inner-blocks) | backgroundImage(image), backgroundColor(color), overlayOpacity(range), textColor(color-palette), contentAlignment(radio), minHeight(number), verticalAlignment(select) | inner-blocks, color + color-palette, radio, number, image-in-inspector, overlay via `proto_blocks_hex_to_rgba()` |
 | **stats** | stats(repeater: number, prefix, suffix, label) | columns(number), style(select), numberSize(range), showDividers(toggle) | repeater with optional fields, CSS custom properties from controls, responsive grid |
 | **cta** | title(h2), description(p), link | backgroundColor(color-palette), textColor(color-palette), buttonStyle(radio), layout(select), showIcon(checkbox), fullWidth(checkbox, conditional) | textarea/checkbox/radio, conditional visibility, inline SVG icon, dynamic default text |
 
@@ -20,8 +20,10 @@ The plugin ships **9 example blocks** (6 vanilla CSS + 3 Tailwind), all marked `
 | Block | Fields | Controls | Teaches |
 |-------|--------|----------|---------|
 | **tl-header** | logo(image), siteTitle, navItems(repeater: label, url), ctaButton(link) | showCta(toggle), fixedPosition(toggle) | Tailwind layout, responsive utilities, repeater nav, inline vanilla-JS mobile toggle |
-| **tl-hero** | badgeText, badgeLink, heading(h1), description, primaryButton, secondaryLink | showBadge(toggle), showSecondaryLink(toggle) | Tailwind dark theme, gradient blobs (`clip-path`), themed `primary-*` colors, focus-visible |
+| **tl-hero** | badgeText, badgeLink, heading(h1), description, primaryButton, secondaryLink | showBadge(toggle), showSecondaryLink(toggle) | Tailwind dark theme, gradient blobs (`clip-path`), `primary-*` colors (need theme tokens, see note below), focus-visible |
 | **tl-footer** | logo, description, column1Title, column1Links(repeater), column2Title, phone, email, copyrightText, copyrightLink | showLogo, showColumn1, showColumn2 (toggles) | multiple repeaters, toggle-gated sections, responsive grid, semantic `<footer>` |
+
+> **Notes:** (1) `hero`: in 2.10.1 its template echoes `$content`, so nested blocks render empty on the frontend; change it to `$innerBlocksContent ?? ''` (fixed in the next release). (2) The `primary-*` / `bg-primary-500` classes in the `tl-*` examples need `--color-primary-*` tokens in the theme's `tailwind-theme.css`; see `styling.md`.
 
 ## Capability coverage matrix
 
@@ -213,7 +215,7 @@ $wrapper = get_block_wrapper_attributes([
 ```
 **Patterns:** background image + tinted overlay via `proto_blocks_hex_to_rgba(hex, 0..1)`; inner-blocks slot for free composition; numeric/range/radio/color controls feeding inline styles and classes.
 
-### Tailwind Hero (tl-hero) — Tailwind dark theme + themed colors
+### Tailwind Hero (tl-hero) — Tailwind dark theme + primary colors
 
 ```php
 <?php
@@ -238,7 +240,7 @@ $wrapper = get_block_wrapper_attributes(['class' => 'relative isolate bg-gray-90
   </div>
 </section>
 ```
-**Patterns:** `useTailwind: true`, no `style.css`; themed `bg-primary-500`/`hover:bg-primary-400`; responsive text scale; `no-underline` to defeat theme link styles; toggle-gated badge/secondary link.
+**Patterns:** `useTailwind: true`, no `style.css`; `bg-primary-500`/`hover:bg-primary-400` (require `--color-primary-*` tokens in `tailwind-theme.css`); responsive text scale; `no-underline` to defeat theme link styles; toggle-gated badge/secondary link.
 
 ---
 

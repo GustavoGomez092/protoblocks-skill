@@ -102,4 +102,4 @@ The intro overlay plays once per browser session (`sessionStorage` key `protoInt
 
 ## Upcoming (pending release)
 
-A pending feature PR (`feat/yoast-jsonld`) adds a "JSON-LD" panel to Yoast's editor UI, stores the data in post meta `_proto_jsonld`, and merges it into Yoast's schema graph. Not in v1.1.3.
+Unverified until released: a pending feature PR (`feat/yoast-jsonld`) adds a "JSON-LD" panel to Yoast's editor UI, stores the data in post meta `_proto_jsonld`, and merges it into Yoast's schema graph. Not in v1.1.3.
