@@ -6,7 +6,7 @@
 
 **Architecture:** `scripts/lib/status.mjs` derives the next action purely from state (no hidden memory), which is what makes `/protoblocks:resume` and post-compaction recovery reliable. `scripts/qa/page-qa.mjs` adds the full-page diff + axe-core pass. The orchestrator skill is a thin router over phase skills and these two tools. The e2e test renders a fixture "design" HTML into PNG frames, then drives the real scripts (setup → tokens → intake → blocks → page → check-section → motion → SEO) against the disposable WordPress, proving the pieces fit.
 
-**Tech Stack:** Node ≥ 18, Playwright, `@axe-core/playwright@^4.13.0` (added to the QA package), WP-CLI, the Stage 2 test site with `serveSite()` (Stage 6).
+**Tech Stack:** Node ≥ 18, Playwright, `@axe-core/playwright@^4.13.0` (added to the QA package), WP-CLI, the developer's Local test site "Proto Blocks" (`SITE_URL`, `useItestTheme`, `restoreTheme` from `tests/integration/helpers.mjs`).
 
 **Spec:** `docs/superpowers/specs/2026-10-01-site-builder-design.md` (§2.2 pipeline, §2.3 state/resume, §7 page completion, §2.1 commands/agents, §11 testing, §12 stage 7)
 
@@ -18,7 +18,7 @@
 - Page QA: per provided frame, full-page screenshot (reduced motion) vs the full design frame; pass when `mismatch ≤ site.qa.pageMismatchMax` (default 0.12) and `heightDelta ≤ site.qa.heightDeltaMax` (default 0.03); axe-core with tags `wcag2a, wcag2aa, wcag21a, wcag21aa`; `serious`/`critical` violations fail the page; `minor`/`moderate` are listed. On pass, page `status → 'seo'`.
 - Commands live in `commands/` and are invoked as `/protoblocks:<name>` (plugin name `protoblocks-skill`, commands namespaced by plugin — use the command file names `setup-site`, `build-page`, `seo`, `resume`).
 - Version 2.0.0 in both `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (same commit).
-- The e2e test never touches the developer's Local sites; it uses `tests/.site` only, in native mode (`PB_LOCAL_APP_SUPPORT=/nonexistent`, `PATH=tests/.site/bin:$PATH`).
+- The e2e test runs on the Local site "Proto Blocks" (authorized for all testing) in a throwaway theme fork `pb-e2e`. It must re-activate the developer's original theme in `finally`, delete the pages, menus and attachments it created, and never write into the developer's active theme checkout.
 
 ## Review Focus
 
@@ -449,16 +449,16 @@ git commit -m "feat(commands): setup-site, build-page, seo and resume slash comm
 
 - [ ] **Step 2: Write `tests/e2e/run.test.mjs`** — sequence (each step asserts its result):
 1. `serveFixtures`-style local server for `design.html` → render with `shoot({ fullPage: true, width: 1440 })` → `design-desktop.png`.
-2. Native preflight against `tests/.site/public` (`PB_LOCAL_APP_SUPPORT=/nonexistent`, `PATH` with `tests/.site/bin`), `setupSite({ name: 'PB E2E', slug: 'pb-e2e' })` (reuse ok), `installMotion(theme)`.
+2. Record `ORIGINAL_THEME`, run `setupSite({ site: TEST_SITE, name: 'PB E2E', slug: 'pb-e2e' })` (the fork is reused if it exists), then `installMotion(theme)`. Everything below runs in `try`; `finally` re-activates `ORIGINAL_THEME` and deletes the created page, attachments and `pb-nav-*` menus.
 3. Copy `tests/e2e/blocks/*` into `<theme>/proto-blocks/`; `runGates` for each → `ok`.
 4. `addFrame(theme, 'e2e-home', 'desktop', design-desktop.png)`; `findCuts` on the frame → use the `background` bands as section ranges (assert 5 bands) → `cropSections`.
 5. Write section decisions + attrs into state (blocks `site-header`, `hero-split`, `feature-grid`, `cta-band`, `site-footer`), set `plan.approvedAt`, page status `building`; `buildPage`.
-6. Start `serveSite()`; for each section: `prepareCheck` → `checkSection(input)` → assert `numericPass` → write a verdict JSON `{ pass: true, numericPass: true, breakpoints: <from result>, discrepancies: [] }` → `recordVerdict` → status `animating`.
+6. Using the Local site URL (`SITE_URL`), for each section: `prepareCheck` → `checkSection(input)` → assert `numericPass` → write a verdict JSON `{ pass: true, numericPass: true, breakpoints: <from result>, discrepancies: [] }` → `recordVerdict` → status `animating`.
 7. Hero: `motionCheck` → pass → `recordMotion`; other sections: `recordMotion(..., { accepted: true })` with a passing check file for sections without motion (write `{ "pass": true }`).
 8. `pageQa` for the page → `breakpoints[0].pass` true → `recordPageQa` → status `seo`.
 9. `ogImage` from `#pb-s2` → `applySeo` with a provided SEO object (keyword appears in the hero h1 and first paragraph of `design.html`) → `seoAudit` → no `fail` → `recordAudit` → page `done`; `nextAction` → `ask-more-pages`.
 
-- [ ] **Step 3: Run** `npm run test:site && npm run test:e2e` → Expected: PASS. If numeric QA fails for a section, fix the block/CSS (the design is under our control) — never loosen thresholds. Record per-section mismatch numbers in the report.
+- [ ] **Step 3: Run** `npm run test:e2e` → Expected: PASS. If numeric QA fails for a section, fix the block/CSS (the design is under our control) — never loosen thresholds. Record per-section mismatch numbers in the report.
 
 - [ ] **Step 4: Commit**
 

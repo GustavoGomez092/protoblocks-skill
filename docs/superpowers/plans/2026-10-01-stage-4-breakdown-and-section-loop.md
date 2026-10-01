@@ -12,7 +12,7 @@
 
 **Builds on:**
 - Stage 1: `state.mjs` (`loadState`, `updateState(themeDir, fn, {timeoutMs}?)`, `getPath`, `setPath`, `appendPath`, `statePath`, `DEFAULT_QA`), `exec.mjs`.
-- Stage 2: `wp.mjs` (`createWp`, `loadRuntime`, `WP_SCRIPTS_DIR`, `WpError`), `tests/integration/helpers.mjs` (`itest`, `testWp`, `PUBLIC`), `navigation.mjs` (`refreshMenus`), `blocks.mjs` (`serializeAttrs`, `blockComment`), test theme fork `pb-itest` active on `tests/.site`.
+- Stage 2: `wp.mjs` (`createWp`, `loadRuntime`, `WP_SCRIPTS_DIR`, `WpError`), `tests/integration/helpers.mjs` (`itest`, `testWp`, `PUBLIC`, `SITE_URL`, `useItestTheme(wp)` → activates the throwaway `pb-itest` theme and returns its dir, `restoreTheme(wp)`). The test site is the developer's Local site "Proto Blocks": tests that add blocks or files to a theme MUST do so in `pb-itest` (via `useItestTheme`) and call `restoreTheme(wp)` in `finally`. Never write into the developer's active theme checkout. Delete created pages and attachments at the end of each test, `navigation.mjs` (`refreshMenus`), `blocks.mjs` (`serializeAttrs`, `blockComment`), test theme fork `pb-itest` active on `tests/.site`.
 - Stage 3: `scripts/qa/` (`shoot`, `diffImages`, `cropRanges`, `findCuts`, `checkSection`), `agents/visual-qa.md` (writes `<iterDir>/verdict.json`), `tests/qa/helpers.mjs`.
 
 ## Global Constraints
@@ -419,21 +419,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { itest, testWp, PUBLIC } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
 import { runGates } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'blocks');
 
-function install(wp, name) {
-  const theme = wp.check(['eval', 'echo get_stylesheet_directory();']).trim();
+// Installs fixture blocks into the throwaway pb-itest theme (never the developer's theme).
+async function install(wp, name) {
+  const theme = await useItestTheme(wp);
   fs.cpSync(path.join(FIX, name), path.join(theme, 'proto-blocks', name), { recursive: true });
   return theme;
 }
 
-itest('gates pass a good block and stop at render for a warning-emitting block', () => {
+itest('gates pass a good block and stop at render for a warning-emitting block', async () => {
   const wp = testWp();
-  install(wp, 'pb-gate-ok');
-  install(wp, 'pb-gate-bad');
+  try {
+  await install(wp, 'pb-gate-ok');
+  await install(wp, 'pb-gate-bad');
   const ok = runGates(wp, { block: 'pb-gate-ok', attrs: { heading: 'Hello' } });
   assert.equal(ok.ok, true, JSON.stringify(ok, null, 2));
   assert.deepEqual(ok.steps.map((s) => s.id), ['anchor-support', 'validate', 'cache', 'tailwind', 'render']);
@@ -443,11 +445,13 @@ itest('gates pass a good block and stop at render for a warning-emitting block',
   const render = bad.steps.find((s) => s.id === 'render');
   assert.equal(render.ok, false);
   assert.match(JSON.stringify(render.detail), /Undefined array key/);
+  } finally { restoreTheme(wp); }
 });
 
-itest('gates fail fast when the block lacks anchor support', () => {
+itest('gates fail fast when the block lacks anchor support', async () => {
   const wp = testWp();
-  const theme = install(wp, 'pb-gate-ok');
+  try {
+  const theme = await install(wp, 'pb-gate-ok');
   const dir = path.join(theme, 'proto-blocks', 'pb-gate-noanchor');
   fs.cpSync(path.join(FIX, 'pb-gate-ok'), dir, { recursive: true });
   const json = JSON.parse(fs.readFileSync(path.join(dir, 'block.json'), 'utf8'));
@@ -458,6 +462,7 @@ itest('gates fail fast when the block lacks anchor support', () => {
   assert.equal(r.ok, false);
   assert.deepEqual(r.steps.map((s) => s.id), ['anchor-support']);
   fs.rmSync(dir, { recursive: true, force: true });
+  } finally { restoreTheme(wp); }
 });
 ```
 
@@ -655,6 +660,7 @@ itest('importMedia imports once, reuses on re-import, and requires alt', () => {
   assert.equal(wp.check(['post', 'meta', 'get', String(a.id), '_wp_attachment_image_alt']).trim(), 'Acme logo (updated)');
   assert.deepEqual(Object.keys(imageAttr(b)), ['id', 'url', 'alt', 'caption', 'size']);
   assert.throws(() => importMedia(wp, file, {}), (e) => e.code === 'EALT');
+  wp.check(['post', 'delete', String(a.id), '--force']);
 });
 ```
 
@@ -851,24 +857,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { itest, testWp } from './helpers.mjs';
+import { itest, testWp, SITE_URL, useItestTheme, restoreTheme } from './helpers.mjs';
 import { buildPage } from '../../skills/protoblocks-site-builder/scripts/lib/page.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'blocks');
 
-itest('buildPage creates, rebuilds idempotently, guards edits, and refuses foreign slugs', () => {
+itest('buildPage creates, rebuilds idempotently, guards edits, and refuses foreign slugs', async () => {
   const wp = testWp();
-  const themeDirWp = wp.check(['eval', 'echo get_stylesheet_directory();']).trim();
+  const created = [];
+  const themeDirWp = await useItestTheme(wp);
+  try {
   fs.cpSync(path.join(FIX, 'pb-gate-ok'), path.join(themeDirWp, 'proto-blocks', 'pb-gate-ok'), { recursive: true });
   const slug = `pb-page-${Date.now()}`;
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-pagestate-'));
-  initState(theme, { url: 'http://127.0.0.1:8881', path: '/x' });
+  initState(theme, { url: SITE_URL, path: '/x' });
   updateState(theme, (s) => { s.pages.push({ slug, title: 'Itest', status: 'planning', postId: null, contentHash: null, sections: [
     { n: 1, anchor: 'pb-s1', block: 'pb-gate-ok', attrs: { heading: 'One' }, status: 'building' },
   ] }); });
 
   const a = buildPage(wp, theme, slug);
+  created.push(a.postId);
   assert.equal(a.created, true);
   const html = wp.check(['eval', `echo apply_filters('the_content', get_post_field('post_content', ${a.postId}));`]);
   assert.match(html, /id="pb-s1"/);
@@ -883,9 +892,13 @@ itest('buildPage creates, rebuilds idempotently, guards edits, and refuses forei
   assert.equal(buildPage(wp, theme, slug, { force: true }).postId, a.postId);
 
   const foreign = `pb-foreign-${Date.now()}`;
-  wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_name=${foreign}`, '--post_title=Client page']);
+  created.push(Number(wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_name=${foreign}`, '--post_title=Client page', '--porcelain']).trim()));
   updateState(theme, (s) => { s.pages.push({ slug: foreign, title: 'F', status: 'planning', postId: null, contentHash: null, sections: [] }); });
   assert.throws(() => buildPage(wp, theme, foreign), (e) => e.code === 'ESLUGTAKEN');
+  } finally {
+    if (created.length) wp.check(['post', 'delete', ...created.map(String), '--force']);
+    restoreTheme(wp);
+  }
 });
 ```
 
@@ -1021,20 +1034,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { itest, testWp } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
 import { listLibrary } from '../../skills/protoblocks-site-builder/scripts/lib/library.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'blocks');
 
-itest('listLibrary lists theme blocks with their schema summary', () => {
+itest('listLibrary lists theme blocks with their schema summary', async () => {
   const wp = testWp();
-  const theme = wp.check(['eval', 'echo get_stylesheet_directory();']).trim();
+  const theme = await useItestTheme(wp);
+  try {
   fs.cpSync(path.join(FIX, 'pb-gate-ok'), path.join(theme, 'proto-blocks', 'pb-gate-ok'), { recursive: true });
   wp.check(['proto-blocks', 'cache', 'clear']);
   const lib = listLibrary(wp, theme);
   const entry = lib.find((e) => e.slug === 'pb-gate-ok');
   assert.ok(entry, JSON.stringify(lib));
   assert.deepEqual(entry.fields, { heading: 'text' });
+  } finally { restoreTheme(wp); }
 });
 ```
 
