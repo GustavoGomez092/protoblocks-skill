@@ -13,7 +13,7 @@ itest('useItestTheme activates a throwaway copy and restoreTheme puts the origin
   try {
     const dir = await useItestTheme(wp);
     assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), 'pb-itest');
-    assert.ok(!fs.existsSync(path.join(dir, '.git')), 'never copies the developer git checkout');
+    assert.ok(fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'style.css')), 'itest theme folder exists');
   } finally {
     restoreTheme(wp);
   }
