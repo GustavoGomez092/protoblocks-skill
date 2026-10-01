@@ -21,10 +21,13 @@ In `local-wrapper` mode preflight writes `<wp-content>/.protoblocks/wp`, a shell
 
 ```sh
 #!/bin/sh
+export PHPRC='<appSupport>/run/<siteId>/conf/php'
+export WP_CLI_CONFIG_PATH='<extraResources>/bin/wp-cli/config.yaml'
+export MAGICK_CODER_MODULE_PATH='<php-dir>/bin/<platform>/ImageMagick/modules-Q16/coders'
 exec '<php>' -d 'mysqli.default_socket=<socket>' -d 'pdo_mysql.default_socket=<socket>' -d memory_limit=512M '<wp-cli.phar>' '--path=<app/public>' "$@"
 ```
 
-Use it exactly like `wp`: `"$WP" option get siteurl`, with `WP` set to `report.wp`. To regenerate it alone: `node "$PB/lib/local-site.mjs" wrapper --site "<name>" --out <file>`. To inspect resolution without writing: `node "$PB/lib/local-site.mjs" detect [--site "<name>"] [--cwd <dir>]` (prints JSON, exits 2 on failure).
+The three `export` lines mirror Local's own site shell (`ssh-entry/*.sh`) and are emitted only when the target exists. Without `PHPRC`, imagick/opcache are not loaded, so media subsizes would differ from php-fpm. Use it exactly like `wp`: `"$WP" option get siteurl`, with `WP` set to `report.wp`. To regenerate it alone: `node "$PB/lib/local-site.mjs" wrapper --site "<name>" --out <file>`. To inspect resolution without writing: `node "$PB/lib/local-site.mjs" detect [--site "<name>"] [--cwd <dir>]` (prints JSON, exits 2 on failure).
 
 ## Native mode
 

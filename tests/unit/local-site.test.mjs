@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   readSites, findSiteForDir, findSiteByQuery, phpBinary, resolveLocalSite, wrapperScript, writeWrapper, platformKey,
 } from '../../skills/protoblocks-site-builder/scripts/lib/local-site.mjs';
 
+const LCLI = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/lib/local-site.mjs', import.meta.url));
 let home, appSupport, resources, env;
 
 function touch(p) { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, ''); }
@@ -102,6 +105,44 @@ test('wrapperScript single-quotes every path (spaces safe)', () => {
   assert.ok(s.includes(`'/e f/wp-cli.phar'`));
   assert.ok(s.includes(`'--path=/g h/it'\\''s/public'`));
   assert.ok(s.trimEnd().endsWith('"$@"'));
+});
+
+test('wrapperScript exports Local shell environment with quoting', () => {
+  const s = wrapperScript({
+    phpBin: '/a/php', socket: '/c/s', phar: '/e/p', publicPath: '/g',
+    phprc: "/x y/conf/php", wpCliConfig: '/r/config.yaml', magickCoderPath: "/m's/coders",
+  });
+  assert.ok(s.includes(`export PHPRC='/x y/conf/php'`));
+  assert.ok(s.includes(`export WP_CLI_CONFIG_PATH='/r/config.yaml'`));
+  assert.ok(s.includes(`export MAGICK_CODER_MODULE_PATH='/m'\\''s/coders'`));
+  assert.ok(s.indexOf('export PHPRC') < s.indexOf('exec '));
+  assert.ok(s.includes(`-d 'mysqli.default_socket=/c/s'`));
+});
+
+test('resolveLocalSite returns PHPRC and WP-CLI config when present', () => {
+  fs.mkdirSync(path.join(appSupport, 'run/aaa111/conf/php'), { recursive: true });
+  touch(path.join(resources, 'bin/wp-cli/config.yaml'));
+  const r = resolveLocalSite({ cwd: path.join(home, 'Local Sites/acme'), env });
+  assert.equal(r.site.phprc, path.join(appSupport, 'run/aaa111/conf/php'));
+  assert.equal(r.site.wpCliConfig, path.join(resources, 'bin/wp-cli/config.yaml'));
+});
+
+test('resolution failures after a match carry matched:true and the site', () => {
+  fs.rmSync(path.join(appSupport, 'lightning-services'), { recursive: true });
+  const r = resolveLocalSite({ cwd: path.join(home, 'Local Sites/acme'), env });
+  assert.equal(r.ok, false);
+  assert.equal(r.matched, true);
+  assert.equal(r.site.id, 'aaa111');
+  assert.match(r.error, /PHP 8\.4\.10 binary not found/);
+  const h = resolveLocalSite({ cwd: path.join(home, 'Local Sites/halted'), env });
+  assert.equal(h.matched, true);
+  assert.equal(h.halted, true);
+});
+
+test('local-site CLI exits 64 with usage on an unknown subcommand', () => {
+  const r = spawnSync(process.execPath, [LCLI, 'bogus'], { encoding: 'utf8', env: { ...process.env, ...env } });
+  assert.equal(r.status, 64);
+  assert.match(r.stderr, /Usage/);
 });
 
 test('writeWrapper writes an executable file', () => {

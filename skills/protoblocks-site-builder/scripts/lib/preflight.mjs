@@ -55,16 +55,24 @@ export function runPreflight({
     report.runtimeDir = path.join(report.publicPath, 'wp-content', '.protoblocks');
     wpCmd = writeWrapper(path.join(report.runtimeDir, 'wp'), local.site);
     add('site', 'pass', `Local site "${local.site.name}" (${local.site.domain})`);
-  } else if (site && !local.notLocal) {
-    // Explicit --site was passed but lookup failed; never fall back to native.
+  } else if (site && local.notLocal) {
+    // Explicit --site can only be honoured through Local; never fall back to native.
+    add('site', 'fail', '`--site` needs Local by Flywheel; use `--path` for non-Local installs', 'Install/start Local, or pass --path <wp root> for a non-Local install.');
+  } else if (site && !local.ok) {
+    // Explicit --site was passed but lookup/resolution failed; never fall back to native.
     const fixText = local.halted
       ? 'Start the site in Local, then re-run preflight.'
-      : 'Check the name with `node local-site.mjs detect`, or start the site in Local.';
+      : local.matched
+        ? 'Fix the PHP version/installation for this site in Local (or start the site), then re-run preflight.'
+        : 'Check the name with `node local-site.mjs detect`, or start the site in Local.';
     add('site', 'fail', local.error, fixText);
-  } else if (!local.notLocal && (site || local.sites?.length) && !findWpRoot(cwd)) {
+  } else if (local.matched) {
+    // The directory belongs to a Local site that cannot be resolved; never run bare `wp` inside it.
+    add('site', 'fail', local.error, local.halted
+      ? 'Start the site in Local, then re-run preflight.'
+      : 'Fix the site in Local (PHP version/installation), or start it, then re-run preflight.');
+  } else if (!local.notLocal && local.sites?.length && !findWpRoot(cwd)) {
     add('site', 'fail', local.error, 'Start the site in Local or pass --site "<name>".');
-  } else if (!local.notLocal && /Start the site/.test(local.error ?? '')) {
-    add('site', 'fail', local.error, 'Start the site in Local, then re-run preflight.');
   } else {
     const rootDir = wpPath ? path.resolve(wpPath) : findWpRoot(cwd);
     if (!rootDir) {
@@ -86,7 +94,7 @@ export function runPreflight({
   if (wpCmd) {
     const r = wp('option', 'get', 'siteurl');
     if (r.code === 0 && r.stdout.trim()) {
-      report.wp = wpCmd === 'wp' ? 'wp' : wpCmd;
+      report.wp = wpCmd;
       report.url = r.stdout.trim();
       add('wp-cli', 'pass', `siteurl ${report.url}`);
     } else {
@@ -99,14 +107,15 @@ export function runPreflight({
 
   // 4. WordPress-dependent checks
   if (report.url) {
-    const status = wp('plugin', 'get', 'proto-blocks', '--field=status');
-    const version = wp('plugin', 'get', 'proto-blocks', '--field=version');
-    if (status.code !== 0) {
+    const pb = wp('plugin', 'get', 'proto-blocks', '--fields=status,version', '--format=json');
+    let pbInfo = null;
+    if (pb.code === 0) { try { pbInfo = JSON.parse(pb.stdout); } catch { pbInfo = null; } }
+    if (pb.code !== 0) {
       add('proto-blocks', 'warn', 'Proto-Blocks is not installed', 'Run /protoblocks:setup-site (installs the latest release).');
-    } else if (status.stdout.trim() !== 'active') {
-      add('proto-blocks', 'warn', `Proto-Blocks is ${status.stdout.trim()}`, 'Run /protoblocks:setup-site (activates it).');
+    } else if (!pbInfo || pbInfo.status !== 'active') {
+      add('proto-blocks', 'warn', `Proto-Blocks is ${pbInfo?.status ?? 'in an unknown state'}`, 'Run /protoblocks:setup-site (activates it).');
     } else {
-      const ver = version.stdout.trim();
+      const ver = String(pbInfo.version ?? '').trim();
       if (!ver) {
         add('proto-blocks', 'warn', 'Proto-Blocks active (version unknown)', 'Run /protoblocks:setup-site to ensure the latest version.');
       } else if (compareVersions(ver, MIN_PROTO_BLOCKS) < 0) {
@@ -136,7 +145,7 @@ export function runPreflight({
 
   report.ok = !checks.some((c) => c.status === 'fail');
 
-  if (report.runtimeDir && report.url) {
+  if (report.runtimeDir) {
     fs.mkdirSync(report.runtimeDir, { recursive: true });
     fs.writeFileSync(path.join(report.runtimeDir, 'preflight.json'), `${JSON.stringify({ ...report, at: new Date().toISOString() }, null, 2)}\n`);
   }
