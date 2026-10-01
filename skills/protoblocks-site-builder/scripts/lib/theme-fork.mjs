@@ -138,15 +138,21 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
 }
 
 export async function fetchThemeZip({ fetchRelease = fetchLatestRelease } = {}) {
-  const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-themezip-'));
   const rel = await fetchRelease(THEME_REPO);
-  const zipFile = path.join(zipDir, `proto-theme-${rel.version}.zip`);
-  await download(rel.zipUrl, zipFile);
-  return {
-    zipFile,
-    forkedFrom: `proto-blocks-theme@${rel.version}`,
-    cleanup: () => { if (fs.existsSync(zipDir)) fs.rmSync(zipDir, { recursive: true, force: true }); }
-  };
+  const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-themezip-'));
+  try {
+    const zipFile = path.join(zipDir, `proto-theme-${rel.version}.zip`);
+    await download(rel.zipUrl, zipFile);
+    return {
+      zipFile,
+      forkedFrom: `proto-blocks-theme@${rel.version}`,
+      cleanup: () => { if (fs.existsSync(zipDir)) fs.rmSync(zipDir, { recursive: true, force: true }); }
+    };
+  } catch (err) {
+    // Clean up zipDir if download fails
+    if (fs.existsSync(zipDir)) fs.rmSync(zipDir, { recursive: true, force: true });
+    throw err;
+  }
 }
 
 async function main(argv) {

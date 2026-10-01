@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { exec } from '../../skills/protoblocks-site-builder/scripts/lib/exec.mjs';
 import { itest, testWp, SITE_URL, PUBLIC, useItestTheme, restoreTheme, ORIGINAL_THEME } from './helpers.mjs';
 
 itest('runner talks to the Local test site', () => {
@@ -14,20 +14,16 @@ itest('useItestTheme activates a throwaway copy and restoreTheme puts the origin
   try {
     const dir = await useItestTheme(wp);
     assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), 'pb-itest');
-    // If .git exists, verify it does not contain the developer's history
+    assert.ok(fs.existsSync(path.join(dir, 'style.css')), 'pb-itest/style.css exists');
+
+    // If .git exists, verify it contains only the fork marker commit, not developer history
     const gitDir = path.join(dir, '.git');
     if (fs.existsSync(gitDir)) {
-      try {
-        const logOutput = execSync(`git -C "${dir}" log --oneline 2>/dev/null | wc -l`, { encoding: 'utf8' }).trim();
-        const commitCount = parseInt(logOutput, 10);
-        assert.ok(commitCount <= 1, 'git history should be fresh (0 or 1 commit only, never the developer history)');
-        if (commitCount === 1) {
-          const firstCommit = execSync(`git -C "${dir}" log --oneline`, { encoding: 'utf8' }).trim();
-          assert.ok(firstCommit.startsWith('chore: fork'), 'initial commit should be fork marker');
-        }
-      } catch (e) {
-        // git might not be available or repo might not be initialized properly
-      }
+      const result = exec('git', ['log', '--format=%s'], { cwd: dir });
+      assert.equal(result.code, 0, 'git log must succeed');
+      const lines = result.stdout.trim().split('\n').filter(l => l.length > 0);
+      assert.equal(lines.length, 1, 'must have exactly 1 commit (the fork marker)');
+      assert.ok(lines[0].startsWith('chore: fork'), `first commit must start with 'chore: fork', got: ${lines[0]}`);
     }
   } finally {
     restoreTheme(wp);
