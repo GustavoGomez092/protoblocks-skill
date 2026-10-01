@@ -88,7 +88,7 @@ tests/
   - `class WpError extends Error { code = 'EWP'; args: string[]; result: {code,stdout,stderr} }`
   - `createWp({ wp, mode, publicPath }, { exec }?) => Wp` where
     `Wp = { run(args, opts?) => {code,stdout,stderr}, check(args, opts?) => stdout (throws WpError), evalFile(file, args?) => object (parsed last stdout line; throws WpError), wp, mode, publicPath }`. In `native` mode every call is prefixed with `--path=<publicPath>`; in `local-wrapper` mode the wrapper already carries `--path`.
-  - `loadRuntime(dir) => { wp, mode, publicPath, url, localSite }`. It finds the WP root from `dir` (works from inside a theme folder) and reads `<root>/wp-content/.protoblocks/preflight.json`. When that file is missing it throws `Error` with `code: 'ENORUNTIME'` and message `Run preflight first: node preflight.mjs`.
+  - `loadRuntime(dir) => { wp, mode, publicPath, url, localSite }`. It finds the WP root from `dir` (works from inside a theme folder) and reads `<root>/wp-content/.protoblocks/preflight.json`. When that file is missing, or records `ok: false`, it throws `Error` with `code: 'ENORUNTIME'` and message `Run preflight first: node preflight.mjs`.
   - `WP_SCRIPTS_DIR`: absolute path of `scripts/wp/`.
   - **Test site = the developer's Local site "Proto Blocks"** (http://proto-blocks.local), overridable with env `PB_TEST_SITE`. The developer authorized all testing there. Its active theme is a git checkout `proto-blocks-theme` that tests must **never write into**.
   - `tests/integration/helpers.mjs` exports:
@@ -198,10 +198,18 @@ test('loadRuntime reads preflight.json from inside a theme folder', () => {
   fs.mkdirSync(path.join(root, 'wp-content/.protoblocks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'wp-content/themes/acme'), { recursive: true });
   fs.writeFileSync(path.join(root, 'wp-content/.protoblocks/preflight.json'),
-    JSON.stringify({ wp: '/w/wp', mode: 'local-wrapper', publicPath: root, url: 'http://a.local', localSite: null }));
+    JSON.stringify({ ok: true, wp: '/w/wp', mode: 'local-wrapper', publicPath: root, url: 'http://a.local', localSite: null }));
   const rt = loadRuntime(path.join(root, 'wp-content/themes/acme'));
   assert.equal(rt.wp, '/w/wp');
   assert.equal(rt.url, 'http://a.local');
+});
+
+test('loadRuntime refuses a failed preflight report', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-rt-'));
+  fs.writeFileSync(path.join(root, 'wp-config.php'), '<?php');
+  fs.mkdirSync(path.join(root, 'wp-content/.protoblocks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'wp-content/.protoblocks/preflight.json'), JSON.stringify({ ok: false, wp: null }));
+  assert.throws(() => loadRuntime(root), (e) => e.code === 'ENORUNTIME' && /failed/.test(e.message));
 });
 
 test('loadRuntime without preflight throws ENORUNTIME', () => {
@@ -265,6 +273,11 @@ export function loadRuntime(dir) {
     throw e;
   }
   const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (r.ok !== true || !r.wp) {
+    const e = new Error('The last preflight failed; fix its checks and re-run: node preflight.mjs');
+    e.code = 'ENORUNTIME';
+    throw e;
+  }
   return { wp: r.wp, mode: r.mode, publicPath: r.publicPath, url: r.url, localSite: r.localSite ?? null };
 }
 ```
