@@ -25,11 +25,20 @@ class FakeExec {
     }
 
     // Try pattern matching for common commands
-    if (argsStr.includes('eval-file') && argsStr.includes('tailwind.php enable')) {
-      const response = this.responses.get('eval-file tailwind.php enable');
-      if (response) {
-        if (response instanceof Error) throw response;
-        return response;
+    if (argsStr.includes('eval-file') && argsStr.includes('tailwind.php')) {
+      if (argsStr.includes('enable')) {
+        const response = this.responses.get('eval-file tailwind.php enable');
+        if (response) {
+          if (response instanceof Error) throw response;
+          return response;
+        }
+      }
+      if (argsStr.includes('status')) {
+        const response = this.responses.get('eval-file tailwind.php status');
+        if (response) {
+          if (response instanceof Error) throw response;
+          return response;
+        }
       }
     }
     if (argsStr.includes('option get')) {
@@ -87,7 +96,7 @@ function fakeWp(fakeExec) {
   };
 }
 
-function setupCommonResponses(fake) {
+function setupCommonResponses(fake, tailwindEnabled = false) {
   // Default responses for wordpress.org plugins
   fake.record('plugin get wordpress-seo --field=status', { code: 0, stdout: 'active\n', stderr: '' });
   fake.record('plugin get wordpress-seo --field=version', { code: 0, stdout: '21.0\n', stderr: '' });
@@ -98,10 +107,11 @@ function setupCommonResponses(fake) {
 
   // Default responses for options
   fake.record('option get proto_blocks_wizard_completed', { code: 0, stdout: '1\n', stderr: '' });
-  fake.record('option get proto_blocks_component_style', { code: 1, stdout: '', stderr: '' });
+  fake.record('option get proto_blocks_component_style', tailwindEnabled ? { code: 0, stdout: 'tailwind\n', stderr: '' } : { code: 1, stdout: '', stderr: '' });
   fake.record('option get permalink_structure', { code: 0, stdout: '/%postname%/\n', stderr: '' });
 
-  // Tailwind enable response
+  // Tailwind responses
+  fake.record('eval-file tailwind.php status', { code: 0, stdout: JSON.stringify({ enabled: tailwindEnabled }) + '\n', stderr: '' });
   fake.record('eval-file tailwind.php enable', { code: 0, stdout: '{"enabled":true}\n', stderr: '' });
 }
 
@@ -201,14 +211,12 @@ test('(f) plugin install fails: reject with WpError', async () => {
   fake.record('plugin get proto-blocks --field=status', { code: 1, stdout: '', stderr: 'not found' });
   fake.record(`plugin install ${zipUrl} --force --activate`, { code: 1, stdout: '', stderr: 'Download failed' });
 
-  try {
-    await ensurePlugins(fakeWp(fake), {
+  await assert.rejects(
+    () => ensurePlugins(fakeWp(fake), {
       fetchRelease: async () => ({ version: '3.0.0', zipUrl }),
-    });
-    assert.fail('should reject');
-  } catch (e) {
-    assert.equal(e.code, 'EWP');
-  }
+    }),
+    (e) => e.code === 'EWP'
+  );
 });
 
 test('(g) permalink_structure already set: no rewrite call', async () => {
@@ -226,13 +234,77 @@ test('(g) permalink_structure already set: no rewrite call', async () => {
   fake.assertNotCalled('rewrite structure');
 });
 
-test('offline tolerance: if fetchRelease fails and proto-blocks installed, activate and warn', async () => {
+test('all current: options empty, no tailwind enable call', async () => {
+  const fake = new FakeExec();
+  const zipUrl = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
+
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true); // Tailwind already enabled
+
+  const result = await ensurePlugins(fakeWp(fake), {
+    fetchRelease: async () => ({ version: '3.0.0', zipUrl }),
+  });
+
+  assert.deepEqual(result.options, []);
+  fake.assertNotCalled('eval-file tailwind.php enable');
+});
+
+test('only component_style differs: only report that option', async () => {
+  const fake = new FakeExec();
+  const zipUrl = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
+
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  // Tailwind enabled, but component_style not set
+  fake.record('eval-file tailwind.php status', { code: 0, stdout: '{"enabled":true}\n', stderr: '' });
+  fake.record('option get proto_blocks_wizard_completed', { code: 0, stdout: '1\n', stderr: '' });
+  fake.record('option get proto_blocks_component_style', { code: 1, stdout: '', stderr: '' }); // Not set
+  fake.record('option get permalink_structure', { code: 0, stdout: '/%postname%/\n', stderr: '' });
+  fake.record('plugin get wordpress-seo --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get wordpress-seo --field=version', { code: 0, stdout: '21.0\n', stderr: '' });
+  fake.record('plugin get safe-svg --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get safe-svg --field=version', { code: 0, stdout: '2.0.0\n', stderr: '' });
+  fake.record('plugin get duplicate-post --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get duplicate-post --field=version', { code: 0, stdout: '4.5.0\n', stderr: '' });
+  fake.record('eval-file tailwind.php enable', { code: 0, stdout: '{"enabled":true}\n', stderr: '' });
+
+  const result = await ensurePlugins(fakeWp(fake), {
+    fetchRelease: async () => ({ version: '3.0.0', zipUrl }),
+  });
+
+  assert.deepEqual(result.options, ['proto_blocks_component_style']);
+});
+
+test('offline tolerance: installed and active with warning', async () => {
+  const fake = new FakeExec();
+
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '2.10.1\n', stderr: '' });
+  setupCommonResponses(fake, true); // Tailwind already enabled
+
+  const error = new Error('Network error');
+  error.code = 'ERELEASE';
+
+  const result = await ensurePlugins(fakeWp(fake), {
+    fetchRelease: async () => { throw error; },
+  });
+
+  const pbPlugin = result.plugins.find((p) => p.slug === 'proto-blocks');
+  assert.equal(pbPlugin.action, 'ok');
+  assert.equal(pbPlugin.version, '2.10.1');
+  assert.ok(pbPlugin.warning);
+  assert.match(pbPlugin.warning, /could not check for updates/);
+  assert.deepEqual(result.options, []);
+});
+
+test('offline tolerance: installed but inactive, activate and warn', async () => {
   const fake = new FakeExec();
 
   fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'inactive\n', stderr: '' });
   fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '2.10.1\n', stderr: '' });
   fake.record('plugin activate proto-blocks', { code: 0, stdout: '', stderr: '' });
-  setupCommonResponses(fake);
+  setupCommonResponses(fake, true); // Tailwind already enabled
 
   const error = new Error('Network error');
   error.code = 'ERELEASE';
@@ -248,7 +320,7 @@ test('offline tolerance: if fetchRelease fails and proto-blocks installed, activ
   assert.match(pbPlugin.warning, /could not check for updates/);
 });
 
-test('offline tolerance: if fetchRelease fails and proto-blocks not installed, rethrow', async () => {
+test('offline tolerance: not installed, rethrow', async () => {
   const fake = new FakeExec();
 
   fake.record('plugin get proto-blocks --field=status', { code: 1, stdout: '', stderr: 'not found' });
@@ -256,12 +328,10 @@ test('offline tolerance: if fetchRelease fails and proto-blocks not installed, r
   const error = new Error('Network error');
   error.code = 'ERELEASE';
 
-  try {
-    await ensurePlugins(fakeWp(fake), {
+  await assert.rejects(
+    () => ensurePlugins(fakeWp(fake), {
       fetchRelease: async () => { throw error; },
-    });
-    assert.fail('should rethrow ERELEASE');
-  } catch (e) {
-    assert.equal(e.code, 'ERELEASE');
-  }
+    }),
+    (e) => e.code === 'ERELEASE'
+  );
 });

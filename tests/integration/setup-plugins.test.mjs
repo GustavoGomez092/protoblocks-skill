@@ -17,4 +17,5 @@ itest('ensurePlugins installs, configures, and is idempotent', async () => {
 
   const second = await ensurePlugins(wp);
   assert.ok(second.plugins.every((p) => p.action === 'ok'), JSON.stringify(second.plugins));
+  assert.deepEqual(second.options, []);
 });

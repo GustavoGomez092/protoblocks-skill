@@ -73,14 +73,26 @@ export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease } = 
     options.push('proto_blocks_wizard_completed');
   }
 
-  // Enable Tailwind
-  const tailwindResult = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['enable']);
-  options.push('proto_blocks_tailwind.enabled');
+  // Check current Tailwind state before enabling
+  let tailwindCurrentState = null;
+  try {
+    tailwindCurrentState = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['status']);
+  } catch {
+    // tailwind.php status failed, assume not configured
+  }
 
-  // Check if component_style was set by tailwind enable
+  const tailwindEnabled = tailwindCurrentState?.enabled === true;
   const componentStyleCurrent = wp.run(['option', 'get', 'proto_blocks_component_style']).stdout.trim();
-  if (componentStyleCurrent === 'tailwind') {
-    options.push('proto_blocks_component_style');
+
+  // Enable Tailwind only if not already enabled or component_style isn't tailwind
+  if (!tailwindEnabled || componentStyleCurrent !== 'tailwind') {
+    wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['enable']);
+    if (!tailwindEnabled) {
+      options.push('proto_blocks_tailwind.enabled');
+    }
+    if (componentStyleCurrent !== 'tailwind') {
+      options.push('proto_blocks_component_style');
+    }
   }
 
   // Check and update permalink_structure
