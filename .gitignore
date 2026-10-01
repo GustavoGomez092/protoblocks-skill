@@ -1,3 +1,6 @@
 .DS_Store
 node_modules/
 *.log
+tests/.site/
+tests/.tmp/
+skills/protoblocks-site-builder/scripts/node_modules/
