@@ -80,7 +80,7 @@ function gitInit(themeDir, forkedFrom, exec) {
   return exec('git', [...id, 'commit', '-q', '-m', `chore: fork ${forkedFrom}`], { cwd: themeDir }).code === 0;
 }
 
-export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, zipFile, forkedFrom, exec = realExec }) {
+export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, zipFile, forkedFrom, exec = realExec, cp = fs.cpSync }) {
   // Validate slug format first, before any other processing
   validateSlug(slug);
 
@@ -114,7 +114,15 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
       fs.rmSync(themeDir, { recursive: true, force: true });
     }
 
-    fs.cpSync(src, themeDir, { recursive: true });
+    try {
+      cp(src, themeDir, { recursive: true });
+    } catch (err) {
+      // If copy fails, clean up the partial theme directory and rethrow
+      if (fs.existsSync(themeDir)) {
+        fs.rmSync(themeDir, { recursive: true, force: true });
+      }
+      throw err;
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -137,12 +145,12 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
   return { themeDir, slug, reused: false, forkedFrom };
 }
 
-export async function fetchThemeZip({ fetchRelease = fetchLatestRelease } = {}) {
+export async function fetchThemeZip({ fetchRelease = fetchLatestRelease, downloadImpl = download } = {}) {
   const rel = await fetchRelease(THEME_REPO);
   const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-themezip-'));
   try {
     const zipFile = path.join(zipDir, `proto-theme-${rel.version}.zip`);
-    await download(rel.zipUrl, zipFile);
+    await downloadImpl(rel.zipUrl, zipFile);
     return {
       zipFile,
       forkedFrom: `proto-blocks-theme@${rel.version}`,

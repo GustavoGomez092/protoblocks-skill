@@ -181,3 +181,105 @@ test('failed activation rolls back: removes new theme folder and rethrows error'
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('partial copy cleanup: removes theme dir if cp throws', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-fail-test-'));
+  const themesDir = path.join(root, 'themes');
+  fs.mkdirSync(themesDir);
+
+  try {
+    // Create a valid theme zip
+    const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-test-zip-'));
+    try {
+      const srcTheme = path.join(zipDir, 'proto-theme');
+      fs.mkdirSync(srcTheme);
+      fs.writeFileSync(path.join(srcTheme, 'style.css'), '/*\nTheme Name: Test\nText Domain: proto-theme\n*/');
+      fs.writeFileSync(path.join(srcTheme, 'functions.php'), "<?php\n__('test', 'proto-theme');");
+
+      // Build the zip
+      const { execSync } = await import('node:child_process');
+      const zipPath = path.join(zipDir, 'cp-test.zip');
+      execSync(`cd ${zipDir} && zip -r cp-test.zip proto-theme`, { stdio: 'ignore' });
+
+      // Mock cp that creates the dir but then throws
+      const failingCp = (src, dest, opts) => {
+        fs.mkdirSync(dest, { recursive: true });
+        fs.writeFileSync(path.join(dest, 'partial.txt'), 'partial copy');
+        const err = new Error('copy failed (simulated)');
+        err.code = 'ECPCOPY';
+        throw err;
+      };
+
+      const mockWp = { check: () => '' };
+      const partialDir = path.join(themesDir, 'partial');
+
+      // Call forkTheme with failing cp
+      assert.throws(
+        () => forkTheme({ wp: mockWp, themesDir, name: 'Partial', slug: 'partial', zipFile: zipPath, forkedFrom: 'test@1.0', cp: failingCp }),
+        (e) => e.code === 'ECPCOPY'
+      );
+
+      // The partial directory must be removed after cp fails
+      assert.ok(!fs.existsSync(partialDir), 'themesDir/partial must be removed if copy fails');
+      assert.ok(!fs.existsSync(path.join(partialDir, 'partial.txt')), 'partial copy file must not exist');
+    } finally {
+      fs.rmSync(zipDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('slugify format: rejects invalid formats', () => {
+  const invalidCases = ['-start', 'end-', 'UPPER', 'a_b'];
+  for (const slug of invalidCases) {
+    assert.throws(
+      () => forkTheme({ wp: { check: () => '' }, themesDir: '/tmp', name: 'Test', slug, force: true, zipFile: '', forkedFrom: '', exec: () => ({ code: 0, stdout: '' }) }),
+      (e) => e.code === 'ESLUG',
+      `slug "${slug}" must be rejected with ESLUG`
+    );
+  }
+});
+
+test('fetchThemeZip cleanup: no temp dir created if fetchRelease throws', async () => {
+  const tmpBefore = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
+  
+  const failingFetchRelease = () => {
+    const err = new Error('release fetch failed');
+    err.code = 'ERELEASE';
+    throw err;
+  };
+  
+  try {
+    await (await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs')).fetchThemeZip({ fetchRelease: failingFetchRelease });
+    assert.fail('should have thrown ERELEASE');
+  } catch (e) {
+    assert.equal(e.code, 'ERELEASE', 'should throw ERELEASE from fetchRelease');
+  }
+  
+  const tmpAfter = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
+  assert.equal(tmpAfter, tmpBefore, 'no pb-themezip dir created when fetchRelease throws');
+});
+
+test('fetchThemeZip cleanup: removes dir if downloadImpl throws', async () => {
+  const tmpBefore = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
+  
+  const fakeRel = { version: '1.0.0', zipUrl: 'https://example.com/test.zip' };
+  const fetchReleaseOk = () => Promise.resolve(fakeRel);
+  
+  const failingDownload = () => {
+    const err = new Error('download failed');
+    err.code = 'EDOWNLOAD';
+    throw err;
+  };
+  
+  try {
+    await (await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs')).fetchThemeZip({ fetchRelease: fetchReleaseOk, downloadImpl: failingDownload });
+    assert.fail('should have thrown EDOWNLOAD');
+  } catch (e) {
+    assert.equal(e.code, 'EDOWNLOAD', 'should throw EDOWNLOAD from downloadImpl');
+  }
+  
+  const tmpAfter = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('pb-themezip-')).length;
+  assert.equal(tmpAfter, tmpBefore, 'pb-themezip dir cleaned up after downloadImpl throws');
+});
