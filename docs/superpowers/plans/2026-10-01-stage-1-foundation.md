@@ -21,6 +21,7 @@
 - Every CLI prints machine-readable JSON on stdout; human errors on stderr; non-zero exit on failure.
 - Never mutate the developer's existing Local sites in tests. Read-only commands only (`option get`, `plugin list`).
 - Deviation from spec, recorded: `scripts/lib/local-site.sh` is implemented as `scripts/lib/local-site.mjs` (JSON parsing of `sites.json` needs a real parser; Node is already a hard requirement).
+- Deviation from spec, recorded: Preflight resolves Local first, then native (spec §3 lists native first); Local-first avoids running bare `wp` inside a Local site.
 
 ## Review Focus
 
