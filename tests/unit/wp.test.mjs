@@ -57,3 +57,11 @@ test('loadRuntime without preflight throws ENORUNTIME', () => {
   fs.writeFileSync(path.join(root, 'wp-config.php'), '<?php');
   assert.throws(() => loadRuntime(root), (e) => e.code === 'ENORUNTIME');
 });
+
+test('loadRuntime with malformed preflight.json throws ENORUNTIME', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-rt-'));
+  fs.writeFileSync(path.join(root, 'wp-config.php'), '<?php');
+  fs.mkdirSync(path.join(root, 'wp-content/.protoblocks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'wp-content/.protoblocks/preflight.json'), 'not valid json {');
+  assert.throws(() => loadRuntime(root), (e) => e.code === 'ENORUNTIME' && /unreadable/.test(e.message));
+});

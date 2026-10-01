@@ -44,7 +44,14 @@ export function loadRuntime(dir) {
     e.code = 'ENORUNTIME';
     throw e;
   }
-  const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let r;
+  try {
+    r = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    const e = new Error('preflight.json unreadable; re-run preflight');
+    e.code = 'ENORUNTIME';
+    throw e;
+  }
   if (r.ok !== true || !r.wp) {
     const e = new Error('The last preflight failed; fix its checks and re-run: node preflight.mjs');
     e.code = 'ENORUNTIME';

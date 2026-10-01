@@ -14,15 +14,52 @@ if (resolved.ok) writeWrapper(WRAPPER, resolved.site);
 export const haveSite = resolved.ok;
 export const PUBLIC = resolved.ok ? resolved.site.publicPath : '';
 const boot = resolved.ok ? createWp({ wp: WRAPPER, mode: 'local-wrapper', publicPath: PUBLIC }) : null;
-export const SITE_URL = boot ? boot.check(['option', 'get', 'siteurl']).trim() : '';
-export const ORIGINAL_THEME = boot ? boot.check(['option', 'get', 'stylesheet']).trim() : '';
+
+let siteUrl = '';
+let originalTheme = '';
+let skipReason = '';
+
+if (boot) {
+  try {
+    siteUrl = boot.check(['option', 'get', 'siteurl']).trim();
+  } catch (err) {
+    skipReason = `WP-CLI failed to get siteurl: ${err.message}`;
+  }
+  try {
+    const active = boot.check(['option', 'get', 'stylesheet']).trim();
+    if (active.startsWith('pb-')) {
+      // Crashed run left site on pb-itest or pb-* theme. Recover the original.
+      originalTheme = process.env.PB_TEST_THEME ||
+        (fs.existsSync(path.join(REPO, 'tests', '.tmp', 'original-theme.txt'))
+          ? fs.readFileSync(path.join(REPO, 'tests', '.tmp', 'original-theme.txt'), 'utf8').trim()
+          : '');
+      if (!originalTheme) {
+        skipReason = `test site left on ${active}; set PB_TEST_THEME`;
+      }
+    } else {
+      originalTheme = active;
+    }
+  } catch (err) {
+    skipReason = `WP-CLI failed to get stylesheet: ${err.message}`;
+  }
+}
+
+export const SITE_URL = siteUrl;
+export const ORIGINAL_THEME = originalTheme;
 export const runtime = { wp: WRAPPER, mode: 'local-wrapper', publicPath: PUBLIC, url: SITE_URL };
-export const itest = (name, fn) => (haveSite ? test(name, fn) : test.skip(`${name} (start the Local site "${TEST_SITE}")`, fn));
+export const itest = (name, fn) => {
+  if (!haveSite) return test.skip(`${name} (start the Local site "${TEST_SITE}")`, fn);
+  if (skipReason) return test.skip(`${name} (${skipReason})`, fn);
+  return test(name, fn);
+};
 export const testWp = () => createWp(runtime);
 
 export async function useItestTheme(wp) {
   const themes = path.join(PUBLIC, 'wp-content', 'themes');
   const dir = path.join(themes, 'pb-itest');
+  const tmpDir = path.join(REPO, 'tests', '.tmp');
+  const originalThemeFile = path.join(tmpDir, 'original-theme.txt');
+
   if (!fs.existsSync(path.join(dir, 'style.css'))) {
     let forked = false;
     try {
@@ -30,13 +67,38 @@ export async function useItestTheme(wp) {
       const { zipFile, forkedFrom } = await fetchThemeZip();
       forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
       forked = true;
-    } catch { /* theme-fork.mjs not available yet (before Stage 2 Task 4) */ }
+    } catch (err) {
+      if (err.code !== 'ERR_MODULE_NOT_FOUND') {
+        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
+        throw err;
+      }
+      /* theme-fork.mjs not available yet (before Stage 2 Task 4) */
+    }
     if (!forked) {
-      fs.cpSync(path.join(themes, ORIGINAL_THEME), dir, { recursive: true, filter: (src) => !src.split(path.sep).includes('.git') });
+      const src = path.join(themes, ORIGINAL_THEME);
+      fs.cpSync(src, dir, {
+        recursive: true,
+        filter: (fullSrc) => {
+          const rel = path.relative(src, fullSrc);
+          return !rel.split(path.sep).some(part => part === '.git' || part === 'node_modules');
+        }
+      });
     }
   }
+
+  // Record original theme before switching
+  fs.mkdirSync(tmpDir, { recursive: true });
+  fs.writeFileSync(originalThemeFile, ORIGINAL_THEME);
+
   wp.check(['theme', 'activate', 'pb-itest']);
   return dir;
 }
 
-export const restoreTheme = (wp) => wp.check(['theme', 'activate', ORIGINAL_THEME]);
+export const restoreTheme = (wp) => {
+  const tmpDir = path.join(REPO, 'tests', '.tmp');
+  const originalThemeFile = path.join(tmpDir, 'original-theme.txt');
+  wp.check(['theme', 'activate', ORIGINAL_THEME]);
+  if (fs.existsSync(originalThemeFile)) {
+    fs.unlinkSync(originalThemeFile);
+  }
+};
