@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { slugify, forkMarker, rewriteStyleHeader, rewriteTextDomain } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { slugify, forkMarker, rewriteStyleHeader, rewriteTextDomain, ForkError, forkTheme } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 
 const STYLE = `/*
 Theme Name: Proto-theme
@@ -37,4 +40,50 @@ test('forkMarker is null for a non-fork theme', () => {
 test('rewriteTextDomain replaces only the quoted literal', () => {
   const src = `__('Proto Blocks', 'proto-theme'); $x = "proto-theme-dev"; 'id' => 'proto-theme',`;
   assert.equal(rewriteTextDomain(src, 'acme'), `__('Proto Blocks', 'acme'); $x = "proto-theme-dev"; 'id' => 'acme',`);
+});
+
+test('forkTheme rejects invalid explicit slugs', () => {
+  const themesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-'));
+  try {
+    const mockWp = { check: () => '' };
+    const mockExec = () => ({ code: 0, stdout: '' });
+
+    const invalidSlugs = ['../x', '..', 'a/b', '-start', 'end-'];
+    for (const slug of invalidSlugs) {
+      assert.throws(() => forkTheme({ wp: mockWp, themesDir, name: 'Test', slug, zipFile: '', forkedFrom: '', exec: mockExec }),
+        (e) => e.code === 'ESLUG', `should reject slug: ${slug}`);
+    }
+  } finally {
+    fs.rmSync(themesDir, { recursive: true, force: true });
+  }
+});
+
+test('forkTheme with --force does not delete when slug validation fails', () => {
+  const themesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-'));
+  const sentinel = path.join(themesDir, 'sentinel');
+  fs.writeFileSync(sentinel, 'test');
+  try {
+    const mockWp = { check: () => '' };
+    const mockExec = () => ({ code: 0, stdout: '' });
+
+    assert.throws(() => forkTheme({ wp: mockWp, themesDir, name: 'Test', slug: '../x', zipFile: '', forkedFrom: '', force: true, exec: mockExec }),
+      (e) => e.code === 'ESLUG');
+    assert.ok(fs.existsSync(sentinel), 'sentinel not deleted when slug validation fails');
+  } finally {
+    fs.rmSync(themesDir, { recursive: true, force: true });
+  }
+});
+
+test('rewriteStyleHeader appends Text Domain and Proto Fork before closing */ if missing', () => {
+  const styleNoTextDomain = `/*
+Theme Name: Proto-theme
+Version: 1.1.3
+Tags: block-theme
+*/
+body{}`;
+
+  const out = rewriteStyleHeader(styleNoTextDomain, { name: 'Acme Co', slug: 'acme-co', forkedFrom: 'proto-blocks-theme@1.1.3' });
+  assert.match(out, /^Text Domain: acme-co$/m);
+  assert.match(out, /^Proto Fork: proto-blocks-theme@1.1\.3$/m);
+  assert.ok(out.includes('*/'), 'closing */ present');
 });

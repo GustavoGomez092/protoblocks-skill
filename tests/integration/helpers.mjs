@@ -64,9 +64,13 @@ export async function useItestTheme(wp) {
     let forked = false;
     try {
       const { fetchThemeZip, forkTheme } = await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs');
-      const { zipFile, forkedFrom } = await fetchThemeZip();
-      forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
-      forked = true;
+      const { zipFile, forkedFrom, cleanup } = await fetchThemeZip();
+      try {
+        forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
+        forked = true;
+      } finally {
+        cleanup();
+      }
     } catch (err) {
       if (err.code !== 'ERR_MODULE_NOT_FOUND') {
         if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
