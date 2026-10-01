@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Everything the builder needs to turn a bare local WordPress into a ready Proto-Blocks block-theme site: a WP-CLI runner, a disposable integration-test site, plugin install/activation, theme fetch + fork, managed theme assets, design tokens → Tailwind/theme.json, block-theme navigation menus, template-part writing with Site Editor override detection, a one-shot setup CLI, and the `protoblocks-site-setup` skill.
+**Goal:** Everything the builder needs to turn a bare local WordPress into a ready Proto-Blocks block-theme site: a WP-CLI runner, a Local test-site harness, plugin install/activation, theme fetch + fork, managed theme assets, design tokens → Tailwind/theme.json, block-theme navigation menus, template-part writing with Site Editor override detection, a one-shot setup CLI, and the `protoblocks-site-setup` skill.
 
-**Architecture:** Node ESM CLIs in `skills/protoblocks-site-builder/scripts/lib/` orchestrate WP-CLI through one runner (`wp.mjs`). WordPress-side logic lives in small PHP files in `scripts/wp/` executed with `wp eval-file <file> <args…>`; each prints exactly one JSON line as its last stdout line. Pure functions (release picking, token rendering, header rewriting, block attribute serialization) are unit tested; WordPress-touching code is integration tested against a disposable SQLite WordPress in `tests/.site/`.
+**Architecture:** Node ESM CLIs in `skills/protoblocks-site-builder/scripts/lib/` orchestrate WP-CLI through one runner (`wp.mjs`). WordPress-side logic lives in small PHP files in `scripts/wp/` executed with `wp eval-file <file> <args…>`; each prints exactly one JSON line as its last stdout line. Pure functions (release picking, token rendering, header rewriting, block attribute serialization) are unit tested; WordPress-touching code is integration tested against the developer's Local site "Proto Blocks" (http://proto-blocks.local) via `tests/integration/helpers.mjs`.
 
-**Tech Stack:** Node ≥ 18 built-ins (`fetch`, `node:test`), system `unzip` and `git`, PHP ≥ 8.0 + WP-CLI phar, WordPress SQLite Database Integration plugin (test site only).
+**Tech Stack:** Node ≥ 18 built-ins (`fetch`, `node:test`), system `unzip` and `git`, Local by Flywheel's PHP + WP-CLI phar (via the Stage 1 wrapper).
 
 **Spec:** `docs/superpowers/specs/2026-10-01-site-builder-design.md` (§4 Site setup, §3 runtime, §10 error handling, §11 testing)
 
@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Local sites only. Never run write commands against a site other than the one preflight resolved (or the disposable test site in tests).
+- Local sites only. Never run write commands against a site other than the one preflight resolved (in tests: the Local site "Proto Blocks", which the developer authorized for all testing).
 - Proto-Blocks: install the **highest `vX.Y.Z` release** of `GustavoGomez092/Proto-Blocks` that has a `.zip` asset. Never use `/releases/latest` — the repo's `latest` tag is stale (points at 2.10.0 while 2.10.1 exists).
 - Theme: `GustavoGomez092/proto-blocks-theme`, same release-picking rule; zip root folder is `proto-theme/`; original text domain `proto-theme`.
 - wordpress.org plugins: `wordpress-seo`, `safe-svg`, `duplicate-post`. Wordfence is skipped locally.
@@ -25,7 +25,7 @@
 - PHP scripts that write content call `kses_remove_filters()` first (WP-CLI runs without a user; kses would mangle block markup).
 - Every `scripts/wp/*.php` prints exactly one JSON object as the last line of stdout; errors go to STDERR with exit code 1.
 - Every CLI prints JSON on stdout; errors on stderr; non-zero exit on failure.
-- Unit tests: `npm test` (`node --test tests/unit/*.test.mjs`). Integration tests: `npm run test:integration` (`node --test --test-concurrency=1 tests/integration/*.test.mjs`), auto-skip when `tests/.site/wp` doesn't exist.
+- Unit tests: `npm test` (`node --test tests/unit/*.test.mjs`). Integration tests: `npm run test:integration` (`node --test --test-concurrency=1 tests/integration/*.test.mjs`), auto-skip when the Local site isn't running. Theme-mutating tests use `useItestTheme()`/`restoreTheme()` (never write into the developer's active `proto-blocks-theme` git checkout); created posts/pages/menus use unique slugs and are deleted at the end of each test.
 
 ## Review Focus
 
@@ -67,99 +67,48 @@ skills/protoblocks-site-setup/
 tests/
 ├── unit/{releases,theme-fork,theme-assets,tokens,blocks,parts}.test.mjs
 └── integration/
-    ├── setup-test-site.sh  creates tests/.site (SQLite WordPress + wp wrapper)
-    ├── helpers.mjs         runtime for the test site, skip logic
+    ├── helpers.mjs         Local test-site runtime, skip logic, pb-itest theme helpers
     └── {wp,setup-plugins,theme-fork,theme-assets,tokens,navigation,parts}.test.mjs
 ```
 
 ---
 
-### Task 1: WP-CLI runner + disposable test site
+### Task 1: WP-CLI runner + Local test-site harness
 
 **Files:**
 - Create: `skills/protoblocks-site-builder/scripts/lib/wp.mjs`
-- Create: `tests/integration/setup-test-site.sh`
 - Create: `tests/integration/helpers.mjs`
 - Create: `tests/integration/wp.test.mjs`
 - Create: `tests/unit/wp.test.mjs`
-- Modify: `package.json` (add `test:integration` and `test:site` scripts)
+- Modify: `package.json` (add the `test:integration` script)
 
 **Interfaces:**
-- Consumes: `exec` (Stage 1), `findWpRoot` (Stage 1 `preflight.mjs`).
+- Consumes: `exec` (Stage 1), `findWpRoot` (Stage 1 `preflight.mjs`), `resolveLocalSite`, `writeWrapper` (Stage 1 `local-site.mjs`).
 - Produces:
   - `class WpError extends Error { code = 'EWP'; args: string[]; result: {code,stdout,stderr} }`
   - `createWp({ wp, mode, publicPath }, { exec }?) => Wp` where
     `Wp = { run(args, opts?) => {code,stdout,stderr}, check(args, opts?) => stdout (throws WpError), evalFile(file, args?) => object (parsed last stdout line; throws WpError), wp, mode, publicPath }`. In `native` mode every call is prefixed with `--path=<publicPath>`; in `local-wrapper` mode the wrapper already carries `--path`.
-  - `loadRuntime(dir) => { wp, mode, publicPath, url, localSite }` — finds the WP root from `dir` (works from inside a theme folder), reads `<root>/wp-content/.protoblocks/preflight.json`; throws `Error` with `code: 'ENORUNTIME'` and message `Run preflight first: node preflight.mjs` when missing.
-  - `WP_SCRIPTS_DIR` — absolute path of `scripts/wp/`.
-  - Test site: `tests/.site/public` (WordPress), `tests/.site/wp` (executable wrapper), siteurl `http://127.0.0.1:8881`, admin `admin`/`admin`.
-  - `tests/integration/helpers.mjs` exports `SITE_DIR`, `PUBLIC`, `haveSite: boolean`, `runtime` (`{wp, mode:'local-wrapper', publicPath, url}`), `itest(name, fn)` (= `test` or `test.skip` with reason "run npm run test:site first"), `testWp()` (returns `createWp(runtime)`).
+  - `loadRuntime(dir) => { wp, mode, publicPath, url, localSite }`. It finds the WP root from `dir` (works from inside a theme folder) and reads `<root>/wp-content/.protoblocks/preflight.json`. When that file is missing it throws `Error` with `code: 'ENORUNTIME'` and message `Run preflight first: node preflight.mjs`.
+  - `WP_SCRIPTS_DIR`: absolute path of `scripts/wp/`.
+  - **Test site = the developer's Local site "Proto Blocks"** (http://proto-blocks.local), overridable with env `PB_TEST_SITE`. The developer authorized all testing there. Its active theme is a git checkout `proto-blocks-theme` that tests must **never write into**.
+  - `tests/integration/helpers.mjs` exports:
+    - `TEST_SITE`: string.
+    - `haveSite`: boolean, true when the Local site resolves and is running.
+    - `PUBLIC`: the site's `app/public`.
+    - `SITE_URL`: from `wp option get siteurl`.
+    - `runtime`: `{wp: <tests/.tmp/wp-test-site wrapper>, mode: 'local-wrapper', publicPath: PUBLIC, url: SITE_URL}`.
+    - `itest(name, fn)`: `test`, or `test.skip` with reason `start the Local site "<TEST_SITE>"`.
+    - `testWp()`.
+    - `ORIGINAL_THEME`: the stylesheet active when the helpers module loaded.
+    - `useItestTheme(wp) => Promise<themeDir>`: ensures the throwaway fork `wp-content/themes/pb-itest` exists. Until Task 4 exists, it creates it by copying the active theme folder **excluding `.git`**. After Task 4 it uses `forkTheme`, with the copy kept as a fallback when `theme-fork.mjs` is missing. It then activates `pb-itest` and returns its path.
+    - `restoreTheme(wp)`: re-activates `ORIGINAL_THEME`.
+  - Every integration test that changes theme files or activates another theme must call `useItestTheme` and `restoreTheme(wp)` in a `finally`. Tests create posts/pages with unique slugs (`pb-<name>-<Date.now()>`) and delete them at the end.
 
-- [ ] **Step 1: Add scripts to root `package.json`**
+- [ ] **Step 1: Add the script to root `package.json`**
 
-```json
-"scripts": {
-  "test": "node --test tests/unit/*.test.mjs",
-  "test:site": "bash tests/integration/setup-test-site.sh",
-  "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs"
-}
-```
-(Keep whatever the existing `test` script is if Stage 1 changed it to a portable form; only add the two new scripts.)
+Add `"test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs"` to `scripts`. Keep the existing `test` script unchanged.
 
-- [ ] **Step 2: Write `tests/integration/setup-test-site.sh`**
-
-```bash
-#!/usr/bin/env bash
-# Creates a disposable SQLite WordPress for integration tests at tests/.site.
-# Usage: bash tests/integration/setup-test-site.sh [--fresh]
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SITE="$ROOT/tests/.site"
-PUBLIC="$SITE/public"
-PORT="${PB_TEST_PORT:-8881}"
-
-if [[ "${1:-}" == "--fresh" ]]; then rm -rf "$SITE"; fi
-if [[ -x "$SITE/wp" ]] && "$SITE/wp" core is-installed >/dev/null 2>&1; then
-  echo "{\"ok\":true,\"site\":\"$SITE\",\"reused\":true}"; exit 0
-fi
-mkdir -p "$SITE"
-
-PHAR="${PB_WP_CLI_PHAR:-}"
-if [[ -z "$PHAR" ]]; then
-  LOCAL_PHAR="/Applications/Local.app/Contents/Resources/extraResources/bin/wp-cli/wp-cli.phar"
-  if [[ -f "$LOCAL_PHAR" ]]; then PHAR="$LOCAL_PHAR"; else
-    PHAR="$SITE/wp-cli.phar"
-    [[ -f "$PHAR" ]] || curl -fsSL -o "$PHAR" https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-  fi
-fi
-PHP_BIN="${PB_PHP:-php}"
-
-cat > "$SITE/wp" <<EOF
-#!/bin/sh
-exec '$PHP_BIN' -d memory_limit=512M '$PHAR' '--path=$PUBLIC' "\$@"
-EOF
-chmod 755 "$SITE/wp"
-# Plain `wp` (no --path) for exercising native-mode preflight: PATH="$SITE/bin:$PATH"
-mkdir -p "$SITE/bin"
-cat > "$SITE/bin/wp" <<EOF
-#!/bin/sh
-exec '$PHP_BIN' -d memory_limit=512M '$PHAR' "\$@"
-EOF
-chmod 755 "$SITE/bin/wp"
-
-"$SITE/wp" core download --quiet
-curl -fsSL -o "$SITE/sqlite.zip" https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip
-unzip -q -o "$SITE/sqlite.zip" -d "$PUBLIC/wp-content/plugins/"
-sed -e "s#{SQLITE_IMPLEMENTATION_FOLDER_PATH}#$PUBLIC/wp-content/plugins/sqlite-database-integration#" \
-    -e "s#{SQLITE_PLUGIN}#sqlite-database-integration/load.php#" \
-    "$PUBLIC/wp-content/plugins/sqlite-database-integration/db.copy" > "$PUBLIC/wp-content/db.php"
-"$SITE/wp" config create --dbname=wp --dbuser=x --dbpass=x --skip-check --quiet
-"$SITE/wp" core install --url="http://127.0.0.1:$PORT" --title="PB Test" --admin_user=admin \
-  --admin_password=admin --admin_email=admin@example.com --skip-email --quiet
-echo "{\"ok\":true,\"site\":\"$SITE\",\"reused\":false}"
-```
-
-- [ ] **Step 3: Write `tests/integration/helpers.mjs`**
+- [ ] **Step 2: Write `tests/integration/helpers.mjs`**
 
 ```js
 import fs from 'node:fs';
@@ -167,16 +116,46 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
+import { resolveLocalSite, writeWrapper } from '../../skills/protoblocks-site-builder/scripts/lib/local-site.mjs';
 
-export const SITE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.site');
-export const PUBLIC = path.join(SITE_DIR, 'public');
-export const haveSite = fs.existsSync(path.join(SITE_DIR, 'wp'));
-export const runtime = { wp: path.join(SITE_DIR, 'wp'), mode: 'local-wrapper', publicPath: PUBLIC, url: 'http://127.0.0.1:8881' };
-export const itest = (name, fn) => (haveSite ? test(name, fn) : test.skip(`${name} (run npm run test:site first)`, fn));
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const TEST_SITE = process.env.PB_TEST_SITE ?? 'Proto Blocks';
+const resolved = resolveLocalSite({ query: TEST_SITE });
+const WRAPPER = path.join(REPO, 'tests', '.tmp', 'wp-test-site');
+if (resolved.ok) writeWrapper(WRAPPER, resolved.site);
+
+export const haveSite = resolved.ok;
+export const PUBLIC = resolved.ok ? resolved.site.publicPath : '';
+const boot = resolved.ok ? createWp({ wp: WRAPPER, mode: 'local-wrapper', publicPath: PUBLIC }) : null;
+export const SITE_URL = boot ? boot.check(['option', 'get', 'siteurl']).trim() : '';
+export const ORIGINAL_THEME = boot ? boot.check(['option', 'get', 'stylesheet']).trim() : '';
+export const runtime = { wp: WRAPPER, mode: 'local-wrapper', publicPath: PUBLIC, url: SITE_URL };
+export const itest = (name, fn) => (haveSite ? test(name, fn) : test.skip(`${name} (start the Local site "${TEST_SITE}")`, fn));
 export const testWp = () => createWp(runtime);
+
+export async function useItestTheme(wp) {
+  const themes = path.join(PUBLIC, 'wp-content', 'themes');
+  const dir = path.join(themes, 'pb-itest');
+  if (!fs.existsSync(path.join(dir, 'style.css'))) {
+    let forked = false;
+    try {
+      const { fetchThemeZip, forkTheme } = await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs');
+      const { zipFile, forkedFrom } = await fetchThemeZip();
+      forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
+      forked = true;
+    } catch { /* theme-fork.mjs not available yet (before Stage 2 Task 4) */ }
+    if (!forked) {
+      fs.cpSync(path.join(themes, ORIGINAL_THEME), dir, { recursive: true, filter: (src) => !src.split(path.sep).includes('.git') });
+    }
+  }
+  wp.check(['theme', 'activate', 'pb-itest']);
+  return dir;
+}
+
+export const restoreTheme = (wp) => wp.check(['theme', 'activate', ORIGINAL_THEME]);
 ```
 
-- [ ] **Step 4: Write failing unit tests** `tests/unit/wp.test.mjs`
+- [ ] **Step 3: Write failing unit tests** `tests/unit/wp.test.mjs`
 
 ```js
 import { test } from 'node:test';
@@ -232,11 +211,11 @@ test('loadRuntime without preflight throws ENORUNTIME', () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify failure**
+- [ ] **Step 4: Run to verify failure**
 
-Run: `npm test` → Expected: FAIL (cannot find `wp.mjs`).
+Run `npm test`. Expected: FAIL (cannot find `wp.mjs`).
 
-- [ ] **Step 6: Implement** `skills/protoblocks-site-builder/scripts/lib/wp.mjs`
+- [ ] **Step 5: Implement** `skills/protoblocks-site-builder/scripts/lib/wp.mjs`
 
 ```js
 import fs from 'node:fs';
@@ -290,28 +269,44 @@ export function loadRuntime(dir) {
 }
 ```
 
-- [ ] **Step 7: Run unit tests** → `npm test` → Expected: PASS.
+- [ ] **Step 6: Run unit tests**
 
-- [ ] **Step 8: Create the test site and write the integration test** `tests/integration/wp.test.mjs`
+Run `npm test`. Expected: PASS.
+
+- [ ] **Step 7: Integration test** `tests/integration/wp.test.mjs`
 
 ```js
 import assert from 'node:assert/strict';
-import { itest, testWp } from './helpers.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { itest, testWp, SITE_URL, PUBLIC, useItestTheme, restoreTheme, ORIGINAL_THEME } from './helpers.mjs';
 
-itest('runner talks to the disposable test site', () => {
+itest('runner talks to the Local test site', () => {
+  assert.match(SITE_URL, /^https?:\/\//);
+  assert.equal(testWp().check(['option', 'get', 'siteurl']).trim(), SITE_URL);
+});
+
+itest('useItestTheme activates a throwaway copy and restoreTheme puts the original back', async () => {
   const wp = testWp();
-  assert.equal(wp.check(['option', 'get', 'siteurl']).trim(), 'http://127.0.0.1:8881');
+  try {
+    const dir = await useItestTheme(wp);
+    assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), 'pb-itest');
+    assert.ok(!fs.existsSync(path.join(dir, '.git')), 'never copies the developer git checkout');
+  } finally {
+    restoreTheme(wp);
+  }
+  assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), ORIGINAL_THEME);
+  assert.ok(fs.existsSync(path.join(PUBLIC, 'wp-content/themes', ORIGINAL_THEME)));
 });
 ```
 
-Run: `npm run test:site` → Expected: last line `{"ok":true,...}` (first run downloads WordPress; needs network).
-Run: `npm run test:integration` → Expected: PASS (1 test).
+Run `npm run test:integration`. Expected: PASS. If the Local site isn't running, the tests skip; then start it, or report that in the task report.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add package.json skills/protoblocks-site-builder/scripts/lib/wp.mjs tests/unit/wp.test.mjs tests/integration
-git commit -m "feat(wp): WP-CLI runner and disposable SQLite test site"
+git commit -m "feat(wp): WP-CLI runner and Local test-site harness"
 ```
 
 ---
@@ -810,7 +805,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { itest, testWp, PUBLIC } from './helpers.mjs';
+import { itest, testWp, PUBLIC, restoreTheme } from './helpers.mjs';
 import { forkTheme, fetchThemeZip, forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 
 const themesDir = path.join(PUBLIC, 'wp-content/themes');
@@ -819,7 +814,7 @@ itest('forkTheme forks, activates, reuses, and refuses foreign folders', async (
   const wp = testWp();
   const { zipFile, forkedFrom } = await fetchThemeZip();
   fs.rmSync(path.join(themesDir, 'pb-itest'), { recursive: true, force: true });
-
+  try {
   const first = forkTheme({ wp, themesDir, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
   assert.equal(first.reused, false);
   assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), 'pb-itest');
@@ -836,10 +831,11 @@ itest('forkTheme forks, activates, reuses, and refuses foreign folders', async (
   assert.throws(() => forkTheme({ wp, themesDir, name: 'x', slug: 'pb-foreign', zipFile, forkedFrom }), (e) => e.code === 'EFORKEXISTS');
   assert.ok(fs.existsSync(path.join(themesDir, 'pb-foreign/style.css')), 'foreign folder untouched');
   fs.rmSync(path.join(themesDir, 'pb-foreign'), { recursive: true, force: true });
+  } finally { restoreTheme(wp); }
 });
 ```
 
-Run: `npm run test:integration` → Expected: PASS. (The `pb-itest` fork stays active on the test site; Tasks 5, 6 and 8 reuse it.)
+Run: `npm run test:integration` → Expected: PASS. (The `pb-itest` fork folder is kept for reuse by `useItestTheme`; the developer's original theme is re-activated in `finally`.)
 
 - [ ] **Step 6: Commit**
 
@@ -998,22 +994,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { itest, testWp, PUBLIC } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
 import { installThemeAssets } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 
-itest('managed assets load in WordPress and enqueue pb-*.js', () => {
+itest('managed assets load in WordPress and enqueue pb-*.js', async () => {
   const wp = testWp();
-  const theme = path.join(PUBLIC, 'wp-content/themes', wp.check(['option', 'get', 'stylesheet']).trim());
+  const theme = await useItestTheme(wp);
+  try {
   installThemeAssets(theme);
   fs.mkdirSync(path.join(theme, 'assets/js'), { recursive: true });
   fs.writeFileSync(path.join(theme, 'assets/js/pb-itest.js'), '// itest');
   const out = wp.check(['eval', 'do_action("wp_enqueue_scripts"); echo wp_script_is("pb-itest", "enqueued") ? "yes" : "no";']).trim();
   assert.equal(out, 'yes');
   fs.rmSync(path.join(theme, 'assets/js/pb-itest.js'));
+  } finally { restoreTheme(wp); }
 });
 ```
 
-Run: `npm run test:integration` → Expected: PASS (requires the Task 4 fork to be the active theme; if run standalone, the active theme can be any theme with a `functions.php`).
+Run: `npm run test:integration` → Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -1298,18 +1296,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { itest, testWp, PUBLIC } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
 import { applyTokens } from '../../skills/protoblocks-site-builder/scripts/lib/tokens.mjs';
 import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
-itest('applied tokens reach theme.json and compile with Tailwind', () => {
+itest('applied tokens reach theme.json and compile with Tailwind', async () => {
   const wp = testWp();
-  const theme = path.join(PUBLIC, 'wp-content/themes', wp.check(['option', 'get', 'stylesheet']).trim());
+  const theme = await useItestTheme(wp);
+  try {
   applyTokens(theme, { colors: { ink: '#101010', accent: '#ff5a1f' }, fonts: { sans: { family: 'Inter', google: [400, 700] } } });
   const palette = JSON.parse(wp.check(['eval', 'echo wp_json_encode(wp_get_global_settings(["color","palette","theme"]));']));
   assert.ok(palette.some((p) => p.slug === 'accent' && p.color === '#ff5a1f'), JSON.stringify(palette));
   const r = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
   assert.equal(r.success, true, JSON.stringify(r));
+  } finally { restoreTheme(wp); }
 });
 ```
 
@@ -1513,11 +1513,18 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
   assert.match(content, /wp:navigation-submenu/);
 
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
-  initState(theme, { url: 'http://127.0.0.1:8881', path: '/x' });
+  initState(theme, { url: 'http://proto-blocks.local', path: '/x' });
   updateState(theme, (s) => { setPath(s, 'site.navigation.menus.itest', { id: b.id, spec, pending: b.pending }); });
   wp.check(['post', 'create', '--post_type=page', '--post_status=publish', '--post_title=PB Nav Later', '--post_name=pb-nav-later', '--porcelain']);
   assert.deepEqual(refreshMenus(wp, theme).refreshed, ['itest']);
   assert.deepEqual(loadState(theme).site.navigation.menus.itest.pending, []);
+
+  // cleanup on the shared Local test site
+  for (const name of ['pb-nav-home', 'pb-nav-later']) {
+    const ids = wp.check(['post', 'list', '--post_type=page', `--name=${name}`, '--format=ids']).trim().split(/\s+/).filter(Boolean);
+    if (ids.length) wp.check(['post', 'delete', ...ids, '--force']);
+  }
+  wp.check(['post', 'delete', String(b.id), '--force']);
 });
 ```
 
@@ -1723,12 +1730,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 
 ```js
 import assert from 'node:assert/strict';
-import { itest, testWp } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
 import { listOverrides, removeOverride } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 
-itest('detects a Site Editor header override and removes it only with confirm', () => {
+// Runs on the throwaway pb-itest theme only — never touch the developer's real Site Editor overrides.
+itest('detects a Site Editor header override and removes it only with confirm', async () => {
   const wp = testWp();
+  await useItestTheme(wp);
+  try {
   const theme = wp.check(['option', 'get', 'stylesheet']).trim();
+  assert.equal(theme, 'pb-itest');
   for (const o of listOverrides(wp)) removeOverride(wp, o.slug, { confirm: true });
   const id = wp.check(['post', 'create', '--post_type=wp_template_part', '--post_status=publish', '--post_name=header', '--post_title=Header', '--post_content=<!-- wp:paragraph --><p>edited</p><!-- /wp:paragraph -->', '--porcelain']).trim();
   wp.check(['post', 'term', 'set', id, 'wp_theme', theme]);
@@ -1739,6 +1750,7 @@ itest('detects a Site Editor header override and removes it only with confirm', 
   assert.equal(listOverrides(wp).length, 1, 'still there without confirm');
   assert.deepEqual(removeOverride(wp, 'header', { confirm: true }).removed, [Number(id)]);
   assert.equal(listOverrides(wp).length, 0);
+  } finally { restoreTheme(wp); }
 });
 ```
 
@@ -1827,14 +1839,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 }
 ```
 
-- [ ] **Step 2: Smoke-test against the test site**
+- [ ] **Step 2: Smoke-test against the Local test site**
 
-Run:
+Run (from the repo root):
 ```bash
-PATH="$(pwd)/tests/.site/bin:$PATH" PB_LOCAL_APP_SUPPORT=/nonexistent \
-  node skills/protoblocks-site-builder/scripts/lib/setup-site.mjs --name "PB Smoke" --slug pb-smoke --cwd tests/.site/public
+ORIG=$(tests/.tmp/wp-test-site option get stylesheet)
+node skills/protoblocks-site-builder/scripts/lib/setup-site.mjs --name "PB Smoke" --slug pb-smoke --site "Proto Blocks"
+node skills/protoblocks-site-builder/scripts/lib/setup-site.mjs --name "PB Smoke" --slug pb-smoke --site "Proto Blocks"
+tests/.tmp/wp-test-site theme activate "$ORIG"
+rm -rf "$(tests/.tmp/wp-test-site eval 'echo get_theme_root();')/pb-smoke"
 ```
-Note: `PB_LOCAL_APP_SUPPORT=/nonexistent` forces native mode (the disposable site is not a Local site); `tests/.site/bin/wp` is the plain WP-CLI created by `setup-test-site.sh` (re-run `npm run test:site` if it's missing — the script is idempotent only when the site exists, so delete `tests/.site` with `--fresh` if `bin/wp` is absent). Expected: JSON with `theme.slug: "pb-smoke"`, a `stateFile` path, all four plugins `ok`. Run it a second time → `theme.reused: true`. Afterwards re-activate the test fork: `tests/.site/wp theme activate pb-itest`.
+(`tests/.tmp/wp-test-site` is written by the integration helpers; if it's missing, run `npm run test:integration` once.)
+Expected: the first run prints JSON with `theme.slug: "pb-smoke"`, a `stateFile` path, and all four plugins `ok` or `installed`. The second run prints `theme.reused: true`. Afterwards the developer's original theme must be active again (`option get stylesheet` = `$ORIG`) and the `pb-smoke` folder removed. Include all of that output in the report.
 
 - [ ] **Step 3: Write `skills/protoblocks-site-setup/SKILL.md`**
 
