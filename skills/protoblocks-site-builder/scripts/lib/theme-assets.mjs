@@ -15,12 +15,22 @@ const BLOCK = [
   MANAGED_END,
 ].join('\n');
 
+function codeError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
 export function ensureManagedBlock(src) {
   const start = src.indexOf(MANAGED_START);
-  if (start === -1) return `${src.replace(/\s*$/, '')}\n\n${BLOCK}\n`;
-  const end = src.indexOf(MANAGED_END, start);
-  const tail = end === -1 ? '' : src.slice(end + MANAGED_END.length);
-  return `${src.slice(0, start)}${BLOCK}${tail}`;
+  const end = start === -1 ? src.indexOf(MANAGED_END) : src.indexOf(MANAGED_END, start);
+  if ((start === -1) !== (end === -1)) {
+    throw codeError('EMANAGEDBLOCK', 'functions.php has a broken protoblocks managed block (start/end markers); fix it by hand — nothing was changed');
+  }
+  if (start === -1) {
+    const body = src.replace(/\s*$/, '');
+    if (body.endsWith('?>')) return `${body.slice(0, -2).replace(/\s*$/, '')}\n\n${BLOCK}\n?>\n`;
+    return `${body}\n\n${BLOCK}\n`;
+  }
+  return `${src.slice(0, start)}${BLOCK}${src.slice(end + MANAGED_END.length)}`;
 }
 
 function walk(dir, base = dir) {
@@ -31,6 +41,10 @@ function walk(dir, base = dir) {
 }
 
 export function installThemeAssets(themeDir, assetsDir = DEFAULT_ASSETS_DIR) {
+  const fnFile = path.join(themeDir, 'functions.php');
+  if (!fs.existsSync(fnFile)) throw codeError('ENOFUNCTIONS', `No functions.php in ${themeDir}`);
+  const before = fs.readFileSync(fnFile, 'utf8');
+  const after = ensureManagedBlock(before); // throws before anything is written
   const copied = [];
   for (const rel of walk(assetsDir)) {
     if (!path.basename(rel).startsWith('pb-')) continue;
@@ -39,9 +53,6 @@ export function installThemeAssets(themeDir, assetsDir = DEFAULT_ASSETS_DIR) {
     fs.copyFileSync(path.join(assetsDir, rel), dest);
     copied.push(rel.split(path.sep).join('/'));
   }
-  const fnFile = path.join(themeDir, 'functions.php');
-  const before = fs.readFileSync(fnFile, 'utf8');
-  const after = ensureManagedBlock(before);
   if (after !== before) fs.writeFileSync(fnFile, after);
   return { copied, functionsUpdated: after !== before };
 }
