@@ -71,4 +71,6 @@ QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax
 | `validate <themeDir>` | Prints `{"valid": true}` or fails. |
 | `restore <themeDir>` | Replaces `build.json` with the valid `build.json.bak`. `[ENOBACKUP]` if none. |
 
-Exit codes: 0 success, 1 error (message `[CODE] ...` on stderr), 64 usage error. Error codes: `ENOSTATE`, `EEXISTS`, `EPARSE` (not JSON), `EINVALID` (schema violation, including a rejected `set`/`append`), `ENOBACKUP`, `ELOCKED` (lock held over 10 s). `set`/`append` take the lock, validate the result, and write atomically, so a rejected write leaves state unchanged.
+Exit codes: 0 success, 1 error (message `[CODE] ...` on stderr), 64 usage error. Error codes: `ENOSTATE`, `EEXISTS`, `EPARSE` (not JSON), `EINVALID` (schema violation, including a rejected `set`/`append`), `EVALUE` (the `<json>` argument is not valid JSON), `ENOBACKUP`, `ELOCKED` (lock held over 10 s). `set`/`append` take the lock, validate the result, and write atomically, so a rejected write leaves state unchanged.
+
+**Recovery guidance.** Run `restore` only when the file on disk is bad: `[EPARSE]`, or `[EINVALID]` from `get`/`validate`. A rejected `set`/`append` (`[EINVALID]`, or `[EVALUE]` for a malformed JSON argument) leaves state unchanged: fix the value and retry, and do not `restore`, because that would roll back the previous good write. `set` also rejects a non-numeric key on an array, an index past the array length (use `append` or index = length), and the segments `__proto__`, `constructor`, `prototype`.

@@ -182,3 +182,69 @@ test('updateState on empty dir throws ENOSTATE', () => {
     (e) => e instanceof StateError && e.code === 'ENOSTATE'
   );
 });
+
+function cliInit() {
+  const siteFile = path.join(theme, 'site.json');
+  fs.writeFileSync(siteFile, JSON.stringify(site));
+  execFileSync(process.execPath, [CLI, 'init', theme, siteFile]);
+}
+const cli = (...a) => spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8' });
+const page = JSON.stringify({ slug: 'p', status: 'planning', sections: [] });
+
+test('CLI set pages.2 on an empty array is rejected and the file is unchanged', () => {
+  cliInit();
+  const before = fs.readFileSync(statePath(theme), 'utf8');
+  const r = cli('set', theme, 'pages.2', page);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /\[EINVALID\]/);
+  assert.equal(fs.readFileSync(statePath(theme), 'utf8'), before);
+});
+
+test('setPath allows an index equal to length (append) but rejects past it', () => {
+  const o = { pages: [] };
+  setPath(o, 'pages.0', { a: 1 });
+  assert.equal(o.pages.length, 1);
+  assert.throws(() => setPath(o, 'pages.5', {}), (e) => e.code === 'EINVALID');
+});
+
+test('setPath rejects a non-index key on an array', () => {
+  assert.throws(() => setPath({ pages: [] }, 'pages.home', 'x'), (e) => e.code === 'EINVALID' && /array/.test(e.message));
+});
+
+test('setPath and appendPath reject prototype-polluting segments', () => {
+  assert.throws(() => setPath({}, '__proto__.x', 1), (e) => e.code === 'EINVALID');
+  assert.throws(() => setPath({}, 'a.constructor.b', 1), (e) => e.code === 'EINVALID');
+  assert.throws(() => appendPath({}, 'prototype.x', 1), (e) => e.code === 'EINVALID');
+  assert.equal({}.x, undefined);
+});
+
+test('validate reports holes in arrays', () => {
+  const s = initState(theme, site);
+  s.pages.length = 2; // two holes
+  assert.ok(validate(s).length > 0);
+});
+
+test('CLI set with non-JSON value exits 1 with EVALUE, not EPARSE', () => {
+  cliInit();
+  const r = cli('set', theme, 'site.url', 'not-json');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\[EVALUE\] Value is not valid JSON/);
+  assert.doesNotMatch(r.stderr, /EPARSE/);
+});
+
+test('CLI restore recovers the prior good write after corruption', () => {
+  cliInit();
+  assert.equal(cli('set', theme, 'site.url', '"http://v2.local"').status, 0);
+  fs.writeFileSync(statePath(theme), '{"broken');
+  const bad = cli('get', theme, 'site.url');
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /\[EPARSE\]/);
+  assert.equal(cli('restore', theme).status, 0);
+  assert.equal(JSON.parse(cli('get', theme, 'site.url').stdout), 'http://acme.local');
+});
+
+test('CLI restore without a backup exits 1 with ENOBACKUP', () => {
+  const r = cli('restore', theme);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\[ENOBACKUP\]/);
+});
