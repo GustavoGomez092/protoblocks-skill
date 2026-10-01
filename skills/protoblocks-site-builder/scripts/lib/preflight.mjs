@@ -55,6 +55,12 @@ export function runPreflight({
     report.runtimeDir = path.join(report.publicPath, 'wp-content', '.protoblocks');
     wpCmd = writeWrapper(path.join(report.runtimeDir, 'wp'), local.site);
     add('site', 'pass', `Local site "${local.site.name}" (${local.site.domain})`);
+  } else if (site && !local.notLocal) {
+    // Explicit --site was passed but lookup failed; never fall back to native.
+    const fixText = local.halted
+      ? 'Start the site in Local, then re-run preflight.'
+      : 'Check the name with `node local-site.mjs detect`, or start the site in Local.';
+    add('site', 'fail', local.error, fixText);
   } else if (!local.notLocal && (site || local.sites?.length) && !findWpRoot(cwd)) {
     add('site', 'fail', local.error, 'Start the site in Local or pass --site "<name>".');
   } else if (!local.notLocal && /Start the site/.test(local.error ?? '')) {
@@ -99,10 +105,15 @@ export function runPreflight({
       add('proto-blocks', 'warn', 'Proto-Blocks is not installed', 'Run /protoblocks:setup-site (installs the latest release).');
     } else if (status.stdout.trim() !== 'active') {
       add('proto-blocks', 'warn', `Proto-Blocks is ${status.stdout.trim()}`, 'Run /protoblocks:setup-site (activates it).');
-    } else if (compareVersions(version.stdout.trim(), MIN_PROTO_BLOCKS) < 0) {
-      add('proto-blocks', 'warn', `Proto-Blocks ${version.stdout.trim()} < ${MIN_PROTO_BLOCKS}`, 'Run /protoblocks:setup-site to update to the latest release.');
     } else {
-      add('proto-blocks', 'pass', `Proto-Blocks ${version.stdout.trim()} active`);
+      const ver = version.stdout.trim();
+      if (!ver) {
+        add('proto-blocks', 'warn', 'Proto-Blocks active (version unknown)', 'Run /protoblocks:setup-site to ensure the latest version.');
+      } else if (compareVersions(ver, MIN_PROTO_BLOCKS) < 0) {
+        add('proto-blocks', 'warn', `Proto-Blocks ${ver} < ${MIN_PROTO_BLOCKS}`, 'Run /protoblocks:setup-site to update to the latest release.');
+      } else {
+        add('proto-blocks', 'pass', `Proto-Blocks ${ver} active`);
+      }
     }
 
     const yoast = wp('plugin', 'get', 'wordpress-seo', '--field=status');

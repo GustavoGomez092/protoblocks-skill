@@ -107,3 +107,83 @@ test('halted Local site fails with the start-in-Local message', () => {
   assert.equal(r.ok, false);
   assert.match(r.checks.find((c) => c.id === 'site').detail, /Start the site "Halted" in Local/);
 });
+
+test('explicit --site with typo never falls back to native, fails with check name instruction', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-typo-'));
+  const appSupport = path.join(home, 'Local');
+  fs.mkdirSync(appSupport, { recursive: true });
+  fs.writeFileSync(path.join(appSupport, 'sites.json'), JSON.stringify({ a1: { id: 'a1', name: 'Acme', domain: 'acme.local', path: '~/sites/acme', services: { php: { version: '8.4.10' } } } }));
+  fs.writeFileSync(path.join(appSupport, 'site-statuses.json'), JSON.stringify({ a1: 'running' }));
+  const acmePath = path.join(home, 'sites/acme/app/public');
+  fs.mkdirSync(acmePath, { recursive: true });
+  fs.writeFileSync(path.join(acmePath, 'wp-config.php'), '<?php');
+
+  const calls = [];
+  const recordingExec = (cmd, args) => {
+    calls.push({ cmd, args: args.filter((a) => !a.startsWith('--path=')) });
+    return { code: 127, stdout: '', stderr: 'command not found' };
+  };
+
+  const r = runPreflight({
+    cwd: acmePath,
+    env: { HOME: home, PB_LOCAL_APP_SUPPORT: appSupport },
+    site: 'typo',
+    exec: recordingExec,
+    nodeVersion: '20.1.0',
+    qaDir: home,
+  });
+  assert.equal(r.ok, false);
+  const siteCheck = r.checks.find((c) => c.id === 'site');
+  assert.equal(siteCheck.status, 'fail');
+  assert.match(siteCheck.detail, /No Local site matches/);
+  assert.match(siteCheck.fix, /check the name/i);
+  assert.ok(!siteCheck.fix.includes('--site'), 'fix should not suggest --site when --site was already passed');
+  assert.equal(calls.length, 0, 'wp should not have been called when --site lookup failed');
+});
+
+test('halted Local site with wp-config.php in cwd fails without wp calls', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-halted-wp-'));
+  const appSupport = path.join(home, 'Local');
+  fs.mkdirSync(appSupport, { recursive: true });
+  fs.writeFileSync(path.join(appSupport, 'sites.json'), JSON.stringify({ h1: { id: 'h1', name: 'Halted', domain: 'h.local', path: '~/sites/h', services: { php: { version: '8.4.10' } } } }));
+  fs.writeFileSync(path.join(appSupport, 'site-statuses.json'), JSON.stringify({ h1: 'halted' }));
+  const publicPath = path.join(home, 'sites/h/app/public');
+  fs.mkdirSync(publicPath, { recursive: true });
+  fs.writeFileSync(path.join(publicPath, 'wp-config.php'), '<?php');
+
+  const calls = [];
+  const recordingExec = (cmd, args) => {
+    calls.push({ cmd, args });
+    return { code: 0, stdout: 'http://example.local\n', stderr: '' };
+  };
+
+  const r = runPreflight({
+    cwd: publicPath,
+    env: { HOME: home, PB_LOCAL_APP_SUPPORT: appSupport },
+    exec: recordingExec,
+    nodeVersion: '20.1.0',
+    qaDir: home,
+  });
+  assert.equal(r.ok, false);
+  const siteCheck = r.checks.find((c) => c.id === 'site');
+  assert.equal(siteCheck.status, 'fail');
+  assert.match(siteCheck.detail, /Start the site "Halted" in Local/);
+  assert.equal(calls.length, 0, 'wp should not have been called when site is halted');
+});
+
+test('active proto-blocks with empty version warns with version unknown', () => {
+  const r = runPreflight({
+    cwd: path.join(root, 'public'),
+    env: notLocalEnv(root),
+    nodeVersion: '20.1.0',
+    qaDir: root,
+    exec: fakeExec({
+      ...healthy,
+      'plugin get proto-blocks --field=version': '\n', // empty version
+    }),
+  });
+  const c = r.checks.find((x) => x.id === 'proto-blocks');
+  assert.equal(c.status, 'warn');
+  assert.match(c.detail, /Proto-Blocks active.*version unknown/i);
+  assert.match(c.fix, /setup-site/i);
+});

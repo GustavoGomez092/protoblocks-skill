@@ -75,6 +75,7 @@ test('resolveLocalSite resolves a running site from cwd', () => {
 test('resolveLocalSite on a halted site says to start it in Local', () => {
   const r = resolveLocalSite({ cwd: path.join(home, 'Local Sites/halted'), env });
   assert.equal(r.ok, false);
+  assert.equal(r.halted, true);
   assert.match(r.error, /Start the site "Halted" in Local/);
 });
 

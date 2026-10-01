@@ -82,7 +82,7 @@ export function resolveLocalSite({ cwd = process.cwd(), query, env = process.env
   }
   const socket = socketPath(appSupport, site.id);
   if (!site.running || !fs.existsSync(socket)) {
-    return { ok: false, sites: names, error: `Start the site "${site.name}" in Local, then re-run.` };
+    return { ok: false, halted: true, sites: names, error: `Start the site "${site.name}" in Local, then re-run.` };
   }
   const phpBin = phpBinary(appSupport, site.phpVersion);
   if (!phpBin) return { ok: false, error: `Local's PHP ${site.phpVersion} binary not found under ${appSupport}/lightning-services.` };
