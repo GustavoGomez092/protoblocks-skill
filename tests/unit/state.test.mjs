@@ -162,3 +162,23 @@ test('CLI set without path exits 64 with usage message', () => {
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /Usage:/);
 });
+
+test('saveState does not overwrite .bak if current file is valid JSON but fails schema', () => {
+  initState(theme, site);
+  updateState(theme, (s) => { s.site.url = 'http://v2.local'; });
+  const bakPath = statePath(theme) + '.bak';
+  const bakBefore = JSON.parse(fs.readFileSync(bakPath, 'utf8'));
+  assert.equal(bakBefore.site.url, 'http://acme.local');
+  fs.writeFileSync(statePath(theme), JSON.stringify({ schemaVersion: 1 })); // valid JSON, invalid schema
+  const validState = { schemaVersion: 1, site: { ...site, qa: DEFAULT_QA }, library: {}, pages: [] };
+  saveState(theme, validState);
+  const bakAfter = JSON.parse(fs.readFileSync(bakPath, 'utf8'));
+  assert.equal(bakAfter.site.url, 'http://acme.local', 'backup should not change when current file fails schema validation');
+});
+
+test('updateState on empty dir throws ENOSTATE', () => {
+  assert.throws(
+    () => updateState(theme, (s) => {}),
+    (e) => e instanceof StateError && e.code === 'ENOSTATE'
+  );
+});

@@ -134,10 +134,12 @@ export function saveState(themeDir, state) {
   if (fs.existsSync(file)) {
     try {
       const current = JSON.parse(fs.readFileSync(file, 'utf8'));
-      validate(current); // only copy to .bak if current file is valid JSON and passes validation
-      fs.copyFileSync(file, `${file}.bak`);
+      // only copy to .bak if current file is valid JSON AND passes validation
+      if (validate(current).length === 0) {
+        fs.copyFileSync(file, `${file}.bak`);
+      }
     } catch (e) {
-      // current file is corrupt, don't overwrite .bak
+      // current file is corrupt or doesn't parse, don't overwrite .bak
     }
   }
   const tmp = `${file}.tmp-${process.pid}`;
@@ -164,6 +166,8 @@ export function initState(themeDir, site) {
 }
 
 function waitForLock(lockPath, endTime) {
+  const sab = new SharedArrayBuffer(4);
+  const ia = new Int32Array(sab);
   while (true) {
     try {
       return fs.openSync(lockPath, 'wx');
@@ -171,14 +175,24 @@ function waitForLock(lockPath, endTime) {
       if (e.code !== 'EEXIST') throw e;
       const now = Date.now();
       if (now > endTime) throw new StateError(`Lock timeout on ${lockPath}`, 'ELOCKED');
-      const stat = fs.statSync(lockPath);
-      const lockAge = now - stat.mtimeMs;
-      if (lockAge > 30000) {
-        try {
-          fs.unlinkSync(lockPath);
-        } catch (e2) {
-          if (e2.code !== 'ENOENT') throw e2;
+      try {
+        const stat = fs.statSync(lockPath);
+        const lockAge = now - stat.mtimeMs;
+        if (lockAge > 30000) {
+          try {
+            fs.unlinkSync(lockPath);
+            // Race: another waiter may also unlink; acceptable (stale lock cleanup).
+          } catch (e2) {
+            if (e2.code !== 'ENOENT') throw e2;
+            // Lock was already removed, retry immediately.
+          }
+        } else {
+          // Sleep 50ms before retry
+          Atomics.wait(ia, 0, 0, 50);
         }
+      } catch (e2) {
+        if (e2.code !== 'ENOENT') throw e2;
+        // Lock holder released between check and stat; retry immediately.
       }
     }
   }
@@ -186,6 +200,10 @@ function waitForLock(lockPath, endTime) {
 
 export function updateState(themeDir, fn, opts = {}) {
   const { timeoutMs = 10000 } = opts;
+  // Check state exists before acquiring lock to throw ENOSTATE early
+  const file = statePath(themeDir);
+  if (!fs.existsSync(file)) throw new StateError(`No state file at ${file}. Run: node state.mjs init <themeDir> <site.json>`, 'ENOSTATE');
+
   const lockPath = path.join(stateDir(themeDir), 'build.json.lock');
   const endTime = Date.now() + timeoutMs;
   let lockFd;
