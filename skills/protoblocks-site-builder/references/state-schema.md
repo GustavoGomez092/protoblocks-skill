@@ -60,6 +60,23 @@ Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^
 
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 
+## Plan fields (written by `protoblocks-design-breakdown`)
+
+Free-form keys (not schema-enforced), set at the plan gate after the developer approves:
+
+| Path | Meaning |
+|---|---|
+| `pages[i].plan` | `{ "approvedAt": "<ISO timestamp>", "by": "developer" }`. Must exist before the page `status` becomes `building`. |
+| `pages[i].notes.shellCap` | String note that the theme's 1440px shell cap in `style.css` was changed for a wider desktop frame. |
+| `sections[j].label` | Human label, e.g. "Hero". |
+| `sections[j].decision` | `new`, `reuse` or `extend` (enum-checked). |
+| `sections[j].block` | Block slug the section uses. |
+| `sections[j].notes` | Plan notes (shared classes, assets to replace, etc.). |
+| `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
+| `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` (`references/header-footer.md`). |
+
+Find pages by `slug` and sections by `n`, not by array position.
+
 ## Enums and defaults
 
 | Field | Values |

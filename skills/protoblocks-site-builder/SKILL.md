@@ -58,6 +58,8 @@ Values are JSON (quote strings: `'"done"'`). Writes are validated and locked. Re
 
 **Site setup** - after preflight, run the `protoblocks-site-setup` skill (one-shot `setup-site.mjs`, then tokens, navigation, header/footer parts). It creates the theme fork and initializes the build state.
 
+**Each page** - `protoblocks-design-breakdown` (frames -> crops -> plan -> approval), then `protoblocks-section-loop` for every section in plan order (build -> gates -> page -> visual-qa -> record; animate via `protoblocks-motion`).
+
 ## Iron rules
 
 - Never claim a section passes without a recorded QA verdict in state.

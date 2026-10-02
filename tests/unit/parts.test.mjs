@@ -1,9 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { partMarkup, writePart, removeOverride, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
+import { spawnSync } from 'node:child_process';
+import { markupFromArgs, partMarkup, writePart, removeOverride, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
 test('partMarkup wraps core/navigation inside the proto-block', () => {
@@ -167,4 +169,48 @@ test('recovery commands use the preflight WP-CLI path, shell-quoted', async () =
   const wp = fakeWp();
   assert.throws(() => removeOverride(wp, 'pb-itest', 'header', { wpCmd: wrapper }), (e) => e.code === 'ECONFIRM' && e.message.includes(`${wrapper} eval 'wp_untrash_post(5);'`));
   assert.deepEqual(removeOverride(fakeWp(), 'pb-itest', 'header', { confirm: true, expectId: 5, wpCmd: wrapper }).recovery, [recoveryCommand(5, wrapper)]);
+});
+
+test('parts CLI prints usage and exits 64 on missing or unknown arguments', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  for (const args of [[], ['__pbx__', '/tmp'], ['write', '/tmp'], ['remove-override', '/tmp']]) {
+    const r = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 64, args.join(' '));
+    assert.match(r.stderr, /Usage: node parts\.mjs/);
+  }
+});
+
+test('markupFromArgs builds part markup, namespacing bare block slugs and keeping the anchor attr', () => {
+  assert.equal(
+    markupFromArgs(['site-header', '--attrs', '{"anchor":"pb-s1","sticky":true}', '--nav-ref', '15']),
+    '<!-- wp:proto-blocks/site-header {"anchor":"pb-s1","sticky":true} -->\n<!-- wp:navigation {"ref":15} /-->\n<!-- /wp:proto-blocks/site-header -->\n',
+  );
+  assert.equal(markupFromArgs(['acme/x']), '<!-- wp:acme/x /-->\n');
+});
+
+test('markupFromArgs validates its inputs', () => {
+  const code = (args) => { try { markupFromArgs(args); } catch (e) { return e.code; } return null; };
+  assert.equal(code(['site-header', '--attrs', '{nope']), 'EINPUT');
+  assert.equal(code(['site-header', '--attrs', '[1]']), 'EINPUT');
+  assert.equal(code(['Bad Block']), 'EINPUT');
+  for (const bad of ['0', '-2', '1.5', 'abc', '']) assert.equal(code(['site-header', '--nav-ref', bad]), 'ENAVREF', bad);
+  assert.equal(code([]), 'EUSAGE');
+  assert.equal(code(['site-header', '--bogus', '1']), 'EUSAGE');
+  assert.equal(code(['site-header', '--attrs']), 'EUSAGE');
+});
+
+test('parts.mjs markup runs as a CLI without a WordPress runtime', () => {
+  const script = path.resolve('skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  const run = (...a) => spawnSync(process.execPath, [script, 'markup', ...a], { encoding: 'utf8', cwd: os.tmpdir() });
+  const ok = run('site-footer', '--attrs', '{"anchor":"pb-s9"}', '--nav-ref', '3');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /wp:proto-blocks\/site-footer \{"anchor":"pb-s9"\}/);
+  assert.match(ok.stdout, /wp:navigation \{"ref":3\}/);
+  const badJson = run('site-footer', '--attrs', '{x');
+  assert.equal(badJson.status, 1);
+  assert.match(badJson.stderr, /\[EINPUT\]/);
+  assert.match(run('site-footer', '--nav-ref', 'x').stderr, /\[ENAVREF\]/);
+  assert.equal(run().status, 64);
+  assert.equal(run('site-footer', '--wat').status, 64);
 });

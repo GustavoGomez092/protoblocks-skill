@@ -29,9 +29,10 @@ function assertPlainArgs(values) {
   }
 }
 
-// The optional second argument is an options object (`{ exec }`; later stages may add more keys).
-export function createWp({ wp, mode, publicPath }, { exec = realExec } = {}) {
-  const base = mode === 'native' ? [`--path=${publicPath}`] : [];
+// The optional second argument is an options object. extraArgs: global WP-CLI flags (e.g. --exec=...)
+// for tests only; normal callers pass none and must never pass untrusted input.
+export function createWp({ wp, mode, publicPath }, { exec = realExec, extraArgs = [] } = {}) {
+  const base = [...(mode === 'native' ? [`--path=${publicPath}`] : []), ...extraArgs];
   // `run`/`check` take WP-CLI flags on purpose; only call them with arguments the caller controls.
   const run = (args, opts = {}) => exec(wp, [...base, ...args], opts);
   const check = (args, opts) => {
