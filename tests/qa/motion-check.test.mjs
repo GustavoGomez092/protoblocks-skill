@@ -23,6 +23,28 @@ qtest('motionCheck passes clean motion, fails residue, and checks Taxi re-init',
   } finally { await srv.close().catch(() => {}); }
 });
 
+// Continuous presets never settle; motionCheck stops them at rest before the settled frame. Without that, a marquee
+// frame is mid-loop (mismatch ~0.026) and a striped parallax background is offset (mismatch ~0.8).
+qtest('motionCheck judges a marquee at rest and passes', async () => {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await motionCheck({ url: `${srv.url}/motion-marquee.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.ok(r.settledMismatch <= 0.02, `settledMismatch ${r.settledMismatch}`);
+    assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+  } finally { await srv.close().catch(() => {}); }
+});
+
+qtest('motionCheck judges a striped parallax background at rest and passes', async () => {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await motionCheck({ url: `${srv.url}/motion-parallax.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.ok(r.settledMismatch <= 0.02, `settledMismatch ${r.settledMismatch}`);
+    assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+  } finally { await srv.close().catch(() => {}); }
+});
+
 // Each fault below breaks exactly one rule. The "everything else is clean" asserts make sure the failing
 // rule is the only reason pass is false, so dropping that rule from motionCheck turns the test red.
 async function withChecker(fn) {

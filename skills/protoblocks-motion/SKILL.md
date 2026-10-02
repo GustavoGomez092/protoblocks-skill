@@ -51,7 +51,7 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
    `node "$PB/lib/gates.mjs" "$THEME" <block> --attrs '<attrs json>'`, then `node "$PB/lib/page.mjs" build "$THEME" <page>`.
 4. Verify (the page URL is `page.url` in `state.mjs get "$THEME" pages`; width is the desktop width used in Verify, default 1440):
    `node "$PB/qa/motion-check.mjs" --url <page url> --anchor pb-s<n> --width <w> --out "$THEME/.protoblocks/artifacts/<page>/pb-s<n>/motion"`
-   It prints the result and exits 1 unless `pass`. Result: `settledMismatch` (max 0.02), `settledHeightDelta` (must be 0), `cls` (anchor-scoped, max 0.01) and `clsPage` (information), `unsettled` (reveal elements not `done` in 6 s), `imageErrors` (anchor images failed or stalled; `pageImageWarnings` elsewhere do not fail), `pageErrors`, and `taxi` (`checked` only when the page has Taxi and ScrollTrigger: `before`/`after` counts after two navigate-away-and-back round trips must match, `duplicates` and `unsettled` empty, no `error`; `retries` is information).
+   It prints the result and exits 1 unless `pass`. Continuous presets (`parallax`, `marquee`) never settle, so the check stops them at rest before the settled frame. Result: `settledMismatch` (max 0.02), `settledHeightDelta` (must be 0), `cls` (anchor-scoped, max 0.01) and `clsPage` (information), `unsettled` (reveal elements not `done` in 6 s), `imageErrors` (anchor images failed or stalled; `pageImageWarnings` elsewhere do not fail), `pageErrors`, and `taxi` (`checked` only when the page has Taxi and ScrollTrigger: `before`/`after` counts after two navigate-away-and-back round trips must match, `duplicates` and `unsettled` empty, no `error`; `retries` is information).
 5. Fix by symptom, then re-run:
    - `settledMismatch` or `settledHeightDelta`: residue. A CSS transform or clip-path on the animated element (presets clear them: use a wrapper), a bespoke infinite loop (use `marquee`), a scrub or pin. See `references/presets.md`.
    - `cls`: layout properties animated (height, margin) or a parent resized on reveal; use transform and opacity only.
@@ -60,7 +60,7 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
    - `imageErrors`: not a motion problem; fix the image as in the section loop.
 6. Record:
    `node "$PB/lib/motion.mjs" record "$THEME" <page> <n> "<out>/motion-check.json" --presets a,b`
-   It refuses a failing check (`EMOTION`) and sets the section `done`. Count attempts yourself: after 3 failed verify runs on one section stop and ask the developer to choose: simplify the motion, accept it (re-run `record` with `--accepted`; it adds the note "motion accepted by developer"), or remove the motion from the section (revert the attributes, then record a passing check).
+   It sets the section `done` on a pass, and refuses a section that is not `animating` (`ESTATUS`). A failing check is refused (`EMOTION`) and persisted as `section.motion.attempts` with `lastResult`; a pass resets it. The error reports `attempts` and `capReached`: stop when `record` reports `capReached: true` (3 failed checks) and ask the developer to choose: simplify the motion, accept it (re-run `record` with `--accepted`; it adds the note "motion accepted by developer"), or remove the motion from the section (revert the attributes, then record a passing check).
 7. Commit in the theme fork: `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(motion): <block>"`.
 
 ## Bespoke motion

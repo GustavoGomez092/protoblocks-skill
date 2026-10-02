@@ -169,6 +169,9 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       const loc = page.locator(selector).first();
       const motionImages = await anchorImages(loc);
       await hideChrome(loc);
+      // Continuous presets (parallax, marquee) never settle, so they are judged at rest: stopped in their rest
+      // position (offset 0, marquee copies removed), the same state the reduced-motion frame shows.
+      await page.evaluate((sel) => { if (window.pbMotion && window.pbMotion.rest) window.pbMotion.rest(document.querySelector(sel)); }, selector);
       await page.waitForTimeout(150);
       await loc.screenshot({ path: settled });
       const { cls, clsPage } = await page.evaluate(() => ({ cls: Math.round(window.__pbCls * 10000) / 10000, clsPage: Math.round(window.__pbClsPage * 10000) / 10000 }));

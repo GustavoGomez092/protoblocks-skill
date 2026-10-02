@@ -45,6 +45,7 @@ test('recordMotion closes a section only on pass or explicit acceptance', () => 
   assert.equal(sec.status, 'done');
   assert.equal(sec.motion.check, 'accepted');
   assert.match(sec.notes, /accepted by developer/);
+  updateState(t, (st) => { st.pages[0].sections[0].status = 'animating'; });
   recordMotion(t, 'home', 1, { presets: ['fade-up', 'stagger-children'], checkFile: pass });
   sec = loadState(t).pages[0].sections[0];
   assert.equal(sec.motion.check, 'pass');
@@ -91,6 +92,7 @@ test('accepting twice does not duplicate the note; a later pass removes it', () 
   recordMotion(t, 'home', 1, { presets: [], checkFile: fail, accepted: true });
   recordMotion(t, 'home', 1, { presets: [], checkFile: fail, accepted: true });
   assert.equal(loadState(t).pages[0].sections[0].notes, 'hero is tall; motion accepted by developer');
+  updateState(t, (st) => { st.pages[0].sections[0].status = 'animating'; }); // a later pass needs the section re-opened
   recordMotion(t, 'home', 1, { presets: [], checkFile: pass });
   assert.equal(loadState(t).pages[0].sections[0].notes, 'hero is tall');
   // sole note: removed entirely, no stray separator
@@ -100,6 +102,7 @@ test('accepting twice does not duplicate the note; a later pass removes it', () 
   fs.writeFileSync(f2, JSON.stringify({ pass: false }));
   fs.writeFileSync(p2, JSON.stringify({ pass: true }));
   recordMotion(t2, 'home', 1, { presets: [], checkFile: f2, accepted: true });
+  updateState(t2, (st) => { st.pages[0].sections[0].status = 'animating'; });
   recordMotion(t2, 'home', 1, { presets: [], checkFile: p2 });
   assert.ok(!loadState(t2).pages[0].sections[0].notes);
 });
@@ -151,4 +154,62 @@ test('CLI: profile, record with flags, bad command and missing --presets value',
   r = cli('record', t, 'home', '1', fail, '--presets');
   assert.equal(r.status, 64);
   assert.match(r.stderr, /Usage/);
+});
+
+const checkFiles = (t) => {
+  const fail = path.join(t, 'fail.json');
+  const pass = path.join(t, 'pass.json');
+  fs.writeFileSync(fail, JSON.stringify({ pass: false }));
+  fs.writeFileSync(pass, JSON.stringify({ pass: true }));
+  return { fail, pass };
+};
+const sectionOf = (t) => loadState(t).pages[0].sections[0];
+
+test('failed motion checks are counted in state; the third reports capReached', () => {
+  const t = theme();
+  const { fail } = checkFiles(t);
+  const attempt = () => { try { recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail }); } catch (e) { return e; } return null; };
+  let e = attempt();
+  assert.equal(e.code, 'EMOTION');
+  assert.deepEqual([e.attempts, e.capReached], [1, false]);
+  e = attempt();
+  assert.deepEqual([e.attempts, e.capReached], [2, false]);
+  assert.match(e.message, /attempts: 2, capReached: false/);
+  assert.equal(sectionOf(t).motion.attempts, 2, 'persisted by the failing call');
+  assert.equal(sectionOf(t).motion.lastResult, fail);
+  assert.equal(sectionOf(t).status, 'animating');
+  e = attempt();
+  assert.deepEqual([e.attempts, e.capReached], [3, true]);
+  assert.match(e.message, /capReached: true/);
+  assert.equal(sectionOf(t).motion.attempts, 3);
+});
+
+test('a passing check clears the attempt count; so does acceptance', () => {
+  for (const accepted of [false, true]) {
+    const t = theme();
+    const { fail, pass } = checkFiles(t);
+    assert.throws(() => recordMotion(t, 'home', 1, { checkFile: fail }), (e) => e.attempts === 1);
+    assert.throws(() => recordMotion(t, 'home', 1, { checkFile: fail }), (e) => e.attempts === 2);
+    recordMotion(t, 'home', 1, { presets: ['fade-in'], checkFile: accepted ? fail : pass, accepted });
+    const m = sectionOf(t).motion;
+    assert.equal(m.attempts, undefined);
+    assert.equal(m.lastResult, undefined);
+    assert.equal(m.check, accepted ? 'accepted' : 'pass');
+    assert.equal(sectionOf(t).status, 'done');
+  }
+});
+
+test('record is refused unless the section is animating (acceptance excepted); a refusal counts nothing', () => {
+  for (const status of ['planned', 'verifying', 'done']) {
+    const t = theme();
+    updateState(t, (s) => { s.pages[0].sections[0].status = status; });
+    const { fail, pass } = checkFiles(t);
+    for (const checkFile of [fail, pass]) assert.throws(() => recordMotion(t, 'home', 1, { checkFile }), (e) => e.code === 'ESTATUS', `${status}`);
+    assert.equal(sectionOf(t).motion, undefined);
+    assert.equal(sectionOf(t).status, status);
+    if (status === 'verifying') {
+      recordMotion(t, 'home', 1, { checkFile: fail, accepted: true });
+      assert.equal(sectionOf(t).status, 'done');
+    }
+  }
 });

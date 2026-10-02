@@ -43,18 +43,40 @@ export function installMotion(themeDir) {
   return r;
 }
 
+export const MAX_ATTEMPTS = 3;
+
+// A failing check (not accepted) is persisted as an attempt on the section, in its own state write, then reported
+// as EMOTION with the count. A pass or an acceptance replaces section.motion, which resets the count.
+// Closing a section needs status "animating"; only an explicit acceptance may close it from another status.
 export function recordMotion(themeDir, slug, n, { presets = [], checkFile, accepted = false }) {
   let check;
   try { check = JSON.parse(fs.readFileSync(checkFile, 'utf8')); } catch (e) { throw fail(`cannot read motion check ${checkFile}: ${e.message}`, 'EMOTION'); }
-  if (check.pass !== true && !accepted) throw fail(`Motion check did not pass (${checkFile}). Fix the motion or ask the developer to accept.`, 'EMOTION');
+  const passed = check.pass === true;
+  const find = (s) => {
+    const sec = s.pages.find((p) => p.slug === slug)?.sections.find((x) => x.n === Number(n));
+    if (!sec) throw fail(`No section ${n} on page "${slug}".`, 'ENOSECTION');
+    if (sec.status !== 'animating' && !accepted) throw fail(`Section ${n} on "${slug}" has status "${sec.status}", not "animating"; motion is recorded only while animating.`, 'ESTATUS');
+    return sec;
+  };
+  if (!passed && !accepted) {
+    let attempts;
+    updateState(themeDir, (s) => {
+      const sec = find(s);
+      attempts = (sec.motion?.attempts ?? 0) + 1;
+      sec.motion = { ...(sec.motion ?? {}), attempts, lastResult: checkFile };
+    });
+    const capReached = attempts >= MAX_ATTEMPTS;
+    const e = fail(`Motion check did not pass (${checkFile}); attempts: ${attempts}, capReached: ${capReached}.${capReached ? ' Stop and ask the developer: simplify, accept (--accepted) or remove the motion.' : ' Fix the motion and re-run the check.'}`, 'EMOTION');
+    e.attempts = attempts;
+    e.capReached = capReached;
+    throw e;
+  }
   let status;
   updateState(themeDir, (s) => {
-    const page = s.pages.find((p) => p.slug === slug);
-    const sec = page?.sections.find((x) => x.n === Number(n));
-    if (!sec) throw fail(`No section ${n} on page "${slug}".`, 'ENOSECTION');
-    sec.motion = { presets, check: check.pass === true ? 'pass' : 'accepted', result: checkFile };
+    const sec = find(s);
+    sec.motion = { presets, check: passed ? 'pass' : 'accepted', result: checkFile };
     const parts = (sec.notes ? String(sec.notes).split('; ') : []).filter((x) => x && x !== NOTE);
-    if (check.pass !== true) parts.push(NOTE);
+    if (!passed) parts.push(NOTE);
     if (parts.length) sec.notes = parts.join('; '); else delete sec.notes;
     sec.status = 'done';
     status = sec.status;

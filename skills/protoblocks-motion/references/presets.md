@@ -15,7 +15,7 @@ Reveal presets (frontend markup `data-pb-motion="<name>" data-proto-animate="man
 | `split-chars` | SplitText characters fade up | one short word or phrase of display text | anything longer than a few words |
 | `counter` | counts up from 0 to the authored number | stat values | text with no number (falls back to a fade) |
 
-Continuous presets (markup `data-pb-motion="<name>"` only; never `data-proto-animate`; never hidden):
+Continuous presets (markup `data-pb-motion="<name>"` only; never `data-proto-animate`; never hidden; the motion check judges them at rest: stopped at offset 0, marquee copies removed):
 
 | Preset | What it does | Use for | Avoid for |
 |---|---|---|---|
@@ -32,7 +32,7 @@ Options (all optional, numbers except `start`):
 | `data-pb-distance` | px travelled; default from the profile | `fade-up`, `stagger-children`; half of it for `split-chars` |
 | `data-pb-speed` | factor, default 1 | `parallax` (drift), `marquee` (loop takes 20 s / speed) |
 
-Keep `data-pb-delay` plus `data-pb-start` modest: the plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end.
+The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + profile duration + stagger x (n - 1) must stay under about 1.4 s (counters run at least 1 s, or twice the duration). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
 
 ## Choosing per pattern
 

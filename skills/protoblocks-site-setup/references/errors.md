@@ -32,7 +32,8 @@ Plugins already installed are never replaced. When a newer Proto-Blocks release 
 ## Motion errors
 
 - `EPROFILE` - unknown profile name or an invalid custom profile (duration 0-10, stagger 0-2, distance 0-400, ease 1-40 chars from `A-Za-z0-9.(), -`); nothing changed.
-- `EMOTION` - `motion.mjs record` was given an unreadable check file, or a check that did not pass without `--accepted`. Fix the motion (see `protoblocks-motion`) or get the developer's acceptance.
+- `EMOTION` - `motion.mjs record` was given an unreadable check file, or a check that did not pass without `--accepted`; the message carries `attempts` and `capReached` (3 failures: stop and ask the developer). Fix the motion (see `protoblocks-motion`) or get the developer's acceptance.
+- `ESTATUS` - `motion.mjs record` on a section whose status is not `animating` (only `--accepted` may close it from another status).
 - `ENOSECTION` - no section `<n>` on that page slug.
 
 ## Header/footer part errors

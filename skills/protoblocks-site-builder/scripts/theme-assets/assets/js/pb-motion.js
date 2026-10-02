@@ -206,7 +206,24 @@
     if (root && root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(SEL), function (el) { seen.delete(el); });
   }
 
-  window.pbMotion = { init: init, teardown: teardown, PRESETS: REVEAL.concat(CONTINUOUS), version: '1' };
+  // Put the continuous presets inside root at rest: parallax back at offset 0, marquee stopped at position 0 with
+  // its runtime copies removed. Reveal tweens are untouched and nothing is marked for re-init. Used by the motion
+  // check, which judges continuous presets at rest (they never settle; a mid-motion frame is not a residue).
+  function rest(root) {
+    owned = owned.filter(function (o) {
+      var name = o.el.getAttribute && o.el.getAttribute('data-pb-motion');
+      if (CONTINUOUS.indexOf(name) < 0 || (root && !root.contains(o.el))) return true;
+      try { o.kill(); } catch (e) {}
+      var track = name === 'marquee' ? o.el.firstElementChild : null;
+      if (track) {
+        Array.prototype.forEach.call(track.querySelectorAll('[data-pb-clone]'), function (n) { if (n.parentNode === track) track.removeChild(n); });
+        track.removeAttribute('data-pb-cloned');
+      }
+      return false;
+    });
+  }
+
+  window.pbMotion = { init: init, teardown: teardown, rest: rest, PRESETS: REVEAL.concat(CONTINUOUS), version: '1' };
   if (gsapReady()) window.gsap.registerPlugin(window.ScrollTrigger);
 
   document.addEventListener('proto:page-ready', function (e) { init((e.detail && e.detail.container) || document); });

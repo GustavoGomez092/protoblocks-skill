@@ -28,7 +28,7 @@ test('every data-pb-* option named in the motion docs is read by the runtime', (
   for (const n of ['delay', 'stagger', 'start', 'distance', 'speed']) assert.ok(named.has(n), `option data-pb-${n} is not documented`);
 });
 
-test('every preset named in a data-pb-motion attribute in the motion docs exists', () => {
+test('every concrete data-pb-motion="<name>" attribute in the motion docs names a runtime preset', () => {
   const docs = ['SKILL.md', 'references/presets.md', 'references/custom-motion.md'].map((f) => fs.readFileSync(path.join(ROOT, 'skills/protoblocks-motion', f), 'utf8')).join('\n');
   const known = new Set([...runtimeList('REVEAL'), ...runtimeList('CONTINUOUS')]);
   const used = [...docs.matchAll(/data-pb-motion=\\?"([a-z-]+)\\?"/g)].map((m) => m[1]);
@@ -37,13 +37,15 @@ test('every preset named in a data-pb-motion attribute in the motion docs exists
   for (const u of used) assert.ok(known.has(u), `${u} is not a pb-motion preset`);
 });
 
-test('SKILL.md preset mentions in backticks are real presets or known non-preset words', () => {
+test('every hyphenated preset-like word in backticks in SKILL.md is a runtime preset', () => {
   const skill = fs.readFileSync(path.join(ROOT, 'skills/protoblocks-motion/SKILL.md'), 'utf8');
   const known = new Set([...runtimeList('REVEAL'), ...runtimeList('CONTINUOUS')]);
-  for (const p of ['split-lines', 'fade-up', 'marquee', 'parallax']) assert.ok(known.has(p));
-  assert.ok(skill.includes('`marquee`') && skill.includes("'parallax'"));
+  const family = /^(fade|scale|clip|stagger|split|counter|parallax|marquee)\b/;
+  const mentioned = [...skill.matchAll(/`([a-z]+(?:-[a-z]+)*)`/g)].map((m) => m[1]).filter((w) => family.test(w));
+  assert.ok(mentioned.length >= 3, 'SKILL.md should name presets');
+  for (const w of mentioned) assert.ok(known.has(w), `SKILL.md names "${w}", which is not a pb-motion preset`);
 });
 
-test('runtime counter example formats named in presets.md parse as documented', () => {
+test('presets.md names the counter formats it promises', () => {
   for (const s of ['1,250+', '$4.9M', '98%', '4.5']) assert.ok(DOC.includes(`\`${s}\``), s);
 });
