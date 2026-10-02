@@ -75,37 +75,4 @@ On the second page the same table shows `reuse` for header and footer, `extend`/
 
 ## Recording the plan
 
-Only after the developer approves. The per-field `set` calls in SKILL.md work for a few sections. For a whole page write one atomic update with `updateState` (the same lock and validation `state.mjs set` uses). Section `n` in the plan maps to the state section with that `n`; the script does not touch crops or masks.
-
-<!-- test:run -->
-```bash
-cat > "$THEME/.protoblocks/plan.json" <<'JSON'
-{
-  "page": "home",
-  "sections": [
-    {"n": 1, "label": "Header", "decision": "new", "block": "site-header", "notes": "shared part; sticky"},
-    {"n": 2, "label": "Hero", "decision": "new", "block": "hero-split", "notes": "Image right; \"Book a demo\" button"},
-    {"n": 3, "label": "Features", "decision": "reuse", "block": "feature-grid", "notes": "3 columns"}
-  ]
-}
-JSON
-PLAN="$THEME/.protoblocks/plan.json" THEME="$THEME" PB="$PB" node --input-type=module -e '
-const { updateState } = await import(process.env.PB + "/lib/state.mjs");
-const fs = await import("node:fs");
-const plan = JSON.parse(fs.readFileSync(process.env.PLAN, "utf8"));
-updateState(process.env.THEME, (s) => {
-  const page = s.pages.find((p) => p.slug === plan.page);
-  if (!page) throw new Error("No page " + plan.page + " in state");
-  for (const p of plan.sections) {
-    const sec = page.sections.find((x) => x.n === p.n);
-    if (!sec) throw new Error("No section n=" + p.n + " (run intake.mjs crop first)");
-    Object.assign(sec, { label: p.label, decision: p.decision, block: p.block, notes: p.notes });
-  }
-  page.plan = { approvedAt: new Date().toISOString(), by: "developer" };
-  page.status = "building";
-});
-'
-node "$PB/lib/state.mjs" get "$THEME" pages.0.plan
-```
-
-Missing sections throw before anything is written, so a partial plan is never saved. Afterwards `node "$PB/lib/state.mjs" validate "$THEME"` must print `{"valid": true}`.
+Only after the developer approves. Use the `updateState` recipe in SKILL.md Step 5: it finds the page by slug and each section by `n`, writes label, decision, block and notes, then `plan` and page status, atomically. Keep crops and masks untouched. Afterwards `node "$PB/lib/state.mjs" validate "$THEME"` must print `{"valid": true}`.

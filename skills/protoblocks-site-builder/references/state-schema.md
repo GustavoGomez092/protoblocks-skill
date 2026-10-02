@@ -47,6 +47,22 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
 }
 ```
 
+## Plan fields (written by `protoblocks-design-breakdown`)
+
+Free-form keys (not schema-enforced), set at the plan gate after the developer approves:
+
+| Path | Meaning |
+|---|---|
+| `pages[i].plan` | `{ "approvedAt": "<ISO timestamp>", "by": "developer" }`. Must exist before the page `status` becomes `building`. |
+| `pages[i].notes.shellCap` | String note that the theme's 1440px shell cap in `style.css` was changed for a wider desktop frame. |
+| `sections[j].label` | Human label, e.g. "Hero". |
+| `sections[j].decision` | `new`, `reuse` or `extend` (enum-checked). |
+| `sections[j].block` | Block slug the section uses. |
+| `sections[j].notes` | Plan notes (shared classes, assets to replace, etc.). |
+| `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
+
+Find pages by `slug` and sections by `n`, not by array position.
+
 ## Enums and defaults
 
 | Field | Values |

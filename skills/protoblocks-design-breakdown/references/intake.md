@@ -50,11 +50,12 @@ Say which server failed and the error. Offer the fallback: the developer exports
 The base theme caps `header`, `main` and `footer` at `max-width: 1440px` (theme `style.css`, the `.wp-site-blocks > header, > footer, main` rule). If the desktop frame width W is greater than 1440, every section verified against it fails with `widthDelta = 1440 - W`. Before any section is verified:
 
 1. `grep -n "max-width: 1440px" "$THEME/style.css"` and edit that one rule (and the comment above it) so it reads `max-width: Wpx`. Edit the forked theme in `$THEME` only, never the upstream `proto-blocks-theme` checkout.
-2. Record it in state notes (this example uses W = 1600):
+2. Record it in state notes (`PI` is the page index, found by slug as in SKILL.md Step 5; this example uses W = 1600):
 
 <!-- test:run -->
 ```bash
-node "$PB/lib/state.mjs" set "$THEME" pages.0.notes.shellCap '"style.css shell max-width raised from 1440px to 1600px for the 1600px desktop frame"'
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' home)
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.notes.shellCap" '"style.css shell max-width raised from 1440px to 1600px for the 1600px desktop frame"'
 ```
 
 Frames at or below 1440 need no change (the shell is centred). The cap is theme-wide: if a later page has a different W, ask the developer before changing it again.
@@ -86,7 +87,9 @@ Masks: regions of the design that cannot match the render (cropped stock photos,
 
 <!-- test:run -->
 ```bash
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.0.masks '{"desktop":[{"x":720,"y":0,"w":720,"h":640}]}'
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' home)
+SI=$(node "$PB/lib/state.mjs" get "$THEME" "pages.$PI.sections" | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((x)=>x.n===Number(process.argv[1])))' 1)
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.sections.$SI.masks" '{"desktop":[{"x":720,"y":0,"w":720,"h":640}]}'
 ```
 
 Keep masks small; `fullyMasked` in QA means the masks cover everything and are wrong.

@@ -156,3 +156,14 @@ test('JS refuses a row whose theme (from real terms) differs, via real createWp'
   const two = execReturning([ok([{ ...ROW, theme: 'pb-itest,twentytwentyfive' }])]);
   assert.throws(() => removeOverride(createWp(rt, { exec: two.exec }), 'pb-itest', 'header', { confirm: true, expectId: 5 }), (e) => e.code === 'ETHEMEMISMATCH');
 });
+
+import { fileURLToPath } from 'node:url';
+test('parts CLI prints usage and exits 64 on missing or unknown arguments', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  for (const args of [[], ['__pbx__', '/tmp'], ['write', '/tmp'], ['remove-override', '/tmp']]) {
+    const r = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 64, args.join(' '));
+    assert.match(r.stderr, /Usage: node parts\.mjs/);
+  }
+});

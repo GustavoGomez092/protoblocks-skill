@@ -13,7 +13,7 @@ Turns one design into an approved section plan stored in the build state. It bui
 PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
 ```
 
-`THEME` is the forked theme directory, `<site.path>/wp-content/themes/<site.theme.slug>` (the `theme.themeDir` that `setup-site.mjs` printed). The state file is `$THEME/.protoblocks/build.json`; read it first with `node "$PB/lib/state.mjs" get "$THEME"`. Tools print JSON on stdout; failures print `[CODE] message` on stderr (64 = bad usage). A page `<page>` slug is lowercase letters, digits and dashes.
+`THEME` is the forked theme directory, `<site.path>/wp-content/themes/<site.theme.slug>` (the `theme.themeDir` that `setup-site.mjs` printed). The state file is `$THEME/.protoblocks/build.json`; read it first with `node "$PB/lib/state.mjs" get "$THEME"`. Failures print `[CODE] message` on stderr (64 = bad usage). A page `<page>` slug is lowercase letters, digits and dashes.
 
 ## Step 1 - Intake to frames
 
@@ -53,7 +53,7 @@ Follow `references/breakdown.md`: pattern label, content model (fewest richest r
 node "$PB/lib/library.mjs" list "$THEME"
 ```
 
-Prints one entry per block: `slug, title, description, fields, controls, innerBlocks, purpose, variants, usedOn`. An entry with an `error` is a broken block that still exists: never recreate it; tell the developer. Decide per section: `reuse` (fits as is), `extend` (additive controls only), `new`. Apply intra-page merge and generic naming (breakdown.md). Header and footer map to the shared `site-header`/`site-footer` blocks and template parts, built through the section loop; the parts flow is in `protoblocks-site-setup` Step 4. On later pages they are `reuse` and only verified.
+Prints one entry per block: `slug, title, description, fields, controls, innerBlocks, purpose, variants, usedOn`. An entry with an `error` is a broken block that still exists: never recreate it; tell the developer. Decide per section: `reuse` (fits as is), `extend` (additive controls only), `new`. Header and footer map to the shared `site-header`/`site-footer` blocks and template parts, built through the section loop; the parts flow is in `protoblocks-site-setup` Step 4. On later pages they are `reuse` and only verified.
 
 ## Step 5 - Plan gate (mandatory)
 
@@ -61,21 +61,50 @@ Present this table, with crop paths, then STOP and wait for approval:
 
 `| # | Section | Crop | Decision | Block | Fields / controls | Notes |`
 
-Also list assets that will be cropped from the design ("replace with originals"). Do not write the plan as approved before the developer says so. Pages are indexed in `pages` (`node "$PB/lib/state.mjs" get "$THEME" pages` shows the order); sections are ordered by `n`, so section `n` is at index `n-1`.
+Also list assets that will be cropped from the design ("replace with originals"). Look pages up by `slug` and sections by `n`; never assume a position (`n` need not be contiguous, and other pages may exist).
 
-After approval, record each section (one `set` per field; JSON values, strings quoted), then the approval, then the page status, in that order:
+After approval, record the whole plan in one atomic, validated write (`updateState`, the same lock `state.mjs set` uses). Missing sections throw before anything is saved:
 
 <!-- test:run -->
 ```bash
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.0.label '"Hero"'
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.0.decision '"new"'
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.0.block '"hero-split"'
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.0.notes '"Image right, CTA pair"'
-node "$PB/lib/state.mjs" set "$THEME" pages.0.plan "{\"approvedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"by\":\"developer\"}"
-node "$PB/lib/state.mjs" set "$THEME" pages.0.status '"building"'
+cat > "$THEME/.protoblocks/plan.json" <<'JSON'
+{
+  "page": "home",
+  "sections": [
+    {"n": 1, "label": "Header", "decision": "new", "block": "site-header", "notes": "shared part; sticky"},
+    {"n": 3, "label": "Hero", "decision": "new", "block": "hero-split", "notes": "Image right; \"Book a demo\" button"}
+  ]
+}
+JSON
+PLAN="$THEME/.protoblocks/plan.json" THEME="$THEME" PB="$PB" node --input-type=module -e '
+const { updateState } = await import(process.env.PB + "/lib/state.mjs");
+const fs = await import("node:fs");
+const plan = JSON.parse(fs.readFileSync(process.env.PLAN, "utf8"));
+updateState(process.env.THEME, (s) => {
+  const page = s.pages.find((p) => p.slug === plan.page);
+  if (!page) throw new Error("No page " + plan.page + " in state");
+  for (const p of plan.sections) {
+    const sec = page.sections.find((x) => x.n === p.n);
+    if (!sec) throw new Error("No section n=" + p.n + " (run intake.mjs crop first)");
+    Object.assign(sec, { label: p.label, decision: p.decision, block: p.block, notes: p.notes });
+  }
+  page.plan = { approvedAt: new Date().toISOString(), by: "developer" };
+  page.status = "building";
+});
+'
+node "$PB/lib/state.mjs" validate "$THEME"
 ```
 
-For many sections or notes with quotes, use one atomic write from a `plan.json` (`references/breakdown.md`, "Recording the plan"). Never `set` page status `building` without `plan.approvedAt`. `[EINVALID]` or `[EVALUE]` means nothing was written: fix the value and retry.
+Secondary, for a single field: find the indexes first, then `set` (JSON values, strings quoted). Never `set` page status `building` without `pages.<i>.plan`:
+
+<!-- test:run -->
+```bash
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' home)
+SI=$(node "$PB/lib/state.mjs" get "$THEME" "pages.$PI.sections" | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((x)=>x.n===Number(process.argv[1])))' 3)
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.sections.$SI.notes" '"Image right, CTA pair"'
+```
+
+An index of `-1` means the slug or `n` is not in state: stop and fix that first. `[EINVALID]` or `[EVALUE]` means nothing was written: fix the value and retry.
 
 ## Iron rules
 
