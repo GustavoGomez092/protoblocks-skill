@@ -149,12 +149,16 @@ export async function cropSections(themeDir, slug, ranges) {
   for (const list of Object.values(ranges)) for (const r of list) anchors.set(r.n, anchorFor(page, r.n, partOfN.get(r.n)));
   const { cropRanges } = await import('../qa/segment.mjs');
   const out = [];
+  const spans = new Map(); // `${n}:${bp}` -> {y0, y1}, the crop range in frame pixels (page QA translates masks with it)
   for (const [bp, list] of Object.entries(ranges)) {
     const frame = page.design.frames.find((f) => f.breakpoint === bp);
     if (!frame) throw new Error(`No ${bp} frame for page "${slug}".`);
     const dir = path.join(artifactsDir(themeDir), slug, 'crops', bp);
     const crops = await cropRanges(frame.image, list.map((r) => ({ name: anchors.get(r.n), y0: r.y0, y1: r.y1 })), dir);
-    crops.forEach((c, i) => out.push({ n: list[i].n, anchor: anchors.get(list[i].n), breakpoint: bp, file: c.file }));
+    crops.forEach((c, i) => {
+      out.push({ n: list[i].n, anchor: anchors.get(list[i].n), breakpoint: bp, file: c.file });
+      spans.set(`${list[i].n}:${bp}`, { y0: list[i].y0, y1: list[i].y1 });
+    });
   }
   updateState(themeDir, (s) => {
     const page = s.pages.find((p) => p.slug === slug);
@@ -165,6 +169,7 @@ export async function cropSections(themeDir, slug, ranges) {
       if (partOfN.has(c.n)) sec.anchor = c.anchor;
       sec.crops ??= {};
       sec.crops[c.breakpoint] = c.file;
+      sec.ranges = { ...(sec.ranges ?? {}), [c.breakpoint]: spans.get(`${c.n}:${c.breakpoint}`) };
     }
     page.sections.sort((a, b) => a.n - b.n);
   });

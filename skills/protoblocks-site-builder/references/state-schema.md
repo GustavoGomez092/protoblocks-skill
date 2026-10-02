@@ -25,7 +25,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
     "qa": { "mismatchMax": 0.08, "pageMismatchMax": 0.12, "heightDeltaMax": 0.03, "maxIterations": 5, "motionMaxAttempts": 3 },
     "navigation": { "menus": { "primary": { "id": 123, "spec": { "title": "Primary", "items": […] }, "pending": [{ "label": "Pricing", "page": "pricing" }], "contentHash": "<sha256>" } } },
-    "parts": { "header": { "block": "site-header", "status": "done" }, "footer": { … } }
+    "parts": { "header": { "block": "site-header", "writtenAt": "<ISO>" }, "footer": { … } }
   },
   "library": {
     "media-text": { "purpose": "…", "fields": […], "controls": […], "variants": ["imagePosition"], "usedOn": ["home", "about"], "baseline": "artifacts/…png" }
@@ -58,6 +58,10 @@ Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^
 | `pending` | `[{ label, page }]` page links still written as placeholder custom links (page missing or unpublished). |
 | `contentHash` | sha256 of the menu's `post_content` as protoblocks last wrote it. `upsert` refuses (`[EEDITED]`) when the live menu no longer matches (edited in the Site Editor) unless `--force`. |
 
+## `site.parts.<slug>`
+
+Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.tokens`, `site.navigation.menus` and `site.parts.header` exist.
+
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 
 ## Plan fields (written by `protoblocks-design-breakdown`)
@@ -72,9 +76,13 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | `sections[j].decision` | `new`, `reuse` or `extend` (enum-checked). |
 | `sections[j].block` | Block slug the section uses. |
 | `sections[j].notes` | Plan notes (shared classes, assets to replace, etc.). |
-| `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
+| `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. Page QA applies them too, translated with `ranges`. |
+| `sections[j].ranges.<bp>` | `{ "y0", "y1" }`: the section's crop range in that breakpoint's frame pixels, written by `intake.mjs crop` (a re-crop replaces that breakpoint's range). Page QA uses it to place the section's masks in the full-page diff. |
 | `sections[j].anchor` | `pb-s<n>`, except header and footer: always `pb-header` / `pb-footer` (set by `intake.mjs crop` for ranges with `part`, and by `plan.mjs record` for plan rows with `part`), so the template part keeps one id on every page. |
-| `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` on the first page (`references/header-footer.md`) and by `plan.mjs record` on later pages (`reuse` rows with `part`). |
+| `sections[j].inPart` | `true` once a header/footer section is rendered by its template part: `page.mjs` then leaves it out of the page content. Set on the first page by `parts.mjs adopt` (after `parts.mjs write`; `references/header-footer.md` in `protoblocks-section-loop`) and on later pages by `plan.mjs record` (`reuse` rows with `part`). |
+| `pages[i].pageQa` | Written by `page-qa.mjs record`: `{ "pass", "file", "at" }`, or with the developer's acceptance `{ "pass": false, "accepted": true, "note", "by": "developer", "file", "at" }`. A pass or an acceptance sets the page `seo`; a later plain record replaces it. |
+| `pages[i].notes.pageQa` | "accepted by developer: <note>", set by `page-qa.mjs record --accepted`. |
+| `pages[i].notes.menu` | `"declined"` when the developer did not want the page in the primary menu (never asked again). |
 | `sections[j].prevStatus`, `sections[j].preparedIteration` | Set by `qa-input.mjs prepare`: the status before verification (a pass on a section that was `done` returns it to `done`) and the newest prepared iteration (`record` only accepts a verdict from that iteration). |
 
 ## `sections[j].motion` (written by `motion.mjs record`)

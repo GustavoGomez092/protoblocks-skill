@@ -5,7 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { assertFork } from './guards.mjs';
 import { blockComment } from './blocks.mjs';
-import { loadState, getSection } from './state.mjs';
+import { loadState, getSection, updateState, statePath } from './state.mjs';
+import { PART_ANCHORS } from './plan.mjs';
+import { partsToMove } from './status.mjs';
 import { assertSlug, parseBlockName } from './slugs.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'parts.php');
@@ -19,13 +21,59 @@ export function partMarkup({ block, attrs = {}, navRef, innerRaw }) {
   return `${blockComment(block, attrs, inner)}\n`;
 }
 
+// The outermost block of part markup, without the default proto-blocks/ namespace (null when there is none).
+export function partBlock(markup) {
+  const m = /<!--\s*wp:([a-z0-9-]+(?:\/[a-z0-9-]+)?)[\s/]/.exec(String(markup));
+  return m ? m[1].replace(/^proto-blocks\//, '') : null;
+}
+
+/** Writes parts/<slug>.html in the fork and records `site.parts.<slug> = {block?, writtenAt}` in the build state. */
 export function writePart(themeDir, slug, markup) {
   if (typeof slug !== 'string' || !SLUG_RE.test(slug)) throw new Error(`Invalid part slug "${slug}"`);
   assertFork(themeDir);
   const file = path.join(themeDir, 'parts', `${slug}.html`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, markup);
+  if (fs.existsSync(statePath(themeDir))) {
+    const block = partBlock(markup);
+    updateState(themeDir, (s) => {
+      s.site.parts = { ...(s.site.parts ?? {}), [slug]: { ...(block ? { block } : {}), writtenAt: new Date().toISOString() } };
+    });
+  }
   return file;
+}
+
+const PART_OF_ANCHOR = Object.fromEntries(Object.entries(PART_ANCHORS).map(([part, anchor]) => [anchor, part]));
+
+/**
+ * After the first page's header/footer passed as sections and their parts were written with the anchor
+ * (`markup --from-state`, `write`): in one atomic write, mark them rendered by the parts (`inPart`, `building`, so the
+ * section loop rebuilds the page and re-verifies them; a pass returns them to `done`) and reopen the first content
+ * section for re-verification (`verifying`), since the page shifts once the sections leave the content.
+ */
+export function adoptParts(themeDir, slug) {
+  assertSlug(slug, 'page slug');
+  let result;
+  updateState(themeDir, (s) => {
+    const page = s.pages.find((p) => p.slug === slug);
+    if (!page) fail('ENOPAGE', `No page "${slug}" in state.`);
+    if (page.status !== 'building') fail('ESTATUS', `Page "${slug}" is "${page.status}", not "building".`);
+    const move = partsToMove(s, page);
+    if (!move.length) fail('EINPUT', `Page "${slug}" has no header/footer section that is done and not yet in a template part; nothing to adopt.`);
+    for (const sec of move) {
+      const part = PART_OF_ANCHOR[sec.anchor];
+      const file = path.join(themeDir, 'parts', `${part}.html`);
+      const markup = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+      if (!new RegExp(`"anchor"\\s*:\\s*"${sec.anchor}"`).test(markup)) {
+        fail('EINPUT', `parts/${part}.html does not carry the anchor ${sec.anchor} yet. Write it first: parts.mjs markup "$THEME" --from-state ${slug} ${sec.n} > ${part}.html, then parts.mjs write "$THEME" ${part} ${part}.html.`);
+      }
+    }
+    for (const sec of move) Object.assign(sec, { inPart: true, status: 'building', prevStatus: 'done' });
+    const content = [...page.sections].sort((a, b) => a.n - b.n).find((x) => !PART_OF_ANCHOR[x.anchor] && x.status === 'done');
+    if (content) Object.assign(content, { status: 'verifying', prevStatus: 'done' });
+    result = { page: slug, moved: move.map((x) => ({ n: x.n, anchor: x.anchor, status: x.status })), reverify: content ? content.n : null };
+  });
+  return result;
 }
 
 const shq = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
@@ -87,7 +135,7 @@ function idArg(argv) {
   return i >= 0 ? Number(argv[i + 1]) : undefined;
 }
 
-const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>] | markup <block> [--attrs <json>] [--nav-ref <id>] | markup <themeDir> --from-state <page> <n>\n';
+const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | adopt <themeDir> <page> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>] | markup <block> [--attrs <json>] [--nav-ref <id>] | markup <themeDir> --from-state <page> <n>\n';
 
 /**
  * Pure CLI behind `markup`: parses `<block> [--attrs <json>] [--nav-ref <id>]` and returns partMarkup(...) text.
@@ -148,6 +196,10 @@ function main(argv) {
     process.stderr.write(USAGE);
     process.exit(64);
   };
+  if (cmd === 'adopt') {
+    if (!themeDir || !slug || argv.length !== 3) return usage();
+    return process.stdout.write(`${JSON.stringify(adoptParts(themeDir, slug), null, 2)}\n`);
+  }
   if (!['write', 'overrides', 'remove-override'].includes(cmd) || !themeDir) return usage();
   if (cmd === 'write' && (!slug || !file)) return usage();
   if (cmd === 'remove-override' && !slug) return usage();

@@ -9,9 +9,7 @@ Turns one design into an approved section plan stored in the build state. It bui
 
 ## Scripts
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
 `THEME` is the forked theme directory, `<site.path>/wp-content/themes/<site.theme.slug>` (the `theme.themeDir` that `setup-site.mjs` printed). The state file is `$THEME/.protoblocks/build.json`; read it first with `node "$PB/lib/state.mjs" get "$THEME"`. Failures print `[CODE] message` on stderr (64 = bad usage). A page `<page>` slug is lowercase letters, digits and dashes.
 

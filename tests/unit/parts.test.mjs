@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { initState, updateState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
-import { markupFromArgs, partMarkup, writePart, removeOverride, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
+import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
+import { markupFromArgs, partMarkup, writePart, removeOverride, listOverrides, partBlock, adoptParts } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
 test('partMarkup wraps core/navigation inside the proto-block', () => {
@@ -249,4 +249,91 @@ test('markup --from-state errors: unknown page/section, no block yet, mixing wit
   assert.equal(code([t, '--from-state', 'home', 'x']), 'EINPUT');
   assert.equal(code([t, '--from-state', 'home']), 'EUSAGE');
   assert.equal(code([t, '--from-state', 'home', '1', '--attrs', '{}']), 'EUSAGE');
+});
+
+test('writePart records site.parts.<slug> = {block?, writtenAt} when the fork has a build state', () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-parts-state-'));
+  initState(theme, { url: 'http://a.local', path: '/x', parts: { footer: { block: 'site-footer', writtenAt: 'old' } } });
+  writePart(theme, 'header', partMarkup({ block: 'proto-blocks/site-header', attrs: { sticky: true }, navRef: 12 }));
+  const parts = loadState(theme).site.parts;
+  assert.equal(parts.header.block, 'site-header');
+  assert.match(parts.header.writtenAt, /^\d{4}-\d\d-\d\dT/);
+  assert.deepEqual(parts.footer, { block: 'site-footer', writtenAt: 'old' }, 'other parts kept');
+  writePart(theme, 'utility', 'no block here');
+  assert.deepEqual(Object.keys(loadState(theme).site.parts.utility), ['writtenAt']);
+  // A fork without state (marker only) still writes the file.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-parts-bare-'));
+  fs.writeFileSync(path.join(bare, 'style.css'), '/*\nProto Fork: proto-blocks-theme@1.1.3\n*/');
+  assert.ok(fs.existsSync(writePart(bare, 'header', 'X')));
+});
+
+test('partBlock reads the outermost block name, dropping the proto-blocks/ namespace', () => {
+  assert.equal(partBlock('<!-- wp:proto-blocks/site-header {"sticky":true} -->\n<!-- wp:navigation {"ref":1} /-->\n<!-- /wp:proto-blocks/site-header -->'), 'site-header');
+  assert.equal(partBlock('<!-- wp:acme/top /-->'), 'acme/top');
+  assert.equal(partBlock('<!-- wp:navigation {"ref":1} /-->'), 'navigation');
+  assert.equal(partBlock('plain'), null);
+});
+
+// adopt: the first page's header/footer passed as sections; their parts carry the anchors.
+function adoptTheme({ writeParts = ['header', 'footer'], pages } = {}) {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-adopt-'));
+  initState(theme, { url: 'http://a.local', path: '/x' });
+  const sec = (n, anchor, status = 'done', extra = {}) => ({ n, anchor, status, block: 'b', ...extra });
+  updateState(theme, (s) => {
+    s.pages = pages ?? [{ slug: 'home', status: 'building', sections: [sec(1, 'pb-header'), sec(2, 'pb-s2', 'skipped'), sec(3, 'pb-s3'), sec(4, 'pb-s4'), sec(5, 'pb-footer')] }];
+  });
+  for (const part of writeParts) {
+    fs.mkdirSync(path.join(theme, 'parts'), { recursive: true });
+    fs.writeFileSync(path.join(theme, 'parts', `${part}.html`), partMarkup({ block: `proto-blocks/site-${part}`, attrs: { anchor: `pb-${part}` }, innerRaw: '' }));
+  }
+  return theme;
+}
+
+test('adoptParts marks header/footer inPart + building (prevStatus done) and reopens the first content section, atomically', () => {
+  const theme = adoptTheme();
+  assert.deepEqual(adoptParts(theme, 'home'), { page: 'home', moved: [{ n: 1, anchor: 'pb-header', status: 'building' }, { n: 5, anchor: 'pb-footer', status: 'building' }], reverify: 3 });
+  const secs = loadState(theme).pages[0].sections;
+  const pick = (n) => { const x = secs.find((y) => y.n === n); return [x.status, x.inPart, x.prevStatus]; };
+  assert.deepEqual(pick(1), ['building', true, 'done']);
+  assert.deepEqual(pick(5), ['building', true, 'done']);
+  assert.deepEqual(pick(3), ['verifying', undefined, 'done']);
+  assert.deepEqual(pick(2), ['skipped', undefined, undefined]);
+  assert.deepEqual(pick(4), ['done', undefined, undefined]);
+  // Nothing left to adopt.
+  assert.throws(() => adoptParts(theme, 'home'), (e) => e.code === 'EINPUT');
+});
+
+test('adoptParts refuses before the parts carry the anchors, and changes nothing', () => {
+  for (const writeParts of [[], ['header']]) {
+    const theme = adoptTheme({ writeParts });
+    const before = JSON.stringify(loadState(theme).pages);
+    assert.throws(() => adoptParts(theme, 'home'), (e) => e.code === 'EINPUT' && /does not carry the anchor/.test(e.message), JSON.stringify(writeParts));
+    assert.equal(JSON.stringify(loadState(theme).pages), before);
+  }
+  const noAnchor = adoptTheme({ writeParts: [] });
+  fs.mkdirSync(path.join(noAnchor, 'parts'), { recursive: true });
+  for (const part of ['header', 'footer']) fs.writeFileSync(path.join(noAnchor, 'parts', `${part}.html`), partMarkup({ block: `proto-blocks/site-${part}`, attrs: { sticky: true } }));
+  assert.throws(() => adoptParts(noAnchor, 'home'), (e) => e.code === 'EINPUT');
+});
+
+test('adoptParts: unknown page ENOPAGE, page not building ESTATUS, header already in a part elsewhere is not moved', () => {
+  const theme = adoptTheme();
+  assert.throws(() => adoptParts(theme, 'ghost'), (e) => e.code === 'ENOPAGE');
+  updateState(theme, (s) => { s.pages[0].status = 'seo'; });
+  assert.throws(() => adoptParts(theme, 'home'), (e) => e.code === 'ESTATUS');
+  const later = adoptTheme({ pages: [
+    { slug: 'home', status: 'done', sections: [{ n: 1, anchor: 'pb-header', status: 'done', inPart: true }] },
+    { slug: 'about', status: 'building', sections: [{ n: 1, anchor: 'pb-header', status: 'done' }, { n: 2, anchor: 'pb-s2', status: 'done' }] },
+  ] });
+  assert.throws(() => adoptParts(later, 'about'), (e) => e.code === 'EINPUT' && /nothing to adopt/.test(e.message));
+});
+
+test('parts CLI adopt runs without a WordPress runtime and needs exactly <themeDir> <page>', () => {
+  const theme = adoptTheme();
+  const script = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/lib/parts.mjs', import.meta.url));
+  assert.equal(spawnSync(process.execPath, [script, 'adopt', theme], { encoding: 'utf8' }).status, 64);
+  assert.equal(spawnSync(process.execPath, [script, 'adopt', theme, 'home', 'x'], { encoding: 'utf8' }).status, 64);
+  const r = spawnSync(process.execPath, [script, 'adopt', theme, 'home'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).reverify, 3);
 });

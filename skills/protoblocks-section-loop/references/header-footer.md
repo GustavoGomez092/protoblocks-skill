@@ -13,7 +13,7 @@ Header and footer are sections of the first page (labels `header` and `footer`, 
 The theme's `templates/page.html` (and `index`, `single`) include the `header` and `footer` template parts, wrapped in `<header>` / `<footer>` (`tagName`). So while the block is still a page section, the page shows it twice: once from the section, once from the template part. The part at this point is whatever site setup left: the theme's stock header (logo, title, navigation) or the navigation-only part from `protoblocks-site-setup` Step 4.
 
 - This is expected during verification. Visual QA crops by the section's anchor (`#pb-header`), so the section's own screenshot is unaffected. The duplicate chrome above the page content can still shift nothing in the crop, but it makes the page look doubled to a human: tell the developer it is temporary.
-- Duplicate ids: the setup-time part carries no `anchor` (its markup is navigation only, for example `{"sticky":true}`), so only the section owns `pb-header`. Never put the anchor into a part before the block has passed QA as a section. Only step 3 below puts the anchor into the part, and step 4 removes the section from the page in the same pass, so the id exists once.
+- Duplicate ids: the setup-time part carries no `anchor` (its markup is navigation only, for example `{"sticky":true}`), so only the section owns `pb-header`. Never put the anchor into a part before the block has passed QA as a section. Only step 3 below puts the anchor into the part; step 4 hands the section to the part and step 5 rebuilds the page without it, so the id exists once.
 - The loop's part supersedes the setup-time part: after the `site-header` / `site-footer` block passes QA, `parts.mjs write` replaces `parts/header.html` / `parts/footer.html`.
 
 ## Moving them into the parts (once, after the last section of the first page passed)
@@ -28,26 +28,13 @@ Run steps 1-8 once, when every section of the first page has passed Verify (head
    node "$PB/lib/parts.mjs" write "$THEME" header "$THEME/.protoblocks/header.html"
    ```
    Repeat for `footer` (its own `n`, `footer.html`). `[ENOSECTION]` / `[ENOPAGE]`: wrong page or `n`; `[EINPUT]` "no block yet": the section was never built. The part keeps the anchor, so the header still renders with `id="pb-header"` and can be verified by `qa-input.mjs`.
-4. Mark the section as rendered by the part, in one atomic write (look up by slug and `n`; set `inPart` and `status` together). `page.mjs` skips sections with `inPart: true`:
-
-<!-- test:run -->
-```bash
-PAGE=home SECTION=1 THEME="$THEME" PB="$PB" node --input-type=module -e '
-const { updateState } = await import(process.env.PB + "/lib/state.mjs");
-updateState(process.env.THEME, (s) => {
-  const page = s.pages.find((p) => p.slug === process.env.PAGE);
-  if (!page) throw new Error("No page " + process.env.PAGE);
-  const sec = page.sections.find((x) => x.n === Number(process.env.SECTION));
-  if (!sec) throw new Error("No section n=" + process.env.SECTION);
-  sec.inPart = true;
-  sec.status = "done";
-});
-'
-node "$PB/lib/state.mjs" validate "$THEME"
-```
-
-5. Rebuild so they render once, from the parts: `node "$PB/lib/page.mjs" build "$THEME" <page>` (`ESTALE`: re-run, never `--force`).
-6. Re-verify three things, each with `qa-input.mjs prepare` / visual-qa / `record` on the same anchors: the header (`pb-header`, now rendered by the part), the footer (`pb-footer`), and the first content section. A section already `done` is re-verified like any other: `prepare` sets it `verifying`, and a pass puts it back to `done` (not `animating`).
+4. Hand the sections over to the parts, in one atomic write (it looks the page up by slug and refuses until each part file carries its anchor, so run it after step 3 for both parts):
+   ```bash
+   node "$PB/lib/parts.mjs" adopt "$THEME" <page>
+   ```
+   It sets the header and footer `inPart: true`, status `building`, `prevStatus: "done"` (`page.mjs` now leaves them out), and the first content section `verifying` with `prevStatus: "done"`. It prints `{page, moved, reverify}`. `status.mjs` reports `move-parts` until this has run; afterwards it routes through the reopened sections in `n` order.
+5. Header/footer (`building` with `inPart: true`, SKILL.md resume table): no Build; rebuild so they render once, from the parts: `node "$PB/lib/page.mjs" build "$THEME" <page>` (`ESTALE`: re-run, never `--force`).
+6. Re-verify three things, each with `qa-input.mjs prepare` / visual-qa / `record` on the same anchors: the header (`pb-header`, now rendered by the part), the footer (`pb-footer`), and the first content section. A pass puts each back to `done` (not `animating`), because `adopt` stored `prevStatus: "done"`.
 7. If a re-verification fails after `inPart` (for example a pixel shift because the template wraps the part in `<header>` / `<footer>`, or the page now has a different top offset), fix it in the block CSS or in the part markup (regenerate with `markup`, `write`, rebuild) and re-verify. Do not unset `inPart` to chase it, and do not lower thresholds. The iteration cap applies as usual (`verify.md`).
 8. Refresh menus that link to pages built since: `node "$PB/lib/navigation.mjs" refresh "$THEME"`. It keeps Site Editor edits; it patches only pending placeholder links. `page.mjs build` already runs it when a menu has a pending link to the page.
 

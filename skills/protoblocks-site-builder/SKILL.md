@@ -1,72 +1,95 @@
 ---
 name: protoblocks-site-builder
-description: Use when turning a design (image, screenshot, Figma, Penpot, or URL) into a WordPress site or landing page built from Proto-Blocks on a local site (Local by Flywheel) — runs preflight, keeps a resumable build state, and drives site setup, section breakdown, build/visual-QA/animation loops, and Yoast SEO.
+description: Use when turning a design (image, screenshot, PDF, Figma, Penpot, or URL) into a WordPress site or landing pages built from Proto-Blocks on a local site (Local by Flywheel), or when resuming such a build - runs preflight, keeps a resumable build state, and drives site setup, section breakdown, the build/visual-QA/animation loop per section, full-page QA, Yoast SEO, and the next-page loop.
 ---
 
 # Proto-Blocks Site Builder
 
 ## Overview
 
-Turns a design into a WordPress page made of Proto-Blocks, section by section, with visual QA against the design and a resumable state file. It works on **local sites only** (Local by Flywheel, or a native local WordPress install), on a fork of the base theme `proto-blocks-theme`, and requires Proto-Blocks >= 2.10.1. The pipeline (site setup, design breakdown, build, QA, animation, SEO) is extended by later stages; this file defines the shared foundations every phase relies on.
+Builds WordPress landing pages from a design, one Proto-Blocks section at a time, each checked against the design. It works on **local sites only** (Local by Flywheel, or a native local install). It forks the base theme `proto-blocks-theme` and uses the Proto-Blocks plugin (>= 2.10.1). Everything is resumable from the build state `build.json`: this skill says WHEN each step runs, the phase skills say HOW.
 
-## Script location
+Commands: `/protoblocks-skill:setup-site`, `/protoblocks-skill:build-page`, `/protoblocks-skill:seo`, `/protoblocks-skill:resume`.
 
-All tools live in `scripts/` next to this file:
+## Scripts
 
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
+
+(Other agents: this skill's base directory + `/scripts`; plugin commands: `${CLAUDE_PLUGIN_ROOT}/skills/protoblocks-site-builder/scripts`.)
+
+- `WP` = `report.wp` from preflight. Never bare `wp` in `local-wrapper` mode.
+- `THEME` = the fork folder `<publicPath>/wp-content/themes/<slug>` (found by `status.mjs --root`, or the `theme.themeDir` setup printed). State: `$THEME/.protoblocks/build.json`.
+- Failures print `[CODE] message` on stderr; 64 = bad usage. Look pages up by `slug` and sections by `n`, never by position. Never edit `build.json` by hand.
+
+## The loop (always)
+
+1. `node "$PB/lib/preflight.mjs" [--site "<Local site name>"]`. Exit 2 = a check failed. A `site` failure that lists available sites: ask the developer which one and re-run with `--site`. Any other failure: relay its `fix` text verbatim and stop. `warn`: note it and go on.
+2. Find the theme: `node "$PB/lib/status.mjs" --root "<report.publicPath>"`. `themeDir` set: that is `THEME`. `themeDir: null`: `setup`. A `themes` list (several forks have a build state): ask the developer which one.
+3. `node "$PB/lib/status.mjs" "$THEME"`, then do exactly `next.action` (table below) for `next.page` / `next.section`.
+4. After every step, re-run `status.mjs`. Never keep the plan in your head: the state is the plan.
+
+## Actions
+
+| `next.action` | Do | Load |
+|---|---|---|
+| `setup` | Ask the project name; get the first design (files or links). Run setup (fork + state), install motion, intake the frames (design-breakdown Step 1), then tokens from the frames, navigation, header/footer parts. On resume `why` names the missing steps. Header and footer are planned as sections of the first page. | `protoblocks-site-setup`, `protoblocks-design-breakdown` (Step 1) |
+| `breakdown` | Segment, model, match, present the plan. It ends at the plan gate: STOP until the developer approves; `plan.mjs record` then sets the page `building`. | `protoblocks-design-breakdown` |
+| `build-page` | Approved plan, page still `planning`: set it `building` (recipe below). | - |
+| `section-build` | Build section `next.section` (also `planned`, and a reopened section of an `seo`/`done` page). First check the cap on resume. | `protoblocks-section-loop` |
+| `section-verify` | Verify it (re-run from `prepare`). | `protoblocks-section-loop` |
+| `section-animate` | Animate it; `motion.mjs record` closes it `done`. | `protoblocks-motion` |
+| `move-parts` | First page: header/footer (`next.sections`) passed as sections; move them into the template parts, then `node "$PB/lib/parts.mjs" adopt "$THEME" <page>`. | `protoblocks-section-loop` (`references/header-footer.md`) |
+| `page-qa` | `node "$PB/qa/page-qa.mjs" run "$THEME" <page>`, fix failures, `node "$PB/qa/page-qa.mjs" record "$THEME" <page> <file>` (a pass sets the page `seo`). Design differences the developer accepts: `record ... --accepted "<note>"`. | `references/pipeline.md` |
+| `seo` | Yoast SEO, audit, `seo.mjs record-audit` (a pass sets the page `done`). | `protoblocks-seo` |
+| `ask-more-pages` | `why: "no pages yet"`: setup stopped before intake; intake the first design. Otherwise, for each finished page not in the menu and not declined, ask "Add <page> to the primary menu?" (yes: add `{label, page}` to the spec, `navigation.mjs upsert`; no: record the decline). Then "Any other landing pages to build?" (yes: new design, intake, then `breakdown` comes next; no: final report). | `references/pipeline.md` |
+
+`build-page` recipe (by slug; refuses without an approved plan):
+
+<!-- test:run fixture=approved -->
 ```bash
-PB="${CLAUDE_SKILL_DIR}/scripts"
+PAGE=home
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));const i=a.findIndex((p)=>p.slug===process.argv[1]);if(i<0||!a[i].plan?.approvedAt){console.error("no approved plan for "+process.argv[1]);process.exit(1)}console.log(i)' "$PAGE")
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.status" '"building"'
 ```
 
-Claude Code substitutes `${CLAUDE_SKILL_DIR}` in skill bodies; in other agents use this skill's base directory. Call tools as `node "$PB/lib/<tool>.mjs" ...`. Other protoblocks-* skills reach them at `${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts/`; plugin commands and agents use `${CLAUDE_PLUGIN_ROOT}/skills/protoblocks-site-builder/scripts/`.
+Exact command sequences, the fields each step writes, every status transition and recovery: `references/pipeline.md`.
 
-## Step 1 - Preflight (always first)
+## Questions you must ask
 
-```bash
-node "$PB/lib/preflight.mjs" [--site "<Local site name>"]
-```
+- Project name (first run); which Local site when preflight lists several; which theme when `status.mjs --root` lists several.
+- The design's CSS width when intake fails `[ESCALE]`.
+- Plan approval at the plan gate (`page.mjs build` refuses with `[ENOPLAN]` without it).
+- Iteration cap (`capReached: true` from `qa-input.mjs record`, also on resume): accept with notes, guidance, or skip.
+- Motion cap (`capReached: true` from `motion.mjs record`): simplify, accept (`--accepted`), or remove.
+- `[EEDITED]` on a page, a menu or SEO values: someone edited them in wp-admin or the Site Editor.
+- Destructive flags, each only with an explicit OK for that exact action: `--force` (page build, navigation upsert, SEO apply, setup), `--refork`, `--update-plugins`, `--confirm` (removing a part override), `--force-organization`.
+- Page-QA design differences you cannot fix: accept them (`page-qa.mjs record --accepted`) or keep fixing.
+- Menu inclusion for each finished page; more pages.
 
-Prints a JSON report and exits 2 when any check fails. Run it from inside the site folder, or pass `--site` (an explicit `--site` never falls back to native mode). Use `--path <wp-root>` for a non-Local install.
+Plus any question a phase skill tells you to ask (SEO inputs, motion profile, intake gaps, `EWRONGSITE` rename, noindex). Everything else: decide, write the decision into `section.notes` / `page.notes`, and continue.
 
-- A check with `status: "fail"`: stop and relay its `fix` text verbatim.
-- `warn`: note it and continue; site setup fixes plugin/permalink/theme warnings. Playwright is only needed from visual QA onward.
-- `site` fail that lists available sites: ask the developer which one, then re-run with `--site`.
-- Afterwards use `report.wp` as the WP-CLI command for every WordPress call, for example `"$WP" option get siteurl`. Never use bare `wp` in `local-wrapper` mode.
+## Final report
 
-The report is also saved to `<wp-content>/.protoblocks/preflight.json`. See `references/local-sites.md`.
+When the developer wants no more pages, read `node "$PB/lib/state.mjs" get "$THEME" pages` (notes live there; `status.mjs` adds iteration counts):
 
-## Step 2 - Build state
-
-State lives in the theme fork at `wp-content/themes/<fork>/.protoblocks/build.json` (set `THEME` to that directory). Create it once, after the theme fork exists, from a JSON file holding the `site` object (`url`, `path` required):
-
-```bash
-node "$PB/lib/state.mjs" init "$THEME" site.json
-```
-
-Every phase reads state first and writes its outcome immediately, so any session can resume. Never edit `build.json` by hand.
-
-```bash
-node "$PB/lib/state.mjs" get "$THEME" [dotted.path]        # missing path prints null
-node "$PB/lib/state.mjs" set "$THEME" pages.0.sections.2.status '"done"'
-node "$PB/lib/state.mjs" append "$THEME" pages.0.sections.2.qa '{"iteration":1,"breakpoint":"desktop","mismatch":0.12,"heightDelta":0.02,"pass":false}'
-node "$PB/lib/state.mjs" validate "$THEME"
-node "$PB/lib/state.mjs" restore "$THEME"                  # roll back to build.json.bak
-```
-
-Values are JSON (quote strings: `'"done"'`). Writes are validated and locked. Recovery: `[EPARSE]`, or `[EINVALID]` from `get`/`validate` (the file on disk is bad), means run `restore`. `[EINVALID]` or `[EVALUE]` from `set`/`append` means the value was rejected and state is unchanged: fix the value and retry; never `restore` (it would roll back the previous good write). Never re-`init` over existing state. Full schema: `references/state-schema.md`.
-
-## Site setup
-
-**Site setup** - after preflight, run the `protoblocks-site-setup` skill (one-shot `setup-site.mjs`, then tokens, navigation, header/footer parts). It creates the theme fork and initializes the build state.
-
-**Each page** - `protoblocks-design-breakdown` (frames -> crops -> plan -> approval), then `protoblocks-section-loop` for every section in plan order (build -> gates -> page -> visual-qa -> record; animate via `protoblocks-motion`).
+1. Pages built: slug, title, `url`.
+2. Per page, a section table: `n`, label, block, status, iterations, and every `notes` entry (accepted by developer: cap, motion, page QA; skipped).
+3. SEO: point to each page's SEO table (`protoblocks-seo` Step 8), plus `organization` (`kept`: what Yoast holds) and `jsonld` outcomes.
+4. Assets cropped from the design, to replace with originals.
+5. Open warnings: a11y `minor`/`moderate` from page QA, SEO `warn` checks, pending menu links.
+6. Theme fork history: `git -C "$THEME" log --oneline`.
 
 ## Iron rules
 
-- Never claim a section passes without a recorded QA verdict in state.
-- Never overwrite a theme fork, a page edited in wp-admin, or a template-part DB override without explicit confirmation.
+- Never claim a section or page passes without a recorded check in state (QA verdict, motion check, page QA, SEO audit).
+- Never skip a phase because it "looks fine"; never mark anything `done` without its recorded check.
+- Never overwrite a theme fork, a page, menu or SEO value edited in wp-admin, or a template-part DB override without explicit confirmation.
 - Never run write commands against a site other than the one preflight resolved.
+- Never build before the plan is approved; never approve it, or accept differences, for the developer.
+- Never lower QA thresholds (`site.qa`); only the developer may.
 
 ## References
 
-- `references/state-schema.md` - state file shape, enums, defaults, CLI exit behavior.
+- `references/pipeline.md` - per-action commands and outputs, status transitions, recovery.
+- `references/state-schema.md` - state shape, enums, defaults, `state.mjs` CLI and its error codes.
 - `references/local-sites.md` - how Local stores sites, the WP-CLI wrapper, troubleshooting.

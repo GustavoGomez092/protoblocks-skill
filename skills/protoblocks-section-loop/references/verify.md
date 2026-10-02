@@ -67,7 +67,7 @@ The next `prepare` copies the masks into the check input. Mask only what you can
 
 `record` returns `capReached: true` after `maxIterations` failed real iterations (error verdicts do not count; the count restarts after a passing iteration), and stores `capReached: true` on that iteration's `qa` records. On resume, if the section's last `qa` record has `capReached: true`, ask the developer before running another iteration. Stop. Show the developer the latest composite path(s) (`<iterDir>/<bp>-composite.png`, see `result.json`) and the open discrepancies, then ask them to choose:
 
-1. Accept with notes: set status `animating` and write what remains in `section.notes` (for example "accepted by developer: hero image 12px taller").
+1. Accept with notes: set status `animating` (`done` when the section has `prevStatus: "done"`, a re-verification of a finished section) and write what remains in `section.notes` (for example "accepted by developer: hero image 12px taller").
 2. Give guidance and continue: apply their direction and keep iterating. Continuing past the cap is a developer decision; a fresh budget only starts after a pass, so further failed iterations stay over the cap and each one asks again.
 3. Skip: `node "$PB/lib/state.mjs" set "$THEME" pages.<i>.sections.<j>.status '"skipped"'` (page build then leaves the section out).
 

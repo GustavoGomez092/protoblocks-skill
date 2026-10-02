@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, updateState } from './state.mjs';
+import { openSections } from './status.mjs';
 import { importMedia } from './media.mjs';
 import { normalizeJsonld, jsonldSupported } from './jsonld.mjs';
 
@@ -303,7 +304,8 @@ const sameUrl = (a, b) => {
 
 /**
  * Records a seo-audit result. The audit must be of this page's URL, with the applied focus keyword, and newer than
- * the last apply (EAUDITSTALE otherwise); only a page in status `seo` is promoted to `done` (ESTATUS otherwise).
+ * the last apply (EAUDITSTALE otherwise); only a page in status `seo` with no open (building, verifying, animating)
+ * section is promoted to `done` (ESTATUS otherwise).
  */
 export function recordAudit(themeDir, slug, auditFile) {
   const file = path.resolve(auditFile);
@@ -316,6 +318,10 @@ export function recordAudit(themeDir, slug, auditFile) {
     if (!p) throw fail('ENOPAGE', `No page "${slug}" in state.`);
     if (p.status !== 'seo') {
       throw fail('ESTATUS', `Page "${slug}" is "${p.status}", not "seo": ${p.status === 'done' ? 'it already has a recorded audit; re-apply its SEO (seo.mjs apply) to audit it again' : 'it is not ready for an SEO audit until every section is done or skipped and its SEO is applied'}.`);
+    }
+    const open = openSections(p);
+    if (open.length) {
+      throw fail('ESTATUS', `Page "${slug}" has open sections (${open.map((x) => `${x.n}: ${x.status}`).join(', ')}): finish them first (status.mjs), then audit again.`);
     }
     const applied = p.seo?.applied;
     const kw = p.seo?.focusKeyword?.value;

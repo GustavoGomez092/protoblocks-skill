@@ -7,9 +7,7 @@ description: Use when preparing a local WordPress site for a Proto-Blocks build 
 
 Prepares a Local WordPress site: plugins, theme fork, tokens, navigation, header/footer parts. Work only on the site preflight resolved.
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
 Order: preflight (`protoblocks-site-builder` Step 1) -> `setup-site.mjs` -> tokens -> navigation -> header/footer parts. The header/footer blocks themselves are built later in the section loop; this skill only writes the parts.
 
@@ -29,7 +27,7 @@ Custom JSON-LD is provided by the theme's Yoast extension (`_proto_jsonld`); che
 
 Fork and plugin rules (details: `references/errors.md`): an existing fork is always reused (offline OK); `--force` only replaces a foreign folder, `--refork <slug>` replaces a fork, and both move the old folder to `wp-content/.protoblocks/backups/` - use either only with the developer's explicit OK. Installed plugins are never replaced; report `updateAvailable` and use `--update-plugins` only with their OK.
 
-Result: `{ preflight, plugins, theme: {themeDir, slug, reused, forkedFrom}, assets, stateFile }`. Set `THEME=<theme.themeDir>` for every later command. Every value flag needs a value; an unknown flag or missing `--name` prints usage and exits 64.
+Result: `{ preflight, plugins, theme: {themeDir, slug, reused, forkedFrom}, assets, stateFile }`. Use `THEME=<theme.themeDir>` (literal path) in every later command. Every value flag needs a value; an unknown flag or missing `--name` prints usage and exits 64.
 
 Install motion (idempotent; adds the default profile): `node "$PB/lib/motion.mjs" install "$THEME"`. Choose the profile later, in `protoblocks-motion`.
 
@@ -60,7 +58,7 @@ Links to pages that do not exist yet are normal: they are reported in `pending` 
 
 1. List saved Site Editor copies: `node "$PB/lib/parts.mjs" overrides "$THEME"`. An empty list `[]` means none.
 2. If a `header`/`footer` copy exists, show the developer what would be discarded and ask. Only after their explicit OK run `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`, where `<n>` is the id previewed by the `[ECONFIRM]` error (run it once without `--confirm` to get the preview). The copy goes to Trash; the printed recovery command restores it.
-3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html`).
+3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html` and records `site.parts.header` in the build state; `status.mjs` treats setup as unfinished without it).
 
 The printed recovery command uses the same WP-CLI command preflight resolved (Local's wrapper at `wp-content/.protoblocks/wp`, or `wp --path=...`), never a bare `wp` that may target another install.
 
