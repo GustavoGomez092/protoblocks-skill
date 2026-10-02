@@ -39,7 +39,7 @@ qtest('checkSection passes a matching design, fails a different one, and reports
   } finally { await srv.close(); }
 });
 
-qtest('checkSection fails on image errors in diff and sanity modes', { timeout: 90000 }, async () => {
+qtest('checkSection fails on image errors in diff and sanity modes', { timeout: 60000 }, async () => {
   const { checkSection } = await load();
   const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
   const srv = await serveFixtures();
@@ -47,15 +47,15 @@ qtest('checkSection fails on image errors in diff and sanity modes', { timeout: 
     const d = tmpDir();
     const url = `${srv.url}/hang.html`;
     // design identical to the render so only the image error can fail the diff
-    const design = (await shoot({ url, selector: '#pb-s1', width: 1000, out: path.join(d, 'design.png') })).out;
-    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA,
+    const design = (await shoot({ url, selector: '#pb-s1', width: 1000, imageWaitMs: 1500, out: path.join(d, 'design.png') })).out;
+    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA, imageWaitMs: 1500,
       breakpoints: [{ name: 'desktop', width: 1000, design }] });
     assert.ok(r.results[0].imageErrors.length > 0, JSON.stringify(r.results[0]));
     assert.ok(r.results[0].mismatch <= QA.mismatchMax);
     assert.equal(r.results[0].numericPass, false);
     assert.equal(r.numericPass, false);
 
-    const sOnly = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'j'), qa: QA,
+    const sOnly = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'j'), qa: QA, imageWaitMs: 1500,
       breakpoints: [{ name: 'tablet', width: 834, sanityOnly: true }] });
     assert.ok(sOnly.results[0].imageErrors.length > 0);
     assert.equal(sOnly.numericPass, false, 'sanity breakpoint image errors must flip overall numericPass');
@@ -139,4 +139,35 @@ qtest('check-section CLI: usage, missing file and bad JSON exit cleanly', () => 
   const inv = run(path.join(d, 'inv.json'));
   assert.equal(inv.status, 1);
   assert.match(inv.stderr, /EANCHOR|anchor/i);
+});
+
+qtest('checkSection fails on a 404 image inside the anchor and ignores one outside it', async () => {
+  const { checkSection } = await load();
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/imgs.html`;
+    const design = (await shoot({ url, selector: '#pb-s1', width: 600, out: path.join(d, 'design.png') })).out;
+    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA, breakpoints: [{ name: 'desktop', width: 600, design }] });
+    assert.equal(r.results[0].imageErrors.length, 1, JSON.stringify(r.results[0].imageErrors));
+    assert.match(r.results[0].imageErrors[0], /missing-inside/);
+    assert.ok(r.results[0].imageErrors.every((u) => typeof u === 'string'));
+    assert.equal(r.results[0].numericPass, false);
+    assert.equal(r.numericPass, false);
+
+    const s3 = await checkSection({ url, anchor: 'pb-s3', iterDir: path.join(d, 'k'), qa: QA, breakpoints: [{ name: 'm', width: 600, sanityOnly: true }] });
+    assert.deepEqual(s3.results[0].imageErrors, [], 'working images and src-less images are not errors');
+
+    const self = await shoot({ url, selector: '#pb-img', width: 600, out: path.join(d, 'self.png') });
+    assert.equal(self.imageErrors.length, 1);
+    assert.match(self.imageErrors[0], /missing-self/);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection rejects null and non-object input with EINPUT', async () => {
+  const { checkSection } = await load();
+  for (const input of [null, undefined, 'x', 42, []]) {
+    await assert.rejects(() => checkSection(input), (e) => e.code === 'EINPUT', String(input));
+  }
 });

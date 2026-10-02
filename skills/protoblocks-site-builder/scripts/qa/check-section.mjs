@@ -10,7 +10,10 @@ import { sanity } from './sanity.mjs';
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
 
-function validate({ anchor, qa, breakpoints }) {
+function validate(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('EINPUT', 'input must be a JSON object');
+  const { anchor, qa, breakpoints, imageWaitMs } = input;
+  if (imageWaitMs !== undefined && (!isNum(imageWaitMs) || imageWaitMs < 0)) throw fail('EINPUT', 'imageWaitMs must be a non-negative number');
   if (typeof anchor !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(anchor)) {
     throw fail('EANCHOR', `Invalid anchor ${JSON.stringify(anchor)}: must match /^[A-Za-z][A-Za-z0-9_-]*$/`);
   }
@@ -29,7 +32,7 @@ function validate({ anchor, qa, breakpoints }) {
 
 export async function checkSection(input) {
   validate(input);
-  const { url, anchor, iterDir, qa, breakpoints } = input;
+  const { url, anchor, iterDir, qa, breakpoints, imageWaitMs } = input;
   fs.mkdirSync(iterDir, { recursive: true });
   const selector = `#${anchor}`;
   const browser = await launchBrowser();
@@ -38,10 +41,10 @@ export async function checkSection(input) {
     for (const bp of breakpoints) {
       const render = path.join(iterDir, `${bp.name}-render.png`);
       try {
-        const shot = await shoot({ url, selector, width: bp.width, scale: bp.scale ?? 1, out: render, browser });
+        const shot = await shoot({ url, selector, width: bp.width, scale: bp.scale ?? 1, out: render, browser, imageWaitMs });
         const clean = shot.pageErrors.length === 0 && shot.imageErrors.length === 0;
         if (bp.sanityOnly || !bp.design) {
-          const s = await sanity({ url, selector, width: bp.width, browser });
+          const s = await sanity({ url, selector, width: bp.width, browser, imageWaitMs });
           results.push({ breakpoint: bp.name, mode: 'sanity', ok: s.ok, issues: s.issues, render, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors });
           continue;
         }

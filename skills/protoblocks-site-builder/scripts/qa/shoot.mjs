@@ -4,11 +4,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchBrowser, openPage } from './browser.mjs';
 
-export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser }) {
+export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser, imageWaitMs }) {
   const own = !browser;
   const b = browser ?? await launchBrowser();
   try {
-    const { page, context, errors } = await openPage(b, { url, width, height, scale, reducedMotion });
+    const { page, context, errors } = await openPage(b, { url, width, height, scale, reducedMotion, imageWaitMs });
     try {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       let box = null;
@@ -20,6 +20,11 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
           throw e;
         }
         await loc.scrollIntoViewIfNeeded();
+        // Broken (404 / undecodable) images are "complete" with naturalWidth 0; openPage only reports pending ones.
+        const broken = await loc.evaluate((el) => [...(el.tagName === 'IMG' ? [el] : []), ...el.querySelectorAll('img')]
+          .filter((i) => i.complete && i.naturalWidth === 0 && (i.getAttribute('src') || i.getAttribute('srcset')))
+          .map((i) => i.currentSrc || i.src));
+        for (const u of broken) if (!errors.images.includes(u)) errors.images.push(u);
         await page.waitForTimeout(150);
         await loc.screenshot({ path: out });
         box = await loc.boundingBox();

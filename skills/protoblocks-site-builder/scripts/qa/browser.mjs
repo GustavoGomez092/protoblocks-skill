@@ -2,11 +2,11 @@ import { chromium } from 'playwright';
 
 const HIDE_CSS = '.proto-intro{display:none!important}#wpadminbar{display:none!important}html{margin-top:0!important}';
 
-const IMAGE_WAIT_MS = 10000;
+const DEFAULT_IMAGE_WAIT_MS = 10000;
 
 export const launchBrowser = () => chromium.launch({ headless: true });
 
-export async function openPage(browser, { url, width, height = 900, scale = 1, reducedMotion = true }) {
+export async function openPage(browser, { url, width, height = 900, scale = 1, reducedMotion = true, imageWaitMs = DEFAULT_IMAGE_WAIT_MS }) {
   const context = await browser.newContext({
     viewport: { width, height },
     deviceScaleFactor: scale,
@@ -35,7 +35,7 @@ export async function openPage(browser, { url, width, height = 900, scale = 1, r
       ]);
       window.scrollTo(0, 0);
       return [...document.images].filter((i) => !i.complete).map((i) => i.currentSrc || i.src);
-    }, IMAGE_WAIT_MS);
+    }, imageWaitMs);
     // A still-pending request (e.g. a stalled image) keeps the network busy; do not wait on it forever.
     await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(300);

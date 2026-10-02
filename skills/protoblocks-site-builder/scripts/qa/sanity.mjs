@@ -62,11 +62,11 @@ function inspect({ selector, minFontPx, minTapPx, checkTaps, pendingImages }) {
   return out;
 }
 
-export async function sanity({ url, selector, width, height = 900, browser, minFontPx = 14, minTapPx = 44 }) {
+export async function sanity({ url, selector, width, height = 900, browser, minFontPx = 14, minTapPx = 44 , imageWaitMs }) {
   const own = !browser;
   const b = browser ?? await launchBrowser();
   try {
-    const { page, context, errors } = await openPage(b, { url, width, height });
+    const { page, context, errors } = await openPage(b, { url, width, height, imageWaitMs });
     try {
       const raw = await page.evaluate(inspect, { selector: selector ?? null, minFontPx, minTapPx, checkTaps: width <= 480, pendingImages: errors.images });
       const seen = new Set();

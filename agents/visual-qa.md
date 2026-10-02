@@ -16,7 +16,7 @@ The prompt gives you the path to a CheckInput JSON (url, anchor, iterDir, qa thr
 2. For every `diff` result, Read its `composite` image. Panels left→right: DESIGN | RENDER | HEATMAP (red = differing pixels).
    For every `sanity` result, Read its `render` image and its `issues`. Issues of type `note` are informational only: never report them as discrepancies.
    For every `error` result, record a high-severity discrepancy with the error text.
-   For any result with a non-empty `imageErrors` (images that never finished loading), record a high-severity discrepancy naming the image URLs.
+   For any result with a non-empty `imageErrors` (images that failed to load, stalled or broken), record a high-severity discrepancy naming the image URLs.
 3. List concrete discrepancies. Measure, don't describe vaguely: compare sizes against the panel widths (the design breakpoint width is known), e.g. "headline ~48px vs ~56px", "gap above CTA ~24px vs ~40px", "3 columns vs 4 in design", "button is square vs pill", "background #f8fafc vs #eef2ff".
    Severity:
    - **high** — structure or layout wrong: missing/extra/reordered element, wrong column count or alignment, text wrapping that changes height, wrong colour on a large area, broken image, non-empty `imageErrors`, `pageErrors`, an `error` result, sanity `overflow`/`overlap`.
