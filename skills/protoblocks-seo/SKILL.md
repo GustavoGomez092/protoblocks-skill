@@ -16,11 +16,17 @@ PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
 ## When
 
 - A page reaches status `seo`, or the developer asks for SEO on a page (also for an already `done` page).
-- Re-applying on a `done` page resets its status to `seo`; the old audit no longer applies, so finish with Step 8.
+- Re-applying on a `done` page resets its status to `seo`; the old audit no longer applies, so finish with Steps 6–8.
 
 ## Step 1 - Gather
 
-Ask once for what the developer wants to provide: focus keyword, title, description, audience or location, an OG image file, business name, logo file, social links. Never block on it: infer the rest. Read the page's real headings and copy once (the audit prints them under `extract`):
+First read what Yoast already holds for the page (the developer may have filled it in wp-admin):
+
+```bash
+node "$PB/lib/seo.mjs" get "$THEME" <page>
+```
+
+Non-empty `values` (focus keyword, title, description, social fields, page type, `jsonld`) that the skill did not apply (`edited`) are the developer's: treat them as provided (`inferred: false`) in `seo.json`. Then ask once for what the developer wants to provide: focus keyword, title, description, audience or location, an OG image file, business name, logo file, social links. Never block on it: infer the rest. Read the page's real headings and copy once (the audit prints them under `extract`):
 
 ```bash
 node "$PB/qa/seo-audit.mjs" --url <url> --keyword "<draft keyword>" --out "$THEME/.protoblocks/artifacts/<page>/seo-audit.json"
@@ -34,7 +40,7 @@ Rules and the `seo.json` shape: `references/inference.md`. Every inferred value 
 
 ## Step 3 - OG image
 
-Supplied file: use it as `ogImage.file`. Otherwise generate 1200x630 from the first content section (lowest `n` that is not header/footer):
+Supplied file: use it as `ogImage.file`; apply cover-fits one that is not 1200x630 (top-aligned) into `artifacts/<page>/og-supplied.png` and reports `ogImage.resized: true`. Never replace a supplied image with a generated one without asking. Otherwise generate 1200x630 from the first content section (lowest `n` that is not header/footer):
 
 ```bash
 node "$PB/qa/og-image.mjs" --url <url> --selector '#pb-s<n>' --out "$THEME/.protoblocks/artifacts/<page>/og.png"
@@ -57,10 +63,10 @@ node "$PB/lib/jsonld.mjs" check "$THEME"
 Write `seo.json`, then:
 
 ```bash
-node "$PB/lib/seo.mjs" apply "$THEME" <page> seo.json [--force-organization]
+node "$PB/lib/seo.mjs" apply "$THEME" <page> seo.json [--force] [--force-organization]
 ```
 
-`apply` validates first. `[ESEO]` lists every problem: fix the values and re-run (nothing was written). Rules: the title rendered with the site's real name and Yoast separator is at most 60 chars; keyword is 1-4 lowercase words without `%`, `<`, `>`; description is 120-156 chars with no newline; schema page type is a supported one; organization socials are https. Missing files (`[EFILE]`) and a missing page or postId (`[ENOPAGE]`) also stop it before any import.
+`apply` validates first. `[ESEO]` lists every problem: fix the values and re-run (nothing was written). Rules: the title rendered with the site's real name and Yoast separator is at most 60 chars; keyword is 1-4 lowercase words without `%`, `<`, `>`; description is 120-156 chars with no newline; schema page type is a supported one; organization socials are https. Missing files (`[EFILE]`) and a missing page or postId (`[ENOPAGE]`) also stop it before any import. `[EEDITED]`: a Yoast value it would overwrite was set outside the skill (listed with its live and last-applied value); put the developer's value in `seo.json`, or pass `--force` only when they agree to the overwrite.
 
 Read and relay the result fields (`jsonld`, `organization`, `media`, `index`, `warnings`): meanings and the Organization policy are in `references/apply.md`. Never pass `--force-organization` unless the developer explicitly asks for the overwrite.
 

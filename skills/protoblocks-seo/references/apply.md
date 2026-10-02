@@ -6,9 +6,17 @@
 - `organization`: `set`, `kept` or `skipped` (no organization leaf).
 - `media`: imported OG image and logo `{role, id, reused}`.
 - `index`: `ok`, `skipped` or `failed: ...`.
-- `warnings`: for example site context unavailable.
+- `ogImage`: `{file, resized, source}` for a supplied file; `resized: true` means it was not 1200x630 and the cover-fitted copy `artifacts/<page>/og-supplied.png` was imported instead (`seo.json` keeps the original path). Tell the developer; never swap a supplied image for a generated one without asking.
+- `overwritten`: with `--force`, the edited values that were replaced.
+- `warnings`: for example site context unavailable, or an organization without a logo (Yoast prints no Organization schema piece without one).
 
-Organization policy: Yoast's site Organization is written only when the site is an unconfigured Company (no company name). A Person site or an existing company is `kept`. Report `organization: kept` to the developer with what Yoast holds; never pass `--force-organization` unless they explicitly ask for the overwrite (it replaces name, logo and socials).
+## Edits made in wp-admin
+
+`apply` stores what it wrote in the page's `seo.appliedValues`. Before writing, it reads the live values (`seo.mjs get`) and refuses with `[EEDITED]` when a value it would overwrite is non-empty and differs from both what it last applied and what it is about to write. On a first apply every non-empty Yoast value counts, because the developer may have filled Yoast by hand. Nothing is imported or written on `[EEDITED]`. Resolve it by treating the live value as provided in `seo.json` (then it is not a conflict), or with `--force` when the developer agrees to the overwrite.
+
+`seo.mjs get` prints `{slug, postId, values, appliedValues, edited}`: `values` are the raw per-page Yoast values (`''` when unset, so Yoast's post-type defaults are not shown) and `jsonld` is the stored JSON string.
+
+Organization policy: Yoast's site Organization is written only when the site is an unconfigured Company (no company name). A Person site or an existing company is `kept`, and its logo file is then not imported. On an unconfigured Company, supplied socials merge with the existing ones (an empty Facebook / Twitter field is filled; the rest join the other URLs); `--force-organization` replaces them. Report `organization: kept` to the developer with what Yoast holds; never pass `--force-organization` unless they explicitly ask for the overwrite (it replaces name, logo and socials).
 
 ## `seo-audit.mjs` exit codes
 

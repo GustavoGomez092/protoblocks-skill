@@ -100,7 +100,7 @@ When unsure, `WebPage`.
 
 ## Organization
 
-Only when Yoast has no company yet; otherwise `apply` returns `organization: kept` (report it, do not force). Read the header logo and footer: name from the logo text or footer legal line, logo file from the design assets (cropped logo PNG; ask if none), socials from the footer icons' link URLs (https only, drop any that are not full URLs). Omit the leaf entirely when you have no real name. Mark each part provided or inferred.
+Only when Yoast has no company yet; otherwise `apply` returns `organization: kept` (report it, do not force). Read the header logo and footer: name from the logo text or footer legal line, logo file from the design assets (cropped logo PNG; ask if none), socials from the footer icons' link URLs (https only, drop any that are not full URLs). Omit the leaf entirely when you have no real name. Mark each part provided or inferred. Without a logo Yoast prints no Organization schema piece at all (it needs a company name and a logo); `apply` warns, so ask for the logo file rather than leaving it out.
 
 ## Worked example: 6-section landing page
 
