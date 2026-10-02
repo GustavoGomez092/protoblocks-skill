@@ -85,7 +85,7 @@ test('refreshMenus only patches pending links (refresh command), records the new
     setPath(s, 'site.navigation.menus.a', { id: 1, spec: specA, pending: [{ label: 'A', page: 'a' }, { label: 'B', page: 'b' }], contentHash: 'old' });
     setPath(s, 'site.navigation.menus.b', { id: 2, spec: specB, pending: [], contentHash: 'hb' });
   });
-  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [{ label: 'A', page: 'a' }], pending: [{ label: 'B', page: 'b' }], missing: [], contentHash: 'new' }] });
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [{ label: 'A', page: 'a' }], pending: [{ label: 'B', page: 'b' }], missing: [], previousHash: 'old', contentHash: 'new' }] });
   const r = refreshMenus(wp, t);
   assert.deepEqual(r.refreshed, ['a']);
   assert.deepEqual(r.menus.a.patched, [{ label: 'A', page: 'a' }]);
@@ -96,10 +96,25 @@ test('refreshMenus only patches pending links (refresh command), records the new
   assert.deepEqual(menus.b, { id: 2, spec: specB, pending: [], contentHash: 'hb' });
 });
 
+test('refresh of a menu edited in the Site Editor keeps the old stored hash, so the EEDITED guard survives', () => {
+  const t = theme();
+  updateState(t, (s) => { setPath(s, 'site.navigation.menus.a', { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }], contentHash: 'written' }); });
+  // The live menu hashed to 'edited' before the patch (someone changed it), 'patched' after.
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [{ label: 'A', page: 'a' }], pending: [], missing: [], previousHash: 'edited', contentHash: 'patched' }] });
+  refreshMenus(wp, t);
+  const m = loadState(t).site.navigation.menus.a;
+  assert.equal(m.contentHash, 'written', 'hash not advanced over Site Editor edits');
+  assert.deepEqual(m.pending, [], 'the safe pending-link patch is still recorded');
+  // A later plain upsert therefore still sends the old hash, which PHP will reject with EEDITED.
+  const up = fakeWp({ upsert: [Object.assign(new WpError(['eval-file'], { code: 1, stdout: '', stderr: '[EEDITED] changed\n' }))] });
+  assert.throws(() => upsertMenu(up, 'a', { items: [] }, { expectHash: m.contentHash }), (e) => e.code === 'EEDITED');
+  assert.equal(up.calls[0].data.expectHash, 'written');
+});
+
 test('refreshMenus drops pending links that were removed in the Site Editor and reports them', () => {
   const t = theme();
   updateState(t, (s) => { setPath(s, 'site.navigation.menus.a', { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }], contentHash: 'h' }); });
-  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [], pending: [], missing: [{ label: 'A', page: 'a' }], contentHash: 'h' }] });
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [], pending: [], missing: [{ label: 'A', page: 'a' }], previousHash: 'h', contentHash: 'h' }] });
   const r = refreshMenus(wp, t);
   assert.deepEqual(r.menus.a.missing, [{ label: 'A', page: 'a' }]);
   assert.deepEqual(loadState(t).site.navigation.menus.a.pending, []);

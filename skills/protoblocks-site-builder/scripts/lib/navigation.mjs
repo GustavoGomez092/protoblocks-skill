@@ -74,6 +74,7 @@ function record(themeDir, key, spec, result) {
  * For every menu with pending links, patch ONLY the placeholder custom links whose page now exists
  * (navigation.php `refresh` parses the saved blocks), so Site Editor edits elsewhere in the menu survive.
  * Pending links that are no longer in the menu (removed in the Site Editor) are dropped and reported as `missing`.
+ * The stored contentHash only advances when the menu was untouched before the patch (previousHash matches).
  */
 export function refreshMenus(wp, themeDir) {
   const menus = loadState(themeDir).site.navigation?.menus ?? {};
@@ -83,8 +84,11 @@ export function refreshMenus(wp, themeDir) {
     if (!m.pending?.length) continue;
     checkKey(key);
     const r = callNav(wp, 'refresh', { key, pending: m.pending });
+    // Advance the stored hash only if the menu was untouched since protoblocks wrote it. If it was edited in
+    // the Site Editor, keep the old hash so the next plain upsert still refuses with EEDITED.
+    const untouched = r.previousHash !== undefined && r.previousHash === m.contentHash;
     updateState(themeDir, (s) => {
-      setPath(s, `site.navigation.menus.${key}`, { ...m, id: r.id, pending: r.pending, contentHash: r.contentHash });
+      setPath(s, `site.navigation.menus.${key}`, { ...m, id: r.id, pending: r.pending, contentHash: untouched ? r.contentHash : m.contentHash });
     });
     refreshed.push(key);
     out[key] = { id: r.id, patched: r.patched, pending: r.pending, missing: r.missing };

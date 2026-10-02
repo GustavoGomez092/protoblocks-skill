@@ -9,6 +9,8 @@ import { forkTheme, fetchThemeZip, forkMarker } from '../../skills/protoblocks-s
 // the original theme in `finally`, then deletes exactly those two folders after checking they sit directly
 // in the themes dir under their unique names (and that the fork carries the marker).
 const themesDir = path.join(PUBLIC, 'wp-content/themes');
+// Never throws: cleanup must not mask the test's original error.
+const hasMarker = (d) => { try { return Boolean(forkMarker(fs.readFileSync(path.join(d, 'style.css'), 'utf8'))); } catch { return false; } };
 
 itest('forkTheme forks, activates, reuses (even with force), and refuses foreign folders', async () => {
   const wp = testWp();
@@ -48,7 +50,7 @@ itest('forkTheme forks, activates, reuses (even with force), and refuses foreign
       if (!fs.existsSync(d)) continue;
       const ok = active === ORIGINAL_THEME && path.dirname(d) === themesDir && new RegExp(`^pb-itest-(fork|foreign)-${hex}$`).test(path.basename(d))
         && !fs.lstatSync(d).isSymbolicLink()
-        && (!needMarker || forkMarker(fs.readFileSync(path.join(d, 'style.css'), 'utf8')));
+        && (!needMarker || hasMarker(d));
       if (ok) fs.rmSync(d, { recursive: true, force: true });
       else problems.push(`left in place for inspection: ${d}`);
     }

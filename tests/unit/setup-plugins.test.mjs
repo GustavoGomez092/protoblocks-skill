@@ -351,7 +351,9 @@ const olderInstalled = (fake, status = 'active') => {
   setupCommonResponses(fake, true);
 };
 const pluginDir = (fake, dir) => fake.record('plugin path proto-blocks --dir', { code: 0, stdout: `${dir}\n`, stderr: '' });
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pb-plugdir-'));
+// realpath: macOS tmpdir (/var) is itself a symlink to /private/var.
+const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-plugdir-')));
+const noRepo = () => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' });
 
 test('older + inactive without opt-in: activates in place, reports updateAvailable, no install', async () => {
   const fake = new FakeExec();
@@ -368,7 +370,7 @@ test('updatePlugins opt-in on a plain plugin folder: force-installs with a long 
   const dir = tmp();
   pluginDir(fake, dir);
   fake.record(`plugin install ${ZIP} --force --activate`, { code: 0, stdout: '', stderr: '' });
-  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: noRepo });
   assert.equal(r.plugins[0].action, 'updated');
   assert.equal(r.plugins[0].version, '3.0.0');
   const call = fake.calls.find((c) => c.argsStr.startsWith('plugin install'));
@@ -465,4 +467,43 @@ test('a custom permalink structure is left alone and reported as a warning', asy
   fake.assertNotCalled('rewrite structure');
   assert.deepEqual(r.options, []);
   assert.ok(r.warnings.some((w) => w.includes('/blog/%year%/%postname%/')), JSON.stringify(r.warnings));
+});
+
+test('updatePlugins opt-in refuses a plugin folder inside a git work tree (EPLUGINDEV)', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const dir = tmp();
+  pluginDir(fake, dir);
+  const seen = [];
+  const exec = (cmd, args, opts) => { seen.push({ cmd, args, cwd: opts?.cwd }); return { code: 0, stdout: 'true\n', stderr: '' }; };
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec }), (e) => e.code === 'EPLUGINDEV' && /git work tree/.test(e.message));
+  assert.deepEqual(seen[0], { cmd: 'git', args: ['rev-parse', '--is-inside-work-tree'], cwd: dir });
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in detects a real enclosing repo (temp dir, real git)', async () => {
+  const { exec: realExec } = await import('../../skills/protoblocks-site-builder/scripts/lib/exec.mjs');
+  if (realExec('git', ['--version']).code !== 0) return;
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const repo = tmp();
+  realExec('git', ['init', '-q'], { cwd: repo });
+  const dir = path.join(repo, 'wp-content', 'plugins', 'proto-blocks');
+  fs.mkdirSync(dir, { recursive: true });
+  pluginDir(fake, dir);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: realExec }), (e) => e.code === 'EPLUGINDEV');
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in refuses a plugin folder reached through a symlinked parent (realpath differs)', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const realPlugins = tmp();
+  fs.mkdirSync(path.join(realPlugins, 'proto-blocks'));
+  const linkParent = path.join(tmp(), 'plugins');
+  fs.symlinkSync(realPlugins, linkParent);
+  const dir = path.join(linkParent, 'proto-blocks');
+  pluginDir(fake, dir);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: noRepo }), (e) => e.code === 'EPLUGINDEV' && e.message.includes(fs.realpathSync(dir)));
+  fake.assertNotCalled('plugin install');
 });

@@ -15,12 +15,14 @@ function fixture(wp) {
   const key = `it${hex}`;
   const page = (n) => `pb-itest-nav-${hex}-${n}`;
   const names = [];
+  const tmpDirs = [];
   const ids = (type, name) => wp.check(['post', 'list', `--post_type=${type}`, `--name=${name}`, '--post_status=any', '--format=ids']).trim().split(/\s+/).filter(Boolean);
   const createPage = (n, extra = []) => {
     names.push(page(n));
     return wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_title=PB Itest Nav ${n}`, `--post_name=${page(n)}`, ...extra, '--porcelain']).trim();
   };
   const purge = () => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
     for (const [type, name] of [...names.map((n) => ['page', n]), ['wp_navigation', `pb-nav-${key}`], ['wp_navigation', `pb-nav-${key}__trashed`]]) {
       assert.match(name, new RegExp(`${hex}`), 'purge only touches this test\'s unique names');
       const found = ids(type, name);
@@ -30,11 +32,12 @@ function fixture(wp) {
   const get = () => wp.evalFilePayload(path.join(WP_SCRIPTS_DIR, 'navigation.php'), 'get', { key });
   const stateDir = () => {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
+    tmpDirs.push(t);
     initState(t, { url: 'http://proto-blocks.local', path: '/x' });
     return t;
   };
   const remember = (t, spec, r) => updateState(t, (s) => { setPath(s, `site.navigation.menus.${key}`, { id: r.id, spec, pending: r.pending, contentHash: r.contentHash }); });
-  return { hex, key, page, createPage, purge, get, stateDir, remember, names };
+  return { hex, key, page, createPage, purge, get, stateDir, remember, names, tmpDirs };
 }
 
 itest('menus upsert idempotently and pending page links resolve on refresh', () => {
@@ -169,9 +172,16 @@ itest('Site Editor edits survive: upsert refuses (EEDITED), refresh patches only
     assert.match(patched, /"label":"Edited"/, 'added link kept');
     assert.match(patched, /"label":"Ext \(edited\)"/, 'renamed link kept');
     assert.match(patched, /"kind":"post-type"/, 'pending link converted');
-    assert.equal(loadState(theme).site.navigation.menus[f.key].contentHash, f.get().contentHash);
+    // The stored hash must NOT advance over the Site Editor edits: a plain upsert with state's hash still refuses.
+    const stored = loadState(theme).site.navigation.menus[f.key];
+    assert.equal(stored.contentHash, a.contentHash, 'refresh keeps the hash protoblocks last wrote');
+    assert.notEqual(stored.contentHash, f.get().contentHash);
+    assert.deepEqual(stored.pending, []);
+    assert.throws(() => upsertMenu(wp, f.key, spec, { expectHash: stored.contentHash }), (e) => e.code === 'EEDITED');
+    assert.equal(f.get().content, patched, 'refused upsert after refresh changed nothing');
 
     const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navbak-'));
+    f.tmpDirs.push(backupDir);
     const forced = upsertMenu(wp, f.key, spec, { expectHash: 'stale', force: true, backupDir });
     assert.equal(fs.readFileSync(forced.backup, 'utf8'), patched, 'backup holds the edited menu');
     assert.doesNotMatch(f.get().content, /Edited/);

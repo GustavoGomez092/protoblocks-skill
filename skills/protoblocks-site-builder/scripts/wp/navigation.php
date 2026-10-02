@@ -70,7 +70,7 @@ function pb_nav_block(array $item, array &$pending): array {
 function pb_nav_patch(array &$blocks, array $targets, array &$found, array &$patched): void {
     foreach ($blocks as &$b) {
         if (in_array($b['blockName'] ?? '', ['core/navigation-link', 'core/navigation-submenu'], true)
-            && ($b['attrs']['kind'] ?? '') === 'custom' && isset($b['attrs']['url']) && isset($targets[$b['attrs']['url']])) {
+            && ($b['attrs']['kind'] ?? '') === 'custom' && is_string($b['attrs']['url'] ?? null) && isset($targets[$b['attrs']['url']])) {
             $url = $b['attrs']['url'];
             $found[$url] = true;
             $page = $targets[$url]['post'];
@@ -115,13 +115,15 @@ if ($cmd === 'refresh') {
         else { $out['missing'][] = $t['item']; }
     }
     $content = $existing->post_content;
+    // previousHash lets the caller tell whether the menu was edited since protoblocks last wrote it.
+    $previous = pb_nav_hash($content);
     if ($out['patched']) {
         $content = serialize_blocks($blocks);
         $id = wp_update_post(wp_slash(['ID' => $existing->ID, 'post_content' => $content]), true);
         if (is_wp_error($id)) { $pb_fail('EWP', $id->get_error_message()); }
         $content = get_post($existing->ID)->post_content;
     }
-    echo wp_json_encode(['id' => (int) $existing->ID, 'key' => $key] + $out + ['contentHash' => pb_nav_hash($content)]) . "\n";
+    echo wp_json_encode(['id' => (int) $existing->ID, 'key' => $key] + $out + ['previousHash' => $previous, 'contentHash' => pb_nav_hash($content)]) . "\n";
     return;
 }
 

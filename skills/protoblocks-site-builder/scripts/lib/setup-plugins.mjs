@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { exec as realExec } from './exec.mjs';
 import { fetchLatestRelease } from './releases.mjs';
 import { compareVersions } from './preflight.mjs';
 
@@ -25,17 +26,28 @@ function pluginError(code, message) {
 }
 
 // WordPress deletes the old plugin folder before unpacking an update, and that delete follows symlinks:
-// a symlinked or git-managed (development) checkout would be wiped, .git included. Refuse those outright.
-function assertReplaceablePluginDir(wp, slug) {
+// a symlinked or git-managed (development) checkout would be wiped, .git included. Refuse those outright:
+// a symlink (the folder or any parent, e.g. a symlinked wp-content/plugins), a .git inside, or any git work tree.
+function assertReplaceablePluginDir(wp, slug, exec) {
   const dir = wp.check(['plugin', 'path', slug, '--dir']).trim();
   if (!dir) throw pluginError('EPLUGINDEV', `Could not resolve the ${slug} plugin folder; refusing to replace it.`);
+  const advice = 'update it yourself (e.g. git pull) instead.';
   let st;
   try { st = fs.lstatSync(dir); } catch { st = null; }
   if (st?.isSymbolicLink()) {
-    throw pluginError('EPLUGINDEV', `${dir} is a symlink (a development checkout?). Updating would delete the files it points to; update it yourself (e.g. git pull) instead.`);
+    throw pluginError('EPLUGINDEV', `${dir} is a symlink (a development checkout?). Updating would delete the files it points to; ${advice}`);
+  }
+  let real;
+  try { real = fs.realpathSync(dir); } catch { throw pluginError('EPLUGINDEV', `Could not resolve ${dir} on disk; refusing to replace it.`); }
+  if (real !== path.resolve(dir)) {
+    throw pluginError('EPLUGINDEV', `${dir} resolves to ${real} through a symlink (e.g. a symlinked wp-content/plugins). Updating would delete files outside the site; ${advice}`);
   }
   if (fs.existsSync(path.join(dir, '.git'))) {
-    throw pluginError('EPLUGINDEV', `${dir} is a git checkout. Updating would delete it, .git included; update it yourself (e.g. git pull) instead.`);
+    throw pluginError('EPLUGINDEV', `${dir} is a git checkout. Updating would delete it, .git included; ${advice}`);
+  }
+  const git = exec('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir });
+  if (git.code === 0 && git.stdout.trim() === 'true') {
+    throw pluginError('EPLUGINDEV', `${dir} is inside a git work tree. Updating would delete tracked files; ${advice}`);
   }
   return dir;
 }
@@ -51,7 +63,7 @@ function activateIfNeeded(wp, slug, st, extra = {}) {
  * An installed plugin is never replaced unless `updatePlugins` is true, and even then never when its
  * folder is a symlink or git checkout (EPLUGINDEV). A newer release is reported as `updateAvailable`.
  */
-export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease, updatePlugins = false } = {}) {
+export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease, updatePlugins = false, exec = realExec } = {}) {
   const plugins = [];
   const warnings = [];
 
@@ -73,7 +85,7 @@ export async function ensurePlugins(wp, { fetchRelease = fetchLatestRelease, upd
     wp.check(['plugin', 'install', rel.zipUrl, '--activate'], { timeout: INSTALL_TIMEOUT_MS });
     plugins.push({ slug: 'proto-blocks', action: 'installed', version: rel.version });
   } else if (compareVersions(pb.version, rel.version) < 0 && updatePlugins) {
-    assertReplaceablePluginDir(wp, 'proto-blocks');
+    assertReplaceablePluginDir(wp, 'proto-blocks', exec);
     wp.check(['plugin', 'install', rel.zipUrl, '--force', '--activate'], { timeout: INSTALL_TIMEOUT_MS });
     plugins.push({ slug: 'proto-blocks', action: 'updated', version: rel.version, previousVersion: pb.version });
   } else {
