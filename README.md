@@ -1,6 +1,6 @@
 # Proto-Blocks Skill
 
-A [skill](https://docs.anthropic.com/en/docs/claude-code/skills) that teaches an AI coding agent how to build WordPress Gutenberg blocks with the [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks) plugin — PHP-template blocks defined in `block.json` with `data-proto-*` fields, controls, repeaters, inner blocks, and optional Tailwind. With it installed, you can ask your agent for "a Proto-Blocks testimonial block" or "a Tailwind hero with an image control" and get clean, idiomatic, correct-by-construction code.
+A Claude Code plugin that is both a docs hub and a design-to-WordPress site builder. Its docs-hub [skill](https://docs.anthropic.com/en/docs/claude-code/skills) teaches an AI coding agent how to build WordPress Gutenberg blocks with the [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks) plugin — PHP-template blocks defined in `block.json` with `data-proto-*` fields, controls, repeaters, inner blocks, and optional Tailwind. With it installed, you can ask your agent for "a Proto-Blocks testimonial block" or "a Tailwind hero with an image control" and get clean, idiomatic, correct-by-construction code.
 
 It is delivered as a Claude Code plugin (auto-discovered skill) and is grounded in the Proto-Blocks plugin source + README, structured for progressive disclosure: a small always-loaded `SKILL.md` plus focused reference files the agent reads only when relevant.
 
@@ -125,42 +125,93 @@ If the agent doesn't pick it up, nudge it: *"Use the protoblocks skill."*
 
 ## What's inside
 
+Seven skills, four commands and one agent.
+
+### Skills
+
+| Skill | What it does |
+|---|---|
+| `protoblocks` | The docs hub: how to build, scaffold and debug Proto-Blocks (`block.json`, `template.php`, fields, controls, repeaters, inner blocks, Tailwind, interactivity). |
+| `protoblocks-site-builder` | The orchestrator: runs preflight, keeps a resumable build state, and drives the whole design-to-page pipeline below. |
+| `protoblocks-site-setup` | Prepares the Local site: installs Proto-Blocks and Yoast, forks and activates `proto-blocks-theme`, applies design tokens, creates navigation menus, wires header/footer parts. |
+| `protoblocks-design-breakdown` | Normalizes a design (image, PDF, Figma, Penpot, URL), crops its sections, maps each to reuse/extend/new blocks and gets your approval of the plan. |
+| `protoblocks-section-loop` | Builds one section, runs the build gates, dispatches visual QA and fixes until it matches its crop (with an iteration cap). |
+| `protoblocks-motion` | Adds GSAP scroll/entrance motion through the theme's `pb-motion` data-attribute presets, then verifies it. |
+| `protoblocks-seo` | Sets Yoast SEO data (focus keyword, title, description, social, schema), then audits the rendered page. |
+
+### Commands
+
+| Command | Use it to |
+|---|---|
+| `/protoblocks-skill:setup-site` | Prepare the current Local site (plugins, theme fork, motion, tokens, menus). |
+| `/protoblocks-skill:build-page` | Build a landing page from a design path, Figma/Penpot link or URL. |
+| `/protoblocks-skill:seo` | Run the Yoast SEO step (infer, apply, audit, fix) for a built page. |
+| `/protoblocks-skill:resume` | Resume an interrupted build from its saved state. |
+
+### Agent
+
+`protoblocks-skill:visual-qa` verifies one built section against its design crops. It runs the screenshot, diff and sanity scripts, looks at the design/render/heatmap composites and returns only a verdict. It measures and judges; it never fixes. The section loop dispatches it once per section per iteration.
+
+## Site builder
+
+### Requirements
+
+- [Local by Flywheel](https://localwp.com/) or any local WordPress with WP-CLI.
+- Node 18 or newer.
+- Proto-Blocks 2.10.1 or newer (setup installs it).
+- A fork of `proto-blocks-theme` (setup creates and activates it).
+- Yoast SEO (setup installs it).
+
+### First run
+
 ```
-protoblocks-skill/
-├── .claude-plugin/
-│   ├── marketplace.json          # marketplace metadata
-│   └── plugin.json               # plugin metadata
-└── skills/
-    └── protoblocks/
-        ├── SKILL.md              # always-loaded: overview, anatomy, quick reference, iron rules
-        └── references/           # loaded on demand
-            ├── authoring-workflow.md   # ← start here to build a block (end-to-end)
-            ├── recipes.md              # "I want to build X" → fields/controls/pattern
-            ├── composition.md          # discrete fields vs wysiwyg vs inner-blocks vs repeater
-            ├── schema.md               # block.json / protoBlocks schema + validation
-            ├── fields.md               # field types, value shapes, custom fields
-            ├── controls.md             # control types, conditional visibility
-            ├── templates.md            # template vars, data-proto-*, escaping
-            ├── repeaters.md            # repeater markup, ids, min/max, nesting
-            ├── styling.md              # vanilla CSS vs Tailwind, themed colors, theme tokens
-            ├── interactivity.md        # viewScript/module, Interactivity API (full accordion + tabs)
-            ├── previews.md             # inserter thumbnails (Preview Capture / preview.png)
-            ├── examples.md             # 9-block gallery, capability matrix, canonical samples
-            ├── cli-and-hooks.md        # WP-CLI, hooks, discovery, category, admin, debug
-            └── troubleshooting.md      # symptom → cause → fix
+/protoblocks-skill:build-page ~/Desktop/home.png
 ```
 
-## What it covers
+The builder runs this pipeline:
 
-- All field types (text, wysiwyg, image, video, link, repeater, inner-blocks) — config, value shapes, sanitization, custom field registration.
-- All control types (text, textarea, select, toggle, checkbox, range, number, color, color-palette, radio, image, video) + conditional rendering & composition (`conditions.visible`).
-- The full `block.json` / `protoBlocks` schema, defaults, and validation (errors vs warnings).
-- Template authoring: variables, the `data-proto-*` system, escaping, editor-preview detection, caching.
-- Repeaters (ids, min/max, nested object sub-fields) and inner blocks (correct hyphenated type + `$innerBlocksContent`).
-- Composition judgment (avoiding field proliferation), an authoring workflow, and recipes for ~14 module types.
-- Styling: vanilla CSS vs Tailwind (automatic compilation, dev/prod modes), themed colors, `tailwind-theme.css` `@theme` tokens, scoped preflight.
-- Frontend interactivity: plain JS, ES modules, and the WordPress Interactivity API — with the complete Accordion and a Tabs pattern inline — plus loading JS in the editor for third-party embeds (e.g. HubSpot forms) via `enqueue_block_assets`.
-- WP-CLI, hooks/filters, block discovery, category, preview capture, demo blocks, debug mode, troubleshooting.
+1. **Preflight**: finds the Local site and checks tools.
+2. **Setup**: plugins, theme fork, tokens, navigation, header/footer parts.
+3. **Breakdown**: crops the design into sections and proposes a plan. **Nothing is built until you approve the plan.**
+4. **Per section**: build the block, then visual QA, then motion.
+5. **Header/footer**: moves the design's header and footer into the theme parts.
+6. **Full-page QA**: whole-page visual check plus accessibility.
+7. **Yoast SEO**: infers and applies SEO data, audits the rendered page, fixes failures.
+8. **Menu and more pages**: asks whether to add the page to the primary menu and whether you have other landing pages to build.
+
+Install the QA dependencies once (screenshots and diffs):
+
+```bash
+cd skills/protoblocks-site-builder/scripts/qa && npm install
+```
+
+### State and resume
+
+Build state lives in the theme fork at `.protoblocks/build.json`. If a session is interrupted, run `/protoblocks-skill:resume`: it re-runs preflight, reads the state and continues from the next action.
+
+### Safety rails
+
+- Work only touches the site that preflight resolved.
+- Anything overwritten with a forced write is backed up first.
+- If you edited a page, menu or its SEO in WordPress, the builder stops with `EEDITED` and asks before overwriting.
+- Approvals (the plan, a section, a page) are recorded only after you have seen the preview.
+- Theme forks are always reused, never recreated.
+
+### Tests for this repo
+
+| Script | What |
+|---|---|
+| `npm test` | Pure unit tests; no site needed. |
+| `npm run test:qa` | QA scripts against fixture pages. |
+| `npm run test:integration` | WP-CLI, PHP writers and theme forks on a Local site. |
+| `npm run test:integration:page` | The page integration test only. |
+| `npm run test:e2e` | The whole pipeline, design to finished page. |
+
+The integration and e2e tests touch a real Local site, so run them only through the lock script. See [tests/README.md](tests/README.md).
+
+## Docs hub
+
+The `protoblocks` skill is a small always-loaded `SKILL.md` plus `references/*.md` files the agent reads on demand (authoring workflow, recipes, composition, schema, fields, controls, templates, repeaters, styling, interactivity, previews, examples, CLI and hooks, troubleshooting). It covers every field and control type, the full `block.json` schema, template authoring, repeaters, inner blocks, Tailwind, the Interactivity API and WP-CLI.
 
 ## Keeping it in sync
 

@@ -8,13 +8,29 @@
   "plugins": [
     {
       "name": "protoblocks-skill",
-      "description": "Build, scaffold, and debug Proto-Blocks: PHP-template Gutenberg blocks defined in block.json with data-proto-* fields, controls, repeaters, inner blocks, and Tailwind",
-      "version": "1.2.0",
+      "description": "Proto-Blocks docs hub and design-to-WordPress site builder: turn images, Figma, Penpot or URLs into block-theme landing pages built from Proto-Blocks on local sites, with visual QA, GSAP motion and Yoast SEO.",
+      "version": "2.0.0",
       "source": "./",
       "author": {
         "name": "Gustavo Gomez",
         "email": "gustavogomez092@gmail.com"
-      }
+      },
+      "keywords": [
+        "wordpress",
+        "gutenberg",
+        "proto-blocks",
+        "blocks",
+        "php-templates",
+        "block.json",
+        "tailwind",
+        "site-builder",
+        "design-to-code",
+        "figma",
+        "penpot",
+        "yoast",
+        "gsap",
+        "local-by-flywheel"
+      ]
     }
   ]
 }

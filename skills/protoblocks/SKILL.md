@@ -24,6 +24,7 @@ Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML
 - Adding fields (text, image, video, link, wysiwyg, repeater, inner-blocks) or controls (select, toggle, range, color, image/video picker, etc.), including conditional controls.
 - Debugging: block not appearing, preview not updating, field not editable, repeater issues, Tailwind not applying.
 - Writing `template.php` markup with correct `data-proto-*` bindings and escaping.
+- Building whole pages or a site from a design → use `protoblocks-site-builder`.
 
 **Not for:** classic React/`@wordpress/scripts` block development, or non-Proto-Blocks WordPress work.
 
