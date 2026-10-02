@@ -3,7 +3,7 @@
  * Template-part DB overrides (Site Editor saved copies) for the active theme.
  * Usage: wp eval-file parts.php overrides <theme>
  *        wp eval-file parts.php preview <theme> <slug>
- *        wp eval-file parts.php remove-override <theme> <slug> confirm
+ *        wp eval-file parts.php remove-override <theme> <slug> confirm <expectedId>
  * <theme> must equal get_stylesheet(). Slugs are validated, never normalized.
  * remove-override moves the single matching post to Trash (recoverable).
  */
@@ -28,7 +28,7 @@ $rows = function (?string $slug) use ($theme) {
     ]);
     // Filter in PHP: WP_Query drops tax_query when `name` is set, which would match other themes' parts.
     $posts = array_values(array_filter($posts, fn($p) => has_term($theme, 'wp_theme', $p) && ($slug === null || $p->post_name === $slug)));
-    return array_map(fn($p) => ['id' => (int) $p->ID, 'slug' => $p->post_name, 'theme' => $theme, 'modified' => $p->post_modified_gmt], $posts);
+    return array_map(fn($p) => ['id' => (int) $p->ID, 'slug' => $p->post_name, 'theme' => implode(',', wp_get_post_terms($p->ID, 'wp_theme', ['fields' => 'names'])), 'modified' => $p->post_modified_gmt], $posts);
 };
 
 if ($cmd === 'overrides') {
@@ -58,6 +58,20 @@ if ($cmd === 'preview') {
 
 if (($args[3] ?? '') !== 'confirm') {
     $fail('ECONFIRM', 'remove-override requires the explicit argument "confirm".');
+}
+$expect = $args[4] ?? '';
+if (!ctype_digit($expect) || (int) $expect <= 0) {
+    $fail('ECONFIRM', 'remove-override requires the previewed post ID as the last argument.');
+}
+if (count($found) === 1 && $found[0]['id'] !== (int) $expect) {
+    $fail('ESTALE', 'Saved part is now ID ' . $found[0]['id'] . ', not the previewed ' . (int) $expect . '; nothing removed.');
+}
+if ($found) {
+    // wp_trash_post force-deletes when trash is disabled; never allow that.
+    $trash_days = (int) apply_filters('protoblocks_parts_trash_days', defined('EMPTY_TRASH_DAYS') ? EMPTY_TRASH_DAYS : 0);
+    if ($trash_days <= 0) {
+        $fail('ENOTRASH', 'Trash is disabled, so removal would permanently delete the saved copy. Remove it manually: Site Editor -> template part -> Clear customizations.');
+    }
 }
 $removed = [];
 foreach ($found as $r) {
