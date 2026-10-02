@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exec as realExec } from './exec.mjs';
 
-export async function download(url, dest, { fetchImpl = fetch } = {}) {
+// `headers` are added to (and may override) the default User-Agent; `timeoutMs` bounds the whole request.
+export async function download(url, dest, { fetchImpl = fetch, headers = {}, timeoutMs = 120000 } = {}) {
   let res;
   try {
-    res = await fetchImpl(url, { headers: { 'User-Agent': 'protoblocks-site-builder' }, redirect: 'follow', signal: AbortSignal.timeout(120000) });
+    res = await fetchImpl(url, { headers: { 'User-Agent': 'protoblocks-site-builder', ...headers }, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const e = new Error(`Download failed ${url}: ${err.message}`);
     e.code = 'EDOWNLOAD';

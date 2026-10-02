@@ -3,13 +3,17 @@
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
 
-`tokens.mjs apply` turns one JSON file into `tailwind-theme.css` (Tailwind v4 `@theme`), the `theme.json` palette/fonts/sizes, the site's body font and the Google Fonts `@import` in `style.css`, then compiles Tailwind and saves the tokens to `site.tokens` in the build state.
+`tokens.mjs apply` turns one JSON file into `tailwind-theme.css` (Tailwind v4 `@theme`), the `theme.json` palette/fonts/sizes and the site's body font, self-hosts the Google fonts, then compiles Tailwind and saves the tokens to `site.tokens` in the build state.
 
 ```bash
 node "$PB/lib/tokens.mjs" apply "$THEME" "$THEME/.protoblocks/tokens.json" [--no-compile]
 ```
 
-Prints `{ "written": ["tailwind-theme.css","theme.json","style.css"], "compiled": {...} }`, plus `warnings` when something could not be applied (relay them).
+Prints `{ "written": ["tailwind-theme.css","theme.json","style.css"], "compiled": {...}, "fonts": ["assets/fonts/inter-<hash>.woff2", ...] }`, plus `warnings` when something could not be applied (relay them).
+
+## Google fonts (self-hosted)
+
+Fonts with `google` weights are downloaded once, at apply time, into `$THEME/assets/fonts/` (woff2 from fonts.gstatic.com) and declared in `theme.json` as `settings.typography.fontFamilies[].fontFace` with `src: ["file:./assets/fonts/<file>.woff2"]`; WordPress prints the `@font-face` rules. `style.css` never imports Google Fonts (the upstream theme's Inter `@import` is removed): a third-party stylesheet would stall every page load, and visual QA, whenever Google is unreachable. Offline, or when a family's files cannot be downloaded, `apply` warns and that family keeps its fallback stack; re-run `apply` when online.
 
 ## Body font
 
@@ -57,4 +61,4 @@ Fonts: give `google` only to fonts that exist on Google Fonts. For any other fon
 
 `--color-accent` -> `bg-accent`, `text-accent`; `--text-h1` (+ `--text-h1--line-height`, `--letter-spacing`, `--font-weight`) -> `text-h1`; `--font-display` -> `font-display`; `--radius-card` -> `rounded-card`; `--shadow-soft` -> `shadow-soft`; `--spacing-section` -> `p-section`, `py-section`, `gap-section`.
 
-Re-applying overwrites `tailwind-theme.css`, the `theme.json` palette/fontFamilies/fontSizes and `styles.typography.fontFamily` (only for groups you provide), the managed body font rule and the managed Google Fonts `@import` line. Never hand-edit those; change the tokens JSON and re-apply.
+Re-applying overwrites `tailwind-theme.css`, the `theme.json` palette/fontFamilies/fontSizes and `styles.typography.fontFamily` (only for groups you provide), the managed body font rule and the `fontFace` entries (old font files in `assets/fonts/` are left in place). Never hand-edit those; change the tokens JSON and re-apply.

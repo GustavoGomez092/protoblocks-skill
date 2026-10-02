@@ -6,7 +6,7 @@ import path from 'node:path';
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import {
   validateTokens, renderTailwindTheme, mergeThemeJson, googleFontsUrl, rewriteFontImport, applyTokens, runApply,
-  rewriteBodyFont, bodyFontSlug, presetVar,
+  rewriteBodyFont, bodyFontSlug, presetVar, parseFontFaces, selfHostFonts, FONTS_DIR,
 } from '../../skills/protoblocks-site-builder/scripts/lib/tokens.mjs';
 
 const tokens = {
@@ -92,32 +92,162 @@ test('mergeThemeJson replaces token groups and preserves other settings', () => 
   assert.equal(base.settings.typography.fontFamilies[0].slug, 'old', 'input not mutated');
 });
 
-test('google fonts url and import rewrite', () => {
+test('google fonts url; style.css never imports Google Fonts (fonts are self-hosted)', () => {
   assert.equal(googleFontsUrl(tokens), 'https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=DM+Serif+Display:wght@400&display=swap');
   const style = '/*\nTheme Name: X\n*/\n\n/* Optional web font — swap or remove. */\n@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");\nbody{}';
-  const out = rewriteFontImport(style, tokens);
-  assert.equal(out.match(/@import url/g).length, 1);
-  assert.ok(out.includes('family=DM+Serif+Display'));
-  const none = rewriteFontImport(style, { colors: { a: '#000' } });
-  assert.ok(!none.includes('@import url'));
-  const inserted = rewriteFontImport('/*\nTheme Name: X\n*/\nbody{}', tokens);
-  assert.match(inserted, /\*\/\n@import url\("https:\/\/fonts\.googleapis\.com/);
+  for (const t of [tokens, { colors: { a: '#000' } }]) {
+    const out = rewriteFontImport(style, t);
+    assert.ok(!out.includes('@import'), JSON.stringify(t));
+    assert.ok(out.endsWith('body{}'));
+  }
+  assert.equal(rewriteFontImport('/*\nTheme Name: X\n*/\nbody{}', tokens), '/*\nTheme Name: X\n*/\nbody{}', 'no import is inserted');
 });
 
-test('rewriteFontImport collapses several existing Google imports into exactly one', () => {
+test('rewriteFontImport removes every existing Google import', () => {
   const imp = (f) => `@import url("https://fonts.googleapis.com/css2?family=${f}&display=swap");\n`;
   const style = `/*\nTheme Name: X\n*/\n${imp('A')}${imp('B')}${imp('C')}body{}`;
   const out = rewriteFontImport(style, tokens);
-  assert.equal(out.match(/@import url/g).length, 1);
-  assert.ok(out.includes('family=DM+Serif+Display'));
-  assert.ok(!out.includes('family=A&') && !out.includes('family=B&') && !out.includes('family=C&'));
-  assert.ok(out.endsWith('body{}'));
-  // removal of all imports when no google fonts, including repeated ones
-  const none = rewriteFontImport(style, { colors: { a: '#000' }, fonts: { s: { family: 'Local' } } });
-  assert.ok(!none.includes('@import'));
-  assert.ok(none.includes('body{}'));
-  // idempotent: re-running keeps exactly one import
-  assert.equal(rewriteFontImport(out, tokens), out);
+  assert.equal(out, '/*\nTheme Name: X\n*/\nbody{}');
+  assert.equal(rewriteFontImport(out, tokens), out, 'idempotent');
+});
+
+// What fonts.googleapis.com/css2 answers a modern browser: one @font-face per weight and unicode subset.
+const CSS2 = `/* latin-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v18/inter-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v18/inter-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v18/inter-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131;
+}
+/* latin */
+@font-face {
+  font-family: 'DM Serif Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/dmserifdisplay/v15/dm.woff2) format('woff2');
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://evil.example.com/x.woff2) format('woff2');
+}
+`;
+
+// A fake download.mjs: the css2 response for fonts.googleapis.com, bytes per gstatic URL; records every call.
+function fakeDownload({ offline = false, failFile = null } = {}) {
+  const calls = [];
+  const fn = async (url, dest, opts = {}) => {
+    calls.push({ url, dest, opts });
+    if (offline) throw Object.assign(new Error(`Download failed ${url}: getaddrinfo ENOTFOUND`), { code: 'EDOWNLOAD' });
+    if (failFile && url.includes(failFile)) throw Object.assign(new Error(`Download failed ${url}: HTTP 404`), { code: 'EDOWNLOAD' });
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, url.startsWith('https://fonts.googleapis.com/') ? CSS2 : `woff2:${url}`);
+    return dest;
+  };
+  fn.calls = calls;
+  return fn;
+}
+const forkTheme = () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\n@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");\nbody {\n  font-family: "Inter", sans-serif;\n}\n');
+  fs.writeFileSync(path.join(theme, 'theme.json'), JSON.stringify({ version: 3, settings: { typography: { fontFamilies: [{ slug: 'inter', name: 'Inter', fontFamily: 'Inter' }] } } }));
+  fs.writeFileSync(path.join(theme, 'tailwind-theme.css'), '@theme {}');
+  return theme;
+};
+
+test('parseFontFaces reads family, style, weight, unicode-range and the gstatic woff2 url; other hosts are dropped', () => {
+  const faces = parseFontFaces(CSS2);
+  assert.equal(faces.length, 4);
+  assert.deepEqual(faces[0], { family: 'Inter', style: 'normal', weight: '400', unicodeRange: 'U+0100-02BA, U+02BD-02C5', url: 'https://fonts.gstatic.com/s/inter/v18/inter-ext.woff2' });
+  assert.ok(faces.every((f) => f.url.startsWith('https://fonts.gstatic.com/')));
+});
+
+test('selfHostFonts fetches css2 through download.mjs as a browser, saves each woff2 once and returns theme.json fontFace entries', async () => {
+  const theme = forkTheme();
+  const download = fakeDownload();
+  const r = await selfHostFonts(theme, tokens, { download });
+  assert.deepEqual(r.warnings, []);
+  assert.equal(download.calls[0].url, googleFontsUrl(tokens));
+  assert.match(download.calls[0].opts.headers['User-Agent'], /Chrome\//, 'a browser UA: Google serves woff2 only to modern browsers');
+  assert.ok(download.calls[0].opts.timeoutMs <= 30000, 'bounded: an unreachable Google never stalls apply');
+  const gets = download.calls.slice(1).map((c) => c.url);
+  assert.equal(gets.length, new Set(gets).size, 'a file shared by several weights is downloaded once');
+  assert.equal(gets.length, 3);
+  const inter = r.faces.Inter;
+  assert.equal(inter.length, 3);
+  for (const face of [...inter, ...r.faces['DM Serif Display']]) {
+    assert.match(face.src[0], /^file:\.\/assets\/fonts\/[a-z0-9-]+\.woff2$/);
+    assert.ok(fs.existsSync(path.join(theme, face.src[0].slice('file:./'.length))), face.src[0]);
+    assert.equal(face.fontDisplay, 'swap');
+  }
+  assert.deepEqual(Object.keys(inter[0]).sort(), ['fontDisplay', 'fontFamily', 'fontStyle', 'fontWeight', 'src', 'unicodeRange']);
+  assert.equal(inter[0].fontFamily, 'Inter');
+  assert.equal(inter[2].fontWeight, '700');
+  assert.equal(FONTS_DIR, 'assets/fonts');
+  assert.deepEqual(fs.readdirSync(path.join(theme, FONTS_DIR)).filter((n) => !n.endsWith('.woff2')), [], 'no css or temp file left in the fonts folder');
+});
+
+test('runApply self-hosts: theme.json fontFace from file:./assets/fonts, no @import left, fonts listed', async () => {
+  const theme = forkTheme();
+  initState(theme, { url: 'http://x.test', path: '/x' });
+  const r = await runApply(theme, tokens, { compile: null, download: fakeDownload() });
+  const style = fs.readFileSync(path.join(theme, 'style.css'), 'utf8');
+  assert.ok(!style.includes('fonts.googleapis.com'), style);
+  const tj = JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8'));
+  const fam = Object.fromEntries(tj.settings.typography.fontFamilies.map((f) => [f.slug, f]));
+  assert.equal(fam.sans.fontFace.length, 3);
+  assert.equal(fam.display.fontFace[0].src[0].startsWith('file:./assets/fonts/'), true);
+  assert.equal(r.fonts.length, 3);
+  assert.equal(r.warnings, undefined);
+});
+
+test('runApply offline: warns, keeps the fallback stack (no fontFace, no @import) and still applies the tokens', async () => {
+  const theme = forkTheme();
+  const r = await runApply(theme, tokens, { compile: null, download: fakeDownload({ offline: true }) });
+  assert.match(r.warnings.join('\n'), /Google Fonts could not be downloaded.*Inter, DM Serif Display.*fallback/s);
+  const tj = JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8'));
+  assert.ok(tj.settings.typography.fontFamilies.every((f) => f.fontFace === undefined));
+  assert.equal(tj.settings.typography.fontFamilies[0].fontFamily, '"Inter", ui-sans-serif, system-ui, sans-serif');
+  assert.ok(!fs.readFileSync(path.join(theme, 'style.css'), 'utf8').includes('@import'));
+});
+
+test('runApply: a family whose file fails keeps its fallback; the others are self-hosted', async () => {
+  const theme = forkTheme();
+  const r = await runApply(theme, tokens, { compile: null, download: fakeDownload({ failFile: 'dmserifdisplay' }) });
+  assert.match(r.warnings.join('\n'), /DM Serif Display/);
+  const tj = JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8'));
+  const fam = Object.fromEntries(tj.settings.typography.fontFamilies.map((f) => [f.slug, f]));
+  assert.equal(fam.sans.fontFace.length, 3);
+  assert.equal(fam.display.fontFace, undefined);
+});
+
+test('runApply validates before any download (ETOKENS, nothing fetched)', async () => {
+  const download = fakeDownload();
+  await assert.rejects(runApply(forkTheme(), { colors: { BAD: 'x' }, fonts: tokens.fonts }, { compile: null, download }), (e) => e.code === 'ETOKENS');
+  assert.equal(download.calls.length, 0);
 });
 
 test('applyTokens writes three files, and writes nothing when invalid', () => {
@@ -212,7 +342,7 @@ test('applyTokens leaves no .tmp files after success', () => {
   assert.deepEqual(fs.readdirSync(theme).filter((f) => f.endsWith('.tmp')), []);
 });
 
-test('runApply saves state only after a successful compile', () => {
+test('runApply saves state only after a successful compile', async () => {
   const mk = () => {
     const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
     fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
@@ -224,17 +354,17 @@ test('runApply saves state only after a successful compile', () => {
 
   const bad = mk();
   const before = stateFile(bad);
-  assert.throws(() => runApply(bad, tokens, { compile: () => ({ success: false, message: 'tailwind exploded' }) }), /tailwind exploded/);
+  await assert.rejects(runApply(bad, tokens, { compile: () => ({ success: false, message: 'tailwind exploded' }), download: fakeDownload() }), /tailwind exploded/);
   assert.equal(stateFile(bad), before, 'state untouched on failed compile');
   assert.ok(fs.existsSync(path.join(bad, 'tailwind-theme.css')), 'files were written before compile');
 
   const good = mk();
-  const r = runApply(good, tokens, { compile: () => ({ success: true }) });
+  const r = await runApply(good, tokens, { compile: () => ({ success: true }), download: fakeDownload() });
   assert.deepEqual(r.compiled, { success: true });
   assert.deepEqual(JSON.parse(stateFile(good)).site.tokens.colors, tokens.colors);
 
   const skipped = mk();
-  runApply(skipped, tokens, { compile: null });
+  await runApply(skipped, tokens, { compile: null, download: fakeDownload() });
   assert.deepEqual(JSON.parse(stateFile(skipped)).site.tokens.colors, tokens.colors);
 });
 
@@ -418,7 +548,7 @@ test('applyTokens applies the body font to style.css and theme.json; warns when 
   const r = applyTokens(theme, { colors: { a: '#000' }, fonts: { display: { family: 'Fraunces' }, sans: { family: 'Work Sans', google: [400] } } });
   const css = fs.readFileSync(path.join(theme, 'style.css'), 'utf8');
   assert.match(css, /body \{\n  font-family: "Work Sans", ui-sans-serif, system-ui, sans-serif;\n\}/);
-  assert.match(css, /family=Work\+Sans/);
+  assert.doesNotMatch(css, /fonts\.googleapis\.com/, 'no Google Fonts import: fonts are self-hosted by runApply');
   assert.equal(JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8')).styles.typography.fontFamily, 'var(--wp--preset--font-family--sans)');
   assert.equal(r.warnings, undefined);
 

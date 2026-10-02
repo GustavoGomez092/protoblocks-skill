@@ -342,7 +342,7 @@ async function e2ePass(t, { globalStyles }) {
     assert.ok(setup.plugins.plugins.every((p) => p.action === 'ok'), `plugins untouched: ${JSON.stringify(setup.plugins.plugins)}`);
     assert.deepEqual(setup.plugins.options, [], 'setupSite changed no site option');
     lap('setup');
-    const tokens = runApply(themeDir, TOKENS, { compile: () => wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']) });
+    const tokens = await runApply(themeDir, TOKENS, { compile: () => wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']) });
     report.steps.tokens = { written: tokens.written, warnings: tokens.warnings ?? [] };
     assert.ok(!fs.readFileSync(path.join(themeDir, 'style.css'), 'utf8').includes('fonts.googleapis.com'), 'no web font import left in the fork');
     assert.equal(nextAction(loadState(themeDir)).action, 'setup', 'setup is unfinished without menus and parts');

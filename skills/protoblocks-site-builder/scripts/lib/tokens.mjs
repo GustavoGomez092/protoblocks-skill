@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { assertFork } from './guards.mjs';
 import { statePath, updateState, setPath } from './state.mjs';
+import { download as realDownload } from './download.mjs';
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([A-Za-z0-9 .,%+\-*\/()#]+\)|transparent|currentColor)$/;
@@ -119,7 +122,8 @@ export function bodyFontSlug(t) {
 // WordPress kebab-cases preset slugs for CSS variables (letters and digits split: "sans2" -> "sans-2").
 export const presetVar = (slug) => `var(--wp--preset--font-family--${slug.match(/[a-z]+|[0-9]+/g).join('-')})`;
 
-export function mergeThemeJson(json, t) {
+// `faces`: theme.json fontFace entries per font family name (self-hosted Google fonts, see selfHostFonts).
+export function mergeThemeJson(json, t, faces = {}) {
   const out = structuredClone(json);
   out.settings ??= {};
   if (t.colors) {
@@ -128,7 +132,9 @@ export function mergeThemeJson(json, t) {
   }
   if (t.fonts || t.type) out.settings.typography ??= {};
   if (t.fonts) {
-    out.settings.typography.fontFamilies = Object.entries(t.fonts).map(([slug, f]) => ({ slug, name: f.family, fontFamily: fontStack(f) }));
+    out.settings.typography.fontFamilies = Object.entries(t.fonts).map(([slug, f]) => ({
+      slug, name: f.family, fontFamily: fontStack(f), ...(faces[f.family.trim()]?.length ? { fontFace: faces[f.family.trim()] } : {}),
+    }));
     const body = bodyFontSlug(t);
     if (body) {
       out.styles ??= {};
@@ -178,21 +184,84 @@ export function googleFontsUrl(t) {
 }
 
 const IMPORT_RE = /^[ \t]*@import url\("https:\/\/fonts\.googleapis\.com[^"]*"\);[ \t]*\n?/gm;
+// The upstream theme's comment above its Inter import.
+const IMPORT_COMMENT_RE = /^[ \t]*\/\* Optional web font[^*]*\*\/[ \t]*\n(?=[ \t]*@import url\("https:\/\/fonts\.googleapis\.com)/gm;
 
-export function rewriteFontImport(css, t) {
-  const url = googleFontsUrl(t);
-  const line = url ? `@import url("${url}");\n` : '';
-  if (IMPORT_RE.test(css)) {
-    IMPORT_RE.lastIndex = 0;
-    let first = true;
-    return css.replace(IMPORT_RE, () => { const r = first ? line : ''; first = false; return r; });
-  }
-  if (!line) return css;
-  const end = css.indexOf('*/');
-  return end === -1 ? `${line}${css}` : `${css.slice(0, end + 2)}\n${line}${css.slice(end + 2).replace(/^\n/, '')}`;
+/**
+ * Removes every Google Fonts `@import` from style.css. Fonts are self-hosted (selfHostFonts + theme.json fontFace): a
+ * render-blocking third-party stylesheet stalls every page load when Google is unreachable.
+ */
+export function rewriteFontImport(css) {
+  return css.replace(IMPORT_COMMENT_RE, '').replace(IMPORT_RE, '').replace(/\*\/\n\n+(?=\S)/, '*/\n\n');
 }
 
-export function applyTokens(themeDir, t) {
+export const FONTS_DIR = 'assets/fonts';
+// fonts.googleapis.com/css2 serves woff2 only to browsers it recognises.
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const FONT_TIMEOUT_MS = 20000;
+const GSTATIC = /^https:\/\/fonts\.gstatic\.com\/[A-Za-z0-9._~\/-]+\.woff2$/;
+
+/** The @font-face rules of a css2 response whose source is a fonts.gstatic.com woff2 file (anything else is dropped). */
+export function parseFontFaces(css) {
+  const faces = [];
+  for (const m of css.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
+    const prop = (name) => m[1].match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+);`))?.[1].trim();
+    const url = m[1].match(/src\s*:\s*url\(\s*['"]?([^'")\s]+)['"]?\s*\)\s*format\(\s*['"]woff2['"]\s*\)/)?.[1];
+    const family = prop('font-family')?.replace(/^['"]|['"]$/g, '');
+    if (!family || !url || !GSTATIC.test(url)) continue;
+    const range = prop('unicode-range');
+    faces.push({ family, style: prop('font-style') ?? 'normal', weight: prop('font-weight') ?? '400', ...(range ? { unicodeRange: range } : {}), url });
+  }
+  return faces;
+}
+
+/**
+ * Downloads the Google fonts named in the tokens into `$THEME/assets/fonts/` (css2 through download.mjs, then each woff2
+ * once) and returns theme.json fontFace entries per family. Offline, or when a family's files fail, that family keeps
+ * its fallback stack and a warning says so; nothing here throws for the network.
+ */
+export async function selfHostFonts(themeDir, t, { download = realDownload } = {}) {
+  const url = googleFontsUrl(t);
+  const families = Object.values(t.fonts ?? {}).filter((f) => Array.isArray(f.google) && f.google.length).map((f) => f.family.trim());
+  const out = { faces: {}, files: [], warnings: [] };
+  if (!url) return out;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-fonts-'));
+  let css;
+  try {
+    const cssFile = path.join(tmp, 'css2.css');
+    await download(url, cssFile, { headers: { 'User-Agent': BROWSER_UA }, timeoutMs: FONT_TIMEOUT_MS });
+    css = fs.readFileSync(cssFile, 'utf8');
+  } catch (e) {
+    out.warnings.push(`Google Fonts could not be downloaded (${e.message}): ${families.join(', ')} not self-hosted; the fallback stack is used. Re-run tokens.mjs apply when online.`);
+    return out;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  const dir = path.join(themeDir, FONTS_DIR);
+  const saved = new Map(); // url -> file name
+  for (const family of families) {
+    const faces = parseFontFaces(css).filter((f) => f.family.toLowerCase() === family.toLowerCase());
+    if (!faces.length) { out.warnings.push(`Google Fonts returned no woff2 file for ${family}; the fallback stack is used.`); continue; }
+    const entries = [];
+    try {
+      for (const f of faces) {
+        if (!saved.has(f.url)) {
+          const name = `${family.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${crypto.createHash('sha256').update(f.url).digest('hex').slice(0, 10)}.woff2`;
+          await download(f.url, path.join(dir, name), { headers: { 'User-Agent': BROWSER_UA }, timeoutMs: FONT_TIMEOUT_MS });
+          saved.set(f.url, name);
+          out.files.push(`${FONTS_DIR}/${name}`);
+        }
+        entries.push({ fontFamily: family, fontStyle: f.style, fontWeight: String(f.weight), src: [`file:./${FONTS_DIR}/${saved.get(f.url)}`], fontDisplay: 'swap', ...(f.unicodeRange ? { unicodeRange: f.unicodeRange } : {}) });
+      }
+      out.faces[family] = entries;
+    } catch (e) {
+      out.warnings.push(`A font file of ${family} could not be downloaded (${e.message}); ${family} keeps the fallback stack.`);
+    }
+  }
+  return out;
+}
+
+export function applyTokens(themeDir, t, { fontFaces = {} } = {}) {
   assertFork(themeDir);
   const errors = validateTokens(t);
   if (errors.length) {
@@ -205,7 +274,7 @@ export function applyTokens(themeDir, t) {
   const st = path.join(themeDir, 'style.css');
   const warnings = [];
   // Read and compute everything first so a missing/unparseable input throws before any write.
-  let style = rewriteFontImport(fs.readFileSync(st, 'utf8'), t);
+  let style = rewriteFontImport(fs.readFileSync(st, 'utf8'));
   const body = bodyFontSlug(t);
   if (body) {
     const r = rewriteBodyFont(style, fontStack(t.fonts[body]));
@@ -214,7 +283,7 @@ export function applyTokens(themeDir, t) {
   }
   const outputs = [
     [tw, renderTailwindTheme(t)],
-    [tj, `${JSON.stringify(mergeThemeJson(JSON.parse(fs.readFileSync(tj, 'utf8')), t), null, '\t')}\n`],
+    [tj, `${JSON.stringify(mergeThemeJson(JSON.parse(fs.readFileSync(tj, 'utf8')), t, fontFaces), null, '\t')}\n`],
     [st, style],
   ];
   for (const [file, content] of outputs) fs.writeFileSync(`${file}.tmp`, content);
@@ -222,8 +291,15 @@ export function applyTokens(themeDir, t) {
   return { written: ['tailwind-theme.css', 'theme.json', 'style.css'], ...(warnings.length ? { warnings } : {}) };
 }
 
-export function runApply(themeDir, t, { compile } = {}) {
-  const { written, warnings } = applyTokens(themeDir, t);
+/** Validates, self-hosts the Google fonts, writes the three files, compiles Tailwind, then records site.tokens. */
+export async function runApply(themeDir, t, { compile, download } = {}) {
+  assertFork(themeDir);
+  const errors = validateTokens(t);
+  if (errors.length) throw Object.assign(new Error(`Invalid tokens:\n- ${errors.join('\n- ')}`), { code: 'ETOKENS' });
+  const fonts = await selfHostFonts(themeDir, t, download ? { download } : {});
+  const applied = applyTokens(themeDir, t, { fontFaces: fonts.faces });
+  const written = applied.written;
+  const warnings = [...fonts.warnings, ...(applied.warnings ?? [])];
   let compiled = null;
   if (compile) {
     compiled = compile();
@@ -234,18 +310,18 @@ export function runApply(themeDir, t, { compile } = {}) {
     }
   }
   if (fs.existsSync(statePath(themeDir))) updateState(themeDir, (s) => { setPath(s, 'site.tokens', t); });
-  return { written, compiled, ...(warnings ? { warnings } : {}) };
+  return { written, compiled, fonts: fonts.files, ...(warnings.length ? { warnings } : {}) };
 }
 
-function main(argv) {
+async function main(argv) {
   const [cmd, themeDir, file] = argv;
   if (cmd !== 'apply' || !themeDir || !file) { process.stderr.write('Usage: node tokens.mjs apply <themeDir> <tokens.json> [--no-compile]\n'); process.exit(64); }
   const rt = loadThemeRuntime(themeDir);
   const t = JSON.parse(fs.readFileSync(file, 'utf8'));
   const compile = argv.includes('--no-compile') ? null : () => createWp(rt).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
-  process.stdout.write(`${JSON.stringify(runApply(themeDir, t, { compile }), null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(await runApply(themeDir, t, { compile }), null, 2)}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
-  try { main(process.argv.slice(2)); } catch (e) { process.stderr.write(`${e.code ? `[${e.code}] ` : ''}${e.message}\n`); process.exit(1); }
+  main(process.argv.slice(2)).catch((e) => { process.stderr.write(`${e.code ? `[${e.code}] ` : ''}${e.message}\n`); process.exit(1); });
 }

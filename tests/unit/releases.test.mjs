@@ -106,3 +106,14 @@ test('unzip with corrupt zip gives EUNZIP', () => {
   assert.throws(() => unzip(zipFile, out), (e) => e.code === 'EUNZIP');
   fs.rmSync(dir, { recursive: true });
 });
+
+test('download passes extra headers and a bounded timeout to fetch', async () => {
+  const dest = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-dl-')), 'f.css');
+  let seen;
+  const fetchImpl = async (url, init) => { seen = init; return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode('x').buffer }; };
+  await download('https://fonts.googleapis.com/css2?family=A', dest, { fetchImpl, headers: { 'User-Agent': 'Browser/1' }, timeoutMs: 5000 });
+  assert.equal(seen.headers['User-Agent'], 'Browser/1');
+  assert.ok(seen.signal instanceof AbortSignal);
+  await download('https://x.test/a', dest, { fetchImpl });
+  assert.equal(seen.headers['User-Agent'], 'protoblocks-site-builder', 'the default UA is unchanged');
+});
