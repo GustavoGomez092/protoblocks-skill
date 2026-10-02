@@ -7,5 +7,10 @@
     "test:qa": "node --test --test-concurrency=1 tests/qa/*.test.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "gsap": "^3.15.0"
+  }
 }

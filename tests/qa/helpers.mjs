@@ -25,13 +25,30 @@ export async function makeImage({ width, height, bg = [255, 255, 255], rects = [
   return file;
 }
 
+const REPO = path.resolve(HERE, '../..');
+const VENDOR_DIR = path.join(REPO, 'node_modules', 'gsap', 'dist');
+const RUNTIME_FILE = path.join(REPO, 'skills', 'protoblocks-site-builder', 'scripts', 'theme-assets', 'assets', 'js', 'pb-motion.js');
+const within = (p, dir) => p === dir || p.startsWith(dir + path.sep);
+const TYPES = { '.html': 'text/html', '.png': 'image/png', '.svg': 'image/svg+xml', '.js': 'text/javascript' };
+
+function resolveFixture(root, pathname) {
+  if (pathname === '/runtime/pb-motion.js') return RUNTIME_FILE;
+  if (pathname.startsWith('/vendor/')) {
+    const p = path.join(VENDOR_DIR, pathname.slice('/vendor/'.length));
+    return within(p, VENDOR_DIR) ? p : null;
+  }
+  const p = path.join(root, pathname);
+  return within(p, root) ? p : null;
+}
+
 export function serveFixtures() {
   const root = path.join(HERE, 'fixtures');
   const server = http.createServer((req, res) => {
-    const p = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-    if (!p.startsWith(root) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end('nf'); return; }
-    const type = p.endsWith('.html') ? 'text/html' : p.endsWith('.png') ? 'image/png' : p.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type });
+    let pathname;
+    try { pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { pathname = null; }
+    const p = pathname && resolveFixture(root, pathname);
+    if (!p || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end('nf'); return; }
+    res.writeHead(200, { 'Content-Type': TYPES[path.extname(p)] || 'application/octet-stream' });
     fs.createReadStream(p).pipe(res);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
