@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec as realExec } from './exec.mjs';
@@ -15,8 +16,22 @@ export class WpError extends Error {
   }
 }
 
+// Local's WP-CLI has no `--` end-of-options handling: a positional such as `--exec=<php>` or
+// `--require=<file>` would be parsed as a global flag and run PHP. eval-file positionals must be plain.
+function assertPlainArgs(values) {
+  for (const v of values) {
+    if (typeof v !== 'string' || /^-/.test(v)) {
+      const e = new Error(`Refusing eval-file argument ${JSON.stringify(v ?? null)}: arguments must be strings that do not start with "-" (pass data with evalFilePayload instead).`);
+      e.code = 'EARGV';
+      throw e;
+    }
+  }
+}
+
+// The optional second argument is an options object (`{ exec }`; later stages may add more keys).
 export function createWp({ wp, mode, publicPath }, { exec = realExec } = {}) {
   const base = mode === 'native' ? [`--path=${publicPath}`] : [];
+  // `run`/`check` take WP-CLI flags on purpose; only call them with arguments the caller controls.
   const run = (args, opts = {}) => exec(wp, [...base, ...args], opts);
   const check = (args, opts) => {
     const r = run(args, opts);
@@ -24,6 +39,7 @@ export function createWp({ wp, mode, publicPath }, { exec = realExec } = {}) {
     return r.stdout;
   };
   const evalFile = (file, args = []) => {
+    assertPlainArgs([file, ...args]);
     const full = ['eval-file', file, ...args];
     const out = check(full);
     const last = out.trim().split('\n').filter(Boolean).at(-1) ?? '';
@@ -33,7 +49,19 @@ export function createWp({ wp, mode, publicPath }, { exec = realExec } = {}) {
       throw new WpError(full, { code: 0, stdout: out, stderr: 'eval-file did not print JSON on its last line' });
     }
   };
-  return { run, check, evalFile, wp, mode, publicPath };
+  // Pass arbitrary data to a PHP script as a JSON file: `$args = [cmd, <payload.json>]`.
+  const evalFilePayload = (file, cmd, data) => {
+    assertPlainArgs([file, cmd]);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-payload-'));
+    const tmp = path.join(dir, 'payload.json');
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(data));
+      return evalFile(file, [cmd, tmp]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  return { run, check, evalFile, evalFilePayload, wp, mode, publicPath };
 }
 
 export function loadRuntime(dir) {
