@@ -29,7 +29,7 @@ export function serveFixtures() {
   const root = path.join(HERE, 'fixtures');
   const server = http.createServer((req, res) => {
     const p = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-    if (!p.startsWith(root) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end('nf'); return; }
+    if (!(p === root || p.startsWith(root + path.sep)) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end('nf'); return; }
     const type = p.endsWith('.html') ? 'text/html' : p.endsWith('.png') ? 'image/png' : p.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': type });
     fs.createReadStream(p).pipe(res);
