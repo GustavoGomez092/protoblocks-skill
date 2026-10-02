@@ -84,9 +84,45 @@ function idArg(argv) {
   return i >= 0 ? Number(argv[i + 1]) : undefined;
 }
 
-const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>]\n';
+const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>] | markup <block> [--attrs <json>] [--nav-ref <id>]\n';
+
+/**
+ * Pure CLI behind `markup`: parses `<block> [--attrs <json>] [--nav-ref <id>]` and returns partMarkup(...) text.
+ * A bare block slug gets the proto-blocks/ namespace. Throws EINPUT (bad block/attrs/nav-ref) or EUSAGE (bad argv).
+ */
+export function markupFromArgs(args) {
+  const rest = [...args];
+  const block = rest.shift();
+  if (!block || block.startsWith('--')) throw fail('EUSAGE', USAGE.trim());
+  const vals = {};
+  while (rest.length) {
+    const f = rest.shift();
+    if (f !== '--attrs' && f !== '--nav-ref') throw fail('EUSAGE', USAGE.trim());
+    const v = rest.shift();
+    if (v === undefined) throw fail('EUSAGE', `${f} needs a value`);
+    vals[f] = v;
+  }
+  if (!/^(?:[a-z0-9][a-z0-9-]*\/)?[a-z0-9][a-z0-9-]*$/.test(block)) throw fail('EINPUT', `Invalid block name ${JSON.stringify(block)}`);
+  let attrs = {};
+  if ('--attrs' in vals) {
+    try { attrs = JSON.parse(vals['--attrs']); } catch (e) { throw fail('EINPUT', `--attrs is not valid JSON: ${e.message}`); }
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) throw fail('EINPUT', '--attrs must be a JSON object');
+  }
+  let navRef;
+  if ('--nav-ref' in vals) {
+    if (!/^[1-9][0-9]*$/.test(vals['--nav-ref'])) throw fail('ENAVREF', `--nav-ref must be a positive integer (the menu id), got ${JSON.stringify(vals['--nav-ref'])}`);
+    navRef = Number(vals['--nav-ref']);
+  }
+  return partMarkup({ block: block.includes('/') ? block : `proto-blocks/${block}`, attrs, navRef });
+}
 
 function main(argv) {
+  if (argv[0] === 'markup') {
+    try { return process.stdout.write(markupFromArgs(argv.slice(1))); } catch (e) {
+      if (e.code === 'EUSAGE') { process.stderr.write(`${e.message}\n`); process.exit(64); }
+      throw e;
+    }
+  }
   const [cmd, themeDir, slug, file] = argv;
   const usage = () => {
     process.stderr.write(USAGE);

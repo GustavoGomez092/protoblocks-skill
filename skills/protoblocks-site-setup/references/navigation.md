@@ -55,7 +55,7 @@ A part is `$THEME/parts/<slug>.html`. The markup wraps `core/navigation` (by men
 <!-- /wp:proto-blocks/site-header -->
 ```
 
-Without a menu: `<!-- wp:proto-blocks/site-footer /-->`. `partMarkup({ block, attrs, navRef })` in `lib/parts.mjs` produces exactly this (`navRef` must be a positive integer, the menu `id`). Save the markup to a file and write it:
+Without a menu: `<!-- wp:proto-blocks/site-footer /-->`. `partMarkup({ block, attrs, navRef })` in `lib/parts.mjs` produces exactly this (`navRef` must be a positive integer, the menu `id`). Generate it with `node "$PB/lib/parts.mjs" markup site-header --attrs '{"sticky":true}' --nav-ref 12 > header.html` (pure, no WordPress needed; do not add an `anchor` at setup time, the section loop adds it when it supersedes this part). Then write it:
 
 ```bash
 node "$PB/lib/parts.mjs" write "$THEME" header header.html     # -> {"written": ".../parts/header.html"}

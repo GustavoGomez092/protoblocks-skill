@@ -47,7 +47,7 @@ Details and checklist: `references/build.md`.
    `node "$PB/lib/gates.mjs" "$THEME" <block> --attrs '<attrs json>'`
 6. Assemble the page (creates it on first run, then rewrites it):
    `node "$PB/lib/page.mjs" build "$THEME" <page>`
-   `EEDITED`, `ESLUGTAKEN`, `EFOREIGN`, `ENOTPAGE`, `ESTALE` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). Relay `warnings` (kept developer title/slug/status).
+   `EEDITED`, `ESLUGTAKEN`, `EFOREIGN`, `ENOTPAGE` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). `ESTALE` is different: the page changed during the build; just re-run the build (it re-plans and re-backs-up), never `--force`. Relay `warnings` (kept developer title/slug/status).
 7. Record the block in the library:
    `node "$PB/lib/library.mjs" record "$THEME" <block> <page> --purpose "<one line>" [--variants a,b]`
 8. `extend` only: `node "$PB/lib/regress.mjs" "$THEME" <block>`. `checked: 0` with a `note` means no baselines yet (fine). Failures: fix the block until earlier pages are unchanged.

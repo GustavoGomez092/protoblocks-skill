@@ -1,30 +1,55 @@
 # Header and footer
 
-Header and footer are sections of the first page (labels `header` and `footer`, blocks `site-header` and `site-footer`). They go through the same Build and Verify loop, then are moved into the theme's template parts so they render once for every page. On later pages they are `reuse` and only verified.
+Header and footer are sections of the first page (labels `header` and `footer`, blocks `site-header` and `site-footer`). They go through the same Build and Verify loop, then are moved into the theme's template parts so they render once for every page. On later pages they are `reuse` and only verified. `PB`, `THEME` as in `SKILL.md`.
 
 ## Differences from other sections
 
-- The block has an `inner-blocks` field. Its content is a navigation block that references the menu: `<!-- wp:navigation {"ref":<id>} /-->`, with `<id>` from `site.navigation.menus.<key>.id` (read it: `node "$PB/lib/state.mjs" get "$THEME" site.navigation.menus.primary.id`). Put it in `section.inner`. `protoblocks-site-setup` creates the menus; if `null`, run its Step 3 first.
+- The block has an `inner-blocks` field. Its content is a navigation block that references the menu: `<!-- wp:navigation {"ref":<id>} /-->`, with `<id>` from `site.navigation.menus.<key>.id` (`node "$PB/lib/state.mjs" get "$THEME" site.navigation.menus.primary.id`). Put it in `section.inner`. `protoblocks-site-setup` Step 3 creates the menus; if the id is `null`, run it first.
 - Style the mobile menu in the block CSS against `.wp-block-navigation__responsive-container` (the overlay) and `.wp-block-navigation__responsive-container-open` (the hamburger). Verify the mobile breakpoint, not only desktop.
 - A sticky header is a block control (`sticky`), not custom JS.
 
+## Two renders until `inPart` (expected)
+
+The theme's `templates/page.html` (and `index`, `single`) include the `header` and `footer` template parts, wrapped in `<header>` / `<footer>` (`tagName`). So while the block is still a page section, the page shows it twice: once from the section, once from the template part. The part at this point is whatever site setup left: the theme's stock header (logo, title, navigation) or the navigation-only part from `protoblocks-site-setup` Step 4.
+
+- This is expected during verification. Visual QA crops by the section's anchor (`#pb-s1`), so the section's own screenshot is unaffected. The duplicate chrome above the page content can still shift nothing in the crop, but it makes the page look doubled to a human: tell the developer it is temporary.
+- Duplicate ids: the setup-time part carries no `anchor` (its markup is navigation only, for example `{"sticky":true}`), so only the section owns `pb-s1`. Never put the section's anchor into a part before the block has passed QA as a section. Only step 3 below puts the anchor into the part, and step 4 removes the section from the page in the same pass, so the id exists once.
+- The loop's part supersedes the setup-time part: after the `site-header` / `site-footer` block passes QA, `parts.mjs write` replaces `parts/header.html` / `parts/footer.html`.
+
 ## After the block passes QA on the page
 
-1. List Site Editor copies that would shadow the file:
-   `node "$PB/lib/parts.mjs" overrides "$THEME"` (`[]` means none).
+1. List Site Editor copies that would shadow the file: `node "$PB/lib/parts.mjs" overrides "$THEME"` (`[]` means none).
 2. If a `header` (or `footer`) copy exists, show the developer what would be discarded and ask. Run the preview once: `node "$PB/lib/parts.mjs" remove-override "$THEME" header` prints `[ECONFIRM]` with the id. Only after their explicit OK: `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`. The copy goes to Trash, not deleted; relay the printed recovery command. `[ESTALE]` means the id changed: preview again. `[EAMBIGUOUS]` or `[ETHEMEMISMATCH]`: nothing removed; tell the developer. `[ENOTRASH]`: Trash is disabled so removal would be permanent; ask the developer to use "Clear customizations" on the part in the Site Editor.
-3. Write the part. The file content is the `partMarkup` output (the shape is in `protoblocks-site-setup/references/navigation.md`): the block comment wrapping the `core/navigation` ref, with the same attrs the section used:
-   `node "$PB/lib/parts.mjs" write "$THEME" header header.html`
-   (then the same for `footer footer.html`).
-4. Mark the section as rendered by the part so the page stops outputting it. Set `inPart` true and status `done`:
-   `node "$PB/lib/state.mjs" set "$THEME" pages.<i>.sections.<j>.inPart true`
-   `node "$PB/lib/state.mjs" set "$THEME" pages.<i>.sections.<j>.status '"done"'`
-   `page.mjs` skips sections with `inPart: true` (it renders them from the template parts, once).
-5. Rebuild: `node "$PB/lib/page.mjs" build "$THEME" <page>`. Then re-verify the first content section (`prepare`, visual-qa, `record`): removing the in-page header shifts nothing only if the part renders identically, so the section must still pass.
-6. After header and footer exist, refresh menus that link to pages built since: `node "$PB/lib/navigation.mjs" refresh "$THEME"`. It keeps Site Editor edits; it patches only pending placeholder links. `page.mjs build` already runs it when a menu has a pending link to the page.
+3. Generate the part markup. It is a pure command (no WordPress needed): the block's attrs from state, with the same `anchor` the section used, and the menu id as `--nav-ref`:
+   ```bash
+   node "$PB/lib/parts.mjs" markup site-header --attrs '{"anchor":"pb-s1","sticky":true}' --nav-ref 15 > "$THEME/.protoblocks/header.html"
+   node "$PB/lib/parts.mjs" write "$THEME" header "$THEME/.protoblocks/header.html"
+   ```
+   Repeat for `footer` (`site-footer`, its own anchor, `footer.html`). `--attrs` must be the section's `attrs` (copy them from state; the anchor is not stored in `attrs`, add it). Bad JSON gives `[EINPUT]`, a bad `--nav-ref` gives `[ENAVREF]`. The part keeps the anchor, so the header still renders with `id="pb-s1"` and can be verified by `qa-input.mjs`.
+4. Mark the section as rendered by the part, in one atomic write (look up by slug and `n`; set `inPart` and `status` together). `page.mjs` skips sections with `inPart: true`:
+
+<!-- test:run -->
+```bash
+PAGE=home SECTION=1 THEME="$THEME" PB="$PB" node --input-type=module -e '
+const { updateState } = await import(process.env.PB + "/lib/state.mjs");
+updateState(process.env.THEME, (s) => {
+  const page = s.pages.find((p) => p.slug === process.env.PAGE);
+  if (!page) throw new Error("No page " + process.env.PAGE);
+  const sec = page.sections.find((x) => x.n === Number(process.env.SECTION));
+  if (!sec) throw new Error("No section n=" + process.env.SECTION);
+  sec.inPart = true;
+  sec.status = "done";
+});
+'
+node "$PB/lib/state.mjs" validate "$THEME"
+```
+
+5. Rebuild so they render once, from the parts: `node "$PB/lib/page.mjs" build "$THEME" <page>` (`ESTALE`: re-run, never `--force`).
+6. Re-verify three things, each with `qa-input.mjs prepare` / visual-qa / `record` on the same anchors: the header (`pb-s1`, now rendered by the part), the footer, and the first content section. A section already `done` is re-verified like any other (`prepare` sets it `verifying` again).
+7. If a re-verification fails after `inPart` (for example a pixel shift because the template wraps the part in `<header>` / `<footer>`, or the page now has a different top offset), fix it in the block CSS or in the part markup (regenerate with `markup`, `write`, rebuild) and re-verify. Do not unset `inPart` to chase it, and do not lower thresholds. The iteration cap applies as usual (`verify.md`).
+8. Refresh menus that link to pages built since: `node "$PB/lib/navigation.mjs" refresh "$THEME"`. It keeps Site Editor edits; it patches only pending placeholder links. `page.mjs build` already runs it when a menu has a pending link to the page.
 
 ## Notes
 
-- Never write `parts/*.html` by hand around the tool; `parts.mjs write` validates the active theme.
-- Anchors `pb-s1` and the footer's anchor no longer exist on the page once `inPart` is set; verify them before moving them.
-- Editing the header later: change the block, re-run gates, rewrite the part with `parts.mjs write`, re-check one content section.
+- Never write `parts/*.html` by hand around the tool; `parts.mjs write` checks the fork.
+- Editing the header later: change the block, re-run gates, regenerate and rewrite the part, re-check one content section.
