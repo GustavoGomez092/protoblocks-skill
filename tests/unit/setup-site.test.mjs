@@ -28,7 +28,7 @@ function harness({ preflight = okPreflight(), themeReused = false, forkThrows = 
     forkTheme: (o) => {
       calls.push(['fork', o]);
       if (forkThrows) throw forkThrows;
-      return { themeDir, slug: 'acme', reused: themeReused, forkedFrom: o.forkedFrom };
+      return { themeDir, slug: 'acme', reused: themeReused, forkedFrom: o.forkedFrom ?? 'proto-blocks-theme@1.0.0' };
     },
     installThemeAssets: (d) => { calls.push(['assets', d]); return { copied: [], functionsUpdated: false }; },
   };
@@ -84,18 +84,19 @@ test('native mode records wp mode without wrapper or localSiteId', async () => {
   assert.equal('localSiteId' in s.site, false);
 });
 
-test('second run keeps existing state and only updates site.theme and site.url', async () => {
+test('second run on the same site keeps existing state and updates site.theme', async () => {
   const h = harness();
   await setupSite({ name: 'Acme' }, h.deps);
   const { updateState } = await import('../../skills/protoblocks-site-builder/scripts/lib/state.mjs');
   updateState(h.themeDir, (s) => { s.library.hero = { purpose: 'x' }; });
-  const h2 = harness({ preflight: okPreflight({ url: 'http://y.local' }), themeReused: true });
-  h2.deps.forkTheme = (o) => ({ themeDir: h.themeDir, slug: 'acme', reused: true, forkedFrom: o.forkedFrom });
+  const h2 = harness({ themeReused: true });
+  h2.deps.forkTheme = (o) => ({ themeDir: h.themeDir, slug: 'acme', reused: true, forkedFrom: 'proto-blocks-theme@9.9.9' });
   const r = await setupSite({ name: 'Acme' }, h2.deps);
   assert.equal(r.theme.reused, true);
   const s = loadState(h.themeDir);
   assert.deepEqual(s.library.hero, { purpose: 'x' });
-  assert.equal(s.site.url, 'http://y.local');
+  assert.equal(s.site.url, 'http://x.local');
+  assert.deepEqual(s.site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@9.9.9' });
 });
 
 test('zip cleanup runs when forkTheme throws, and the error propagates', async () => {
@@ -108,8 +109,8 @@ test('zip cleanup runs when forkTheme throws, and the error propagates', async (
 
 test('parseArgs: values, boolean --force, defaults', () => {
   assert.deepEqual(parseArgs(['--name', 'A B', '--slug', 's', '--site', 'Local X', '--cwd', '/d', '--force']),
-    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true });
-  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false });
+    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true, updatePlugins: false });
+  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false, updatePlugins: false });
 });
 
 test('parseArgs rejects a missing value, an unknown flag and a stray positional (EUSAGE)', () => {
@@ -134,4 +135,91 @@ test('force: true is passed through to forkTheme', async () => {
   const h = harness();
   await setupSite({ name: 'Acme', force: true }, h.deps);
   assert.equal(h.calls.find((c) => c[0] === 'fork')[1].force, true);
+});
+
+test('--update-plugins is opt-in and reaches ensurePlugins', async () => {
+  assert.equal(parseArgs(['--name', 'A']).updatePlugins, false);
+  assert.equal(parseArgs(['--name', 'A', '--update-plugins']).updatePlugins, true);
+  const h = harness();
+  const seen = [];
+  h.deps.ensurePlugins = async (_wp, opts) => { seen.push(opts); return { plugins: [], options: [] }; };
+  await setupSite({ name: 'Acme' }, h.deps);
+  await setupSite({ name: 'Acme', updatePlugins: true }, h.deps);
+  assert.deepEqual(seen.map((o) => o?.updatePlugins), [false, true]);
+});
+
+// ---- I1: reuse skips the download; refork ----
+function withFork(markerLine = 'Proto Fork: proto-blocks-theme@1.0.0') {
+  const pub = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-setup-pub-'));
+  const dir = path.join(pub, 'wp-content', 'themes', 'acme');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'style.css'), `/*\nTheme Name: Acme\n${markerLine}\n*/`);
+  return okPreflight({ publicPath: pub });
+}
+
+test('a reusable fork skips fetchThemeZip entirely (offline re-runs work)', async () => {
+  const h = harness({ preflight: withFork(), themeReused: true });
+  h.deps.fetchThemeZip = async () => { throw Object.assign(new Error('offline'), { code: 'ERELEASE' }); };
+  const r = await setupSite({ name: 'Acme' }, h.deps);
+  assert.deepEqual(names(h.calls), ['preflight', 'createWp', 'plugins', 'fork', 'assets']);
+  assert.equal(h.calls.find((c) => c[0] === 'fork')[1].zipFile, undefined);
+  assert.equal(r.theme.reused, true);
+});
+
+test('force does not trigger a download for an existing fork either', async () => {
+  const h = harness({ preflight: withFork(), themeReused: true });
+  await setupSite({ name: 'Acme', force: true }, h.deps);
+  assert.equal(names(h.calls).includes('fetchZip'), false);
+});
+
+test('refork downloads and passes refork through; a foreign folder still downloads', async () => {
+  const h = harness({ preflight: withFork() });
+  await setupSite({ name: 'Acme', refork: 'acme' }, h.deps);
+  assert.ok(names(h.calls).includes('fetchZip'));
+  assert.equal(h.calls.find((c) => c[0] === 'fork')[1].refork, 'acme');
+  const f = harness({ preflight: withFork('Author: x') });
+  await setupSite({ name: 'Acme', force: true }, f.deps);
+  assert.ok(names(f.calls).includes('fetchZip'));
+});
+
+test('refork that does not equal the slug is ERFORK before plugins are touched', async () => {
+  const h = harness({ preflight: withFork() });
+  await assert.rejects(setupSite({ name: 'Acme', refork: 'other' }, h.deps), (e) => e.code === 'ERFORK');
+  assert.deepEqual(names(h.calls), ['preflight']);
+});
+
+test('parseArgs accepts --refork <slug>', () => {
+  assert.equal(parseArgs(['--name', 'A', '--refork', 'a']).refork, 'a');
+  assert.throws(() => parseArgs(['--name', 'A', '--refork']), (e) => e.code === 'EUSAGE');
+});
+
+// ---- M5: build state that belongs to another site ----
+test('setupSite refuses with EWRONGSITE before touching plugins when the fork state is for another url', async () => {
+  const pre = withFork();
+  const { initState: init } = await import('../../skills/protoblocks-site-builder/scripts/lib/state.mjs');
+  init(path.join(pre.publicPath, 'wp-content', 'themes', 'acme'), { url: 'http://other.local', path: '/elsewhere' });
+  const h = harness({ preflight: pre });
+  await assert.rejects(setupSite({ name: 'Acme' }, h.deps), (e) => e.code === 'EWRONGSITE' && /other\.local/.test(e.message));
+  assert.deepEqual(names(h.calls), ['preflight']);
+});
+
+test('setupSite refuses with EWRONGSITE when the forked theme dir state is for another url', async () => {
+  const h = harness();
+  await setupSite({ name: 'Acme' }, h.deps);
+  const h2 = harness({ preflight: okPreflight({ url: 'http://y.local' }) });
+  h2.deps.forkTheme = () => ({ themeDir: h.themeDir, slug: 'acme', reused: true, forkedFrom: 'proto-blocks-theme@1.0.0' });
+  const before = fs.readFileSync(statePath(h.themeDir), 'utf8');
+  await assert.rejects(setupSite({ name: 'Acme' }, h2.deps), (e) => e.code === 'EWRONGSITE');
+  assert.equal(fs.readFileSync(statePath(h.themeDir), 'utf8'), before);
+});
+
+test('a re-run on the same site refreshes site.path and site.wp along with the theme', async () => {
+  const h = harness();
+  await setupSite({ name: 'Acme' }, h.deps);
+  const h2 = harness({ preflight: okPreflight({ publicPath: '/moved/public', wp: '/moved/wp' }) });
+  h2.deps.forkTheme = () => ({ themeDir: h.themeDir, slug: 'acme', reused: true, forkedFrom: 'proto-blocks-theme@1.2.3' });
+  await setupSite({ name: 'Acme' }, h2.deps);
+  const s = loadState(h.themeDir);
+  assert.equal(s.site.path, '/moved/public');
+  assert.deepEqual(s.site.wp, { mode: 'local-wrapper', wrapper: '/moved/wp' });
 });

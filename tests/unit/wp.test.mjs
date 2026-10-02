@@ -65,3 +65,51 @@ test('loadRuntime with malformed preflight.json throws ENORUNTIME', () => {
   fs.writeFileSync(path.join(root, 'wp-content/.protoblocks/preflight.json'), 'not valid json {');
   assert.throws(() => loadRuntime(root), (e) => e.code === 'ENORUNTIME' && /unreadable/.test(e.message));
 });
+
+// ---- Cross-cutting: WP-CLI argument injection ----
+const recorder = (stdout = '{"ok":true}\n') => {
+  const calls = [];
+  const exec = (cmd, args) => { calls.push(args); return { code: 0, stdout, stderr: '' }; };
+  return { calls, wp: createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec }) };
+};
+
+test('evalFile rejects dash-leading or non-string args with EARGV before running anything', () => {
+  for (const bad of ['--exec=echo 1;', '--require=/tmp/x.php', '-x', '--', 5, null, undefined, {}]) {
+    const { calls, wp } = recorder();
+    assert.throws(() => wp.evalFile('/x.php', ['ok', bad]), (e) => e.code === 'EARGV', String(bad));
+    assert.equal(calls.length, 0, `nothing executed for ${String(bad)}`);
+  }
+  const { calls, wp } = recorder();
+  assert.throws(() => wp.evalFile('--exec=1', []), (e) => e.code === 'EARGV');
+  assert.deepEqual(wp.evalFile('/x.php', ['status', 'a-b', '12']), { ok: true });
+  assert.deepEqual(calls[0], ['eval-file', '/x.php', 'status', 'a-b', '12']);
+});
+
+test('check and run still pass WP-CLI flags through', () => {
+  const { calls, wp } = recorder('x');
+  wp.check(['plugin', 'get', 'x', '--field=status']);
+  wp.run(['option', 'get', 'siteurl', '--format=json']);
+  assert.deepEqual(calls, [['plugin', 'get', 'x', '--field=status'], ['option', 'get', 'siteurl', '--format=json']]);
+});
+
+test('evalFilePayload writes JSON to a temp file, passes [cmd, path] and always removes it', () => {
+  let seen;
+  const exec = (cmd, args) => {
+    seen = { args, json: JSON.parse(fs.readFileSync(args.at(-1), 'utf8')) };
+    return { code: 0, stdout: '{"done":1}\n', stderr: '' };
+  };
+  const wp = createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec });
+  const data = { key: '--exec=evil', label: 'He said "hi"' };
+  assert.deepEqual(wp.evalFilePayload('/n.php', 'upsert', data), { done: 1 });
+  assert.equal(seen.args[0], 'eval-file');
+  assert.equal(seen.args[2], 'upsert');
+  assert.equal(seen.args.length, 4);
+  assert.deepEqual(seen.json, data);
+  assert.equal(fs.existsSync(seen.args[3]), false, 'payload file removed');
+
+  let file;
+  const failing = createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec: (c, args) => { file = args.at(-1); return { code: 1, stdout: '', stderr: 'boom' }; } });
+  assert.throws(() => failing.evalFilePayload('/n.php', 'upsert', {}), WpError);
+  assert.equal(fs.existsSync(file), false, 'payload file removed after failure');
+  assert.throws(() => failing.evalFilePayload('/n.php', '--exec=x', {}), (e) => e.code === 'EARGV');
+});

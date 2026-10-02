@@ -6,6 +6,7 @@ import path from 'node:path';
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import {
   validateTokens, renderTailwindTheme, mergeThemeJson, googleFontsUrl, rewriteFontImport, applyTokens, runApply,
+  rewriteBodyFont, bodyFontSlug, presetVar,
 } from '../../skills/protoblocks-site-builder/scripts/lib/tokens.mjs';
 
 const tokens = {
@@ -121,7 +122,7 @@ test('rewriteFontImport collapses several existing Google imports into exactly o
 
 test('applyTokens writes three files, and writes nothing when invalid', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
   fs.writeFileSync(path.join(theme, 'theme.json'), JSON.stringify({ version: 3, settings: {} }));
   fs.writeFileSync(path.join(theme, 'tailwind-theme.css'), '@theme {}');
   assert.throws(() => applyTokens(theme, { colors: { BAD: 'x' } }), (e) => e.code === 'ETOKENS');
@@ -133,7 +134,7 @@ test('applyTokens writes three files, and writes nothing when invalid', () => {
 
 test('applyTokens on invalid tokens leaves all three files byte-identical and lists every error', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  const files = { 'style.css': '/*\nTheme Name: X\n*/\nbody{}', 'theme.json': '{"version":3,"settings":{}}', 'tailwind-theme.css': '@theme {}' };
+  const files = { 'style.css': '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}', 'theme.json': '{"version":3,"settings":{}}', 'tailwind-theme.css': '@theme {}' };
   for (const [f, c] of Object.entries(files)) fs.writeFileSync(path.join(theme, f), c);
   let err;
   try { applyTokens(theme, { colors: { BAD: 'x', ok: '#fff' }, radii: { r: 'nope' } }); } catch (e) { err = e; }
@@ -192,10 +193,11 @@ test('validateTokens(null) reports a clear error', () => {
 test('applyTokens throws before writing anything when style.css or theme.json is missing', () => {
   for (const missing of ['style.css', 'theme.json']) {
     const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
     fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
     fs.writeFileSync(path.join(theme, 'tailwind-theme.css'), '@theme {}');
     fs.rmSync(path.join(theme, missing));
+    initState(theme, { url: 'http://x.test', path: '/x' }); // fork guard: build state marks it as a fork
     assert.throws(() => applyTokens(theme, tokens), /ENOENT/);
     assert.equal(fs.readFileSync(path.join(theme, 'tailwind-theme.css'), 'utf8'), '@theme {}', missing);
     assert.deepEqual(fs.readdirSync(theme).filter((f) => f.endsWith('.tmp')), []);
@@ -204,7 +206,7 @@ test('applyTokens throws before writing anything when style.css or theme.json is
 
 test('applyTokens leaves no .tmp files after success', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
   fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
   applyTokens(theme, tokens);
   assert.deepEqual(fs.readdirSync(theme).filter((f) => f.endsWith('.tmp')), []);
@@ -213,7 +215,7 @@ test('applyTokens leaves no .tmp files after success', () => {
 test('runApply saves state only after a successful compile', () => {
   const mk = () => {
     const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
     fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
     initState(theme, { url: 'http://x.test', path: '/x' });
     return theme;
@@ -238,7 +240,7 @@ test('runApply saves state only after a successful compile', () => {
 
 test('applyTokens stages via .tmp files: a failing staged write leaves every target untouched', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  const files = { 'style.css': '/*\nTheme Name: X\n*/\nbody{}', 'theme.json': '{"version":3}', 'tailwind-theme.css': '@theme {}' };
+  const files = { 'style.css': '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}', 'theme.json': '{"version":3}', 'tailwind-theme.css': '@theme {}' };
   for (const [f, c] of Object.entries(files)) fs.writeFileSync(path.join(theme, f), c);
   fs.mkdirSync(path.join(theme, 'style.css.tmp')); // makes staging the last file fail
   assert.throws(() => applyTokens(theme, tokens));
@@ -328,4 +330,101 @@ test('fuzz: any shadow value that validates renders only well-formed @theme line
   assert.ok(probe((v) => ({ colors: { a: '#000' }, shadows: { s: v } })) > 0, 'some characters should still be accepted');
   probe((v) => ({ colors: { a: v.replace(/^0 0 1px /, 'rgb(0 0 0 / ') + ')' } }), LINE_CALC);
   probe((v) => ({ colors: { a: '#000' }, spacing: { s: v.replace(/^0 0 1px /, 'calc(1px + ') + ')' } }), LINE_CALC);
+});
+
+// ---- I3: the design's fonts reach theme.json styles and the fork's style.css ----
+const UPSTREAM_STYLE = `/*
+Theme Name: Acme
+Text Domain: acme
+Proto Fork: proto-blocks-theme@1.1.3
+*/
+
+/* Optional web font — swap or remove. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+/* Base typography */
+body {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+.wp-site-blocks {
+  display: flex;
+}
+.editor-styles-wrapper body {
+  font-family: serif;
+}
+`;
+
+test('bodyFontSlug prefers body, then sans, then text/base, then the first font', () => {
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, sans: { family: 'B' }, body: { family: 'C' } } }), 'body');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, sans: { family: 'B' } } }), 'sans');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, text: { family: 'B' } } }), 'text');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, mono: { family: 'B' } } }), 'display');
+  assert.equal(bodyFontSlug({ colors: { a: '#000' } }), null);
+});
+
+test('presetVar names presets the way WordPress kebab-cases slugs', () => {
+  assert.equal(presetVar('sans'), 'var(--wp--preset--font-family--sans)');
+  assert.equal(presetVar('sans2'), 'var(--wp--preset--font-family--sans-2)');
+  assert.equal(presetVar('body-text'), 'var(--wp--preset--font-family--body-text)');
+});
+
+test('mergeThemeJson sets styles.typography.fontFamily to the body font preset and keeps other styles', () => {
+  const base = { version: 3, styles: { color: { text: '#000' }, typography: { lineHeight: '1.5' } } };
+  const out = mergeThemeJson(base, tokens);
+  assert.equal(out.styles.typography.fontFamily, 'var(--wp--preset--font-family--sans)');
+  assert.equal(out.styles.typography.lineHeight, '1.5');
+  assert.deepEqual(out.styles.color, { text: '#000' });
+  assert.equal(base.styles.typography.fontFamily, undefined, 'input not mutated');
+  assert.equal(mergeThemeJson({ version: 3 }, { colors: { a: '#000' } }).styles, undefined, 'no fonts: styles untouched');
+});
+
+test('rewriteBodyFont replaces only the top-level body font-family inside a managed region, idempotently', () => {
+  const stack = '"Fraunces", ui-serif, serif';
+  const once = rewriteBodyFont(UPSTREAM_STYLE, stack);
+  assert.equal(once.warning, undefined);
+  assert.match(once.css, /body \{\n  font-family: "Fraunces", ui-serif, serif;\n\}/);
+  assert.doesNotMatch(once.css, /Roboto, Helvetica/);
+  assert.match(once.css, /\.editor-styles-wrapper body \{\n  font-family: serif;/, 'other rules untouched');
+  assert.equal(once.css.split('protoblocks: body font').length - 1, 2, 'one start and one end marker');
+  assert.equal(rewriteBodyFont(once.css, stack).css, once.css, 'idempotent');
+  const changed = rewriteBodyFont(once.css, '"Inter", ui-sans-serif, sans-serif').css;
+  assert.match(changed, /font-family: "Inter", ui-sans-serif, sans-serif;/);
+  assert.doesNotMatch(changed, /Fraunces/);
+  assert.equal(changed.split('protoblocks: body font').length - 1, 2);
+  // Everything outside the body rule is byte-identical.
+  const strip = (c) => c.replace(/\/\* >>> protoblocks: body font[\s\S]*?<<< protoblocks: body font \*\//, '').replace(/^body \{[^}]*\}/m, '');
+  assert.equal(strip(once.css), strip(UPSTREAM_STYLE));
+});
+
+test('rewriteBodyFont keeps other declarations in the body rule', () => {
+  const r = rewriteBodyFont('body {\n  margin: 0;\n  font-family: Inter;\n  color: red;\n}\n', '"X", serif');
+  assert.match(r.css, /margin: 0;\n  font-family: "X", serif;\n  color: red;/);
+});
+
+test('rewriteBodyFont without a body font-family rule warns and changes nothing', () => {
+  for (const css of ['/*\nTheme Name: X\n*/\nbody{}', '/*\nTheme Name: X\n*/\n.x{font-family:a;}', 'body.home { font-family: a; }']) {
+    const r = rewriteBodyFont(css, '"X", serif');
+    assert.equal(r.css, css);
+    assert.match(r.warning, /body/);
+  }
+});
+
+test('applyTokens applies the body font to style.css and theme.json; warns when the rule is missing', () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), UPSTREAM_STYLE);
+  fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
+  const r = applyTokens(theme, { colors: { a: '#000' }, fonts: { display: { family: 'Fraunces' }, sans: { family: 'Work Sans', google: [400] } } });
+  const css = fs.readFileSync(path.join(theme, 'style.css'), 'utf8');
+  assert.match(css, /body \{\n  font-family: "Work Sans", ui-sans-serif, system-ui, sans-serif;\n\}/);
+  assert.match(css, /family=Work\+Sans/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8')).styles.typography.fontFamily, 'var(--wp--preset--font-family--sans)');
+  assert.equal(r.warnings, undefined);
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
+  fs.writeFileSync(path.join(bare, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\n.x{}');
+  fs.writeFileSync(path.join(bare, 'theme.json'), '{"version":3}');
+  const w = applyTokens(bare, { colors: { a: '#000' }, fonts: { sans: { family: 'Inter' } } });
+  assert.ok(w.warnings.some((x) => /body/.test(x)), JSON.stringify(w));
 });

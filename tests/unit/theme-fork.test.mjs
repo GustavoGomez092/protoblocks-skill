@@ -280,3 +280,134 @@ test('fetchThemeZip success: zipFile lives in tmpRoot and cleanup() empties it',
     assert.deepEqual(fs.readdirSync(tmpRoot), []);
   });
 });
+
+// ---- I1: forks are always reused; refork/backup instead of delete ----
+import { execSync, spawnSync as spawn } from 'node:child_process';
+import { exec as realExec } from '../../skills/protoblocks-site-builder/scripts/lib/exec.mjs';
+
+function sandbox() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-fork-i1-'));
+  const wpContent = path.join(root, 'wp-content');
+  const themesDir = path.join(wpContent, 'themes');
+  fs.mkdirSync(themesDir, { recursive: true });
+  const src = path.join(root, 'zipsrc', 'proto-theme');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'style.css'), '/*\nTheme Name: Proto-theme\nVersion: 1.1.3\nText Domain: proto-theme\n*/\nbody{}');
+  fs.writeFileSync(path.join(src, 'functions.php'), "<?php\n__('x', 'proto-theme');\n");
+  const zipFile = path.join(root, 'theme.zip');
+  execSync(`cd "${path.dirname(src)}" && zip -qr "${zipFile}" proto-theme`);
+  const calls = [];
+  const wp = { check: (args) => { calls.push(args.join(' ')); return ''; } };
+  const noGit = () => ({ code: 1, stdout: '', stderr: '' });
+  const mkFork = (slug, extra = 'mine') => {
+    const d = path.join(themesDir, slug);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'style.css'), `/*\nTheme Name: Acme\nText Domain: ${slug}\nProto Fork: proto-blocks-theme@1.0.0\n*/`);
+    fs.writeFileSync(path.join(d, 'work.txt'), extra);
+    return d;
+  };
+  const backups = () => { const b = path.join(wpContent, '.protoblocks', 'backups'); return fs.existsSync(b) ? fs.readdirSync(b).map((n) => path.join(b, n)) : []; };
+  return { root, wpContent, themesDir, zipFile, wp, calls, noGit, mkFork, backups };
+}
+const base = (s, over = {}) => ({ wp: s.wp, themesDir: s.themesDir, name: 'Acme', slug: 'acme', forkedFrom: 'proto-blocks-theme@2.0.0', exec: s.noGit, ...over });
+
+test('an existing fork is reused even with force: true, and needs no zip', () => {
+  const s = sandbox();
+  const d = s.mkFork('acme');
+  const r = forkTheme(base(s, { force: true, zipFile: undefined }));
+  assert.equal(r.reused, true);
+  assert.equal(fs.readFileSync(path.join(d, 'work.txt'), 'utf8'), 'mine');
+  assert.deepEqual(s.calls, ['theme activate acme']);
+  assert.deepEqual(s.backups(), []);
+});
+
+test('refork must name the slug (ERFORK) and is checked before anything else', () => {
+  const s = sandbox();
+  const d = s.mkFork('acme');
+  const failWp = { check: () => { throw new Error('wp must not be called'); } };
+  assert.throws(() => forkTheme(base(s, { wp: failWp, refork: 'other', zipFile: s.zipFile })), (e) => e.code === 'ERFORK');
+  assert.throws(() => forkTheme(base(s, { wp: failWp, refork: true, zipFile: s.zipFile })), (e) => e.code === 'ERFORK');
+  assert.equal(fs.readFileSync(path.join(d, 'work.txt'), 'utf8'), 'mine');
+});
+
+test('refork moves the old fork to wp-content/.protoblocks/backups and forks fresh', () => {
+  const s = sandbox();
+  s.mkFork('acme');
+  const r = forkTheme(base(s, { refork: 'acme', zipFile: s.zipFile }));
+  assert.equal(r.reused, false);
+  const [bak] = s.backups();
+  assert.ok(bak, 'backup dir exists');
+  assert.equal(r.backup, bak);
+  assert.match(path.basename(bak), /^acme-\d{4}-\d{2}-\d{2}T/);
+  assert.equal(fs.readFileSync(path.join(bak, 'work.txt'), 'utf8'), 'mine', 'old fork preserved in the backup');
+  assert.equal(fs.existsSync(path.join(s.themesDir, 'acme', 'work.txt')), false);
+  assert.equal(forkMarker(fs.readFileSync(path.join(s.themesDir, 'acme', 'style.css'), 'utf8')), 'proto-blocks-theme@2.0.0');
+});
+
+test('force on a foreign folder moves it to backups instead of deleting it', () => {
+  const s = sandbox();
+  const d = path.join(s.themesDir, 'acme');
+  fs.mkdirSync(d);
+  fs.writeFileSync(path.join(d, 'style.css'), '/*\nTheme Name: Client\n*/');
+  assert.throws(() => forkTheme(base(s, { zipFile: s.zipFile })), (e) => e.code === 'EFORKEXISTS' && /backups/.test(e.message) && !/deletes/.test(e.message));
+  const r = forkTheme(base(s, { force: true, zipFile: s.zipFile }));
+  assert.equal(fs.readFileSync(path.join(r.backup, 'style.css'), 'utf8'), '/*\nTheme Name: Client\n*/');
+  assert.ok(r.backup.startsWith(path.join(s.wpContent, '.protoblocks', 'backups') + path.sep));
+});
+
+test('a symlinked theme folder is never replaced: ESYMLINK for force (foreign) and refork (fork)', () => {
+  for (const [kind, over] of [['foreign', { force: true }], ['fork', { refork: 'acme' }], ['foreign', { refork: 'acme', force: true }]]) {
+    const s = sandbox();
+    const target = path.join(s.root, 'dev-checkout');
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, 'style.css'), kind === 'fork' ? '/*\nProto Fork: proto-blocks-theme@1.0.0\n*/' : '/*\nTheme Name: Dev\n*/');
+    fs.mkdirSync(path.join(target, '.git'));
+    fs.symlinkSync(target, path.join(s.themesDir, 'acme'));
+    assert.throws(() => forkTheme(base(s, { ...over, zipFile: s.zipFile })), (e) => e.code === 'ESYMLINK', `${kind} ${JSON.stringify(over)}`);
+    assert.ok(fs.lstatSync(path.join(s.themesDir, 'acme')).isSymbolicLink());
+    assert.ok(fs.existsSync(path.join(target, '.git')));
+    assert.deepEqual(fs.readdirSync(target).sort(), ['.git', 'style.css']);
+    assert.deepEqual(s.backups(), []);
+  }
+});
+
+test('a symlinked fork is reused (force is ignored for forks); a symlinked foreign folder without force is EFORKEXISTS', () => {
+  const s = sandbox();
+  const target = path.join(s.root, 'dev-fork');
+  fs.mkdirSync(target);
+  fs.writeFileSync(path.join(target, 'style.css'), '/*\nProto Fork: proto-blocks-theme@1.0.0\n*/');
+  fs.symlinkSync(target, path.join(s.themesDir, 'acme'));
+  assert.equal(forkTheme(base(s, { force: true })).reused, true);
+  const f = sandbox();
+  const t2 = path.join(f.root, 'dev');
+  fs.mkdirSync(t2);
+  fs.symlinkSync(t2, path.join(f.themesDir, 'acme'));
+  assert.throws(() => forkTheme(base(f, { zipFile: f.zipFile })), (e) => e.code === 'EFORKEXISTS');
+});
+
+test('failed activation after refork/force restores the previous folder from the backup', () => {
+  const wp = { check: (args) => { if (args[0] === 'theme') throw Object.assign(new Error('nope'), { code: 'WPFAIL' }); return ''; } };
+  const s = sandbox();
+  s.mkFork('acme');
+  assert.throws(() => forkTheme(base(s, { wp, refork: 'acme', zipFile: s.zipFile })), (e) => e.code === 'WPFAIL');
+  assert.equal(fs.readFileSync(path.join(s.themesDir, 'acme', 'work.txt'), 'utf8'), 'mine');
+  assert.deepEqual(s.backups(), []);
+  const f = sandbox();
+  const d = path.join(f.themesDir, 'acme');
+  fs.mkdirSync(d);
+  fs.writeFileSync(path.join(d, 'style.css'), '/*\nTheme Name: Client\n*/');
+  assert.throws(() => forkTheme(base(f, { wp, force: true, zipFile: f.zipFile })), (e) => e.code === 'WPFAIL');
+  assert.equal(fs.readFileSync(path.join(d, 'style.css'), 'utf8'), '/*\nTheme Name: Client\n*/', 'foreign folder restored');
+  assert.deepEqual(f.backups(), []);
+});
+
+test('no git init when the themes dir is already inside a git work tree', () => {
+  if (realExec('git', ['--version']).code !== 0) return;
+  const s = sandbox();
+  spawn('git', ['init', '-q'], { cwd: s.root });
+  forkTheme(base(s, { zipFile: s.zipFile, exec: realExec }));
+  assert.equal(fs.existsSync(path.join(s.themesDir, 'acme', '.git')), false, 'nested repo must not be created');
+  const outside = sandbox();
+  forkTheme(base(outside, { zipFile: outside.zipFile, exec: realExec }));
+  assert.equal(fs.existsSync(path.join(outside.themesDir, 'acme', '.git')), true, 'standalone fork gets its own repo');
+});
