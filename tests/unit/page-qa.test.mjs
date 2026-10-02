@@ -125,3 +125,22 @@ test('filterViolations trusts a DOM-resolved inScope flag over the target string
   assert.deepEqual(r.blocking.map((x) => [x.id, x.nodes.length]), [['image-alt', 1]]);
   assert.deepEqual(r.blocking[0].nodes[0].target, ['img']);
 });
+
+test('filterViolations counts document-level nodes (html, body) but not look-alike selectors', () => {
+  const v = [
+    { id: 'html-has-lang', impact: 'serious', nodes: [{ target: ['html'] }] },
+    { id: 'bypass', impact: 'moderate', nodes: [{ target: ['body'] }] },
+    { id: 'x', impact: 'critical', nodes: [{ target: ['html > div'] }, { target: ['body.home .widget'] }] },
+    { id: 'flagged', impact: 'critical', nodes: [{ target: ['html'], inScope: true }] },
+  ];
+  const r = filterViolations(v);
+  assert.deepEqual(r.blocking.map((x) => x.id), ['html-has-lang', 'flagged']);
+  assert.deepEqual(r.other.map((x) => x.id), ['bypass']);
+});
+
+test('initState fills site.qa.pageMismatchMax (0.12) and keeps an explicit value', () => {
+  const a = tmp();
+  assert.equal(initState(a, { url: 'http://a.local', path: '/x' }).site.qa.pageMismatchMax, 0.12);
+  const b = tmp();
+  assert.equal(initState(b, { url: 'http://a.local', path: '/x', qa: { pageMismatchMax: 0.2 } }).site.qa.pageMismatchMax, 0.2);
+});

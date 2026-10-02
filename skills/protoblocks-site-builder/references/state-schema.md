@@ -23,7 +23,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
     "theme": { "slug": "acme", "forkedFrom": "proto-blocks-theme@1.1.3" },
     "tokens": { "colors": {…}, "fonts": {…}, "type": {…}, "radii": {…}, "shadows": {…} },
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
-    "qa": { "mismatchMax": 0.08, "heightDeltaMax": 0.03, "maxIterations": 5 },
+    "qa": { "mismatchMax": 0.08, "pageMismatchMax": 0.12, "heightDeltaMax": 0.03, "maxIterations": 5 },
     "navigation": { "primary": 123, "footer": [124, 125], "pendingLinks": [{ "label": "Pricing", "page": "pricing" }] },
     "parts": { "header": { "block": "site-header", "status": "done" }, "footer": { … } }
   },
@@ -56,7 +56,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
 | section `status` | `planned`, `building`, `verifying`, `animating`, `done`, `skipped` |
 | section `decision` | `new`, `reuse`, `extend` |
 
-QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax` 0.08, `heightDeltaMax` 0.03, `maxIterations` 5.
+QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax` 0.08, `pageMismatchMax` 0.12 (full-page QA), `heightDeltaMax` 0.03, `maxIterations` 5.
 
 ## CLI
 

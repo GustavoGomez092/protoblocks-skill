@@ -8,6 +8,8 @@ import { loadState, updateState, stateDir } from '../lib/state.mjs';
 // matched as whole compound-selector heads so ".domain a", "#footer-widget a" and ".site-header a" do not qualify.
 const TAG_SCOPE = /(?:^|[\s>+~(])(?:main|header|footer)(?![\w-])/;
 const ANCHOR_SCOPE = /#pb-s/;
+// Document-level rules (html-has-lang, document-title, meta-viewport...) report the root elements themselves.
+const DOCUMENT_SCOPE = /^(?:html|body)$/;
 const BLOCKING = ['serious', 'critical'];
 // Chromium cannot paint a surface much taller than 16384 device px; stay below it.
 const MAX_SURFACE_PX = 16000;
@@ -19,7 +21,7 @@ const pageError = (message) => Object.assign(new Error(message), { code: 'ENOPAG
 export function filterViolations(violations) {
   // pageQa resolves each node in the page and sets node.inScope; the selector-string match is the fallback for nodes it
   // could not resolve (iframe/shadow targets) and for results that were not produced in a page.
-  const inScope = (node) => (typeof node?.inScope === 'boolean' ? node.inScope : [].concat(node?.target ?? []).flat(Infinity).some((t) => TAG_SCOPE.test(String(t)) || ANCHOR_SCOPE.test(String(t))));
+  const inScope = (node) => (typeof node?.inScope === 'boolean' ? node.inScope : [].concat(node?.target ?? []).flat(Infinity).some((t) => DOCUMENT_SCOPE.test(String(t)) || TAG_SCOPE.test(String(t)) || ANCHOR_SCOPE.test(String(t))));
   const kept = (violations ?? []).map((v) => ({ ...v, nodes: (v.nodes ?? []).filter(inScope) })).filter((v) => v.nodes.length);
   return { blocking: kept.filter((v) => BLOCKING.includes(v.impact)), other: kept.filter((v) => !BLOCKING.includes(v.impact)) };
 }
@@ -105,7 +107,7 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser }) {
         // axe targets are the shortest unique selector (just "img"), so resolve the real DOM position of every node.
         const flags = await page.evaluate((groups) => groups.map((targets) => targets.map((t) => {
           if (!Array.isArray(t) || t.length !== 1 || typeof t[0] !== 'string') return null;
-          try { const el = document.querySelector(t[0]); return el ? !!el.closest('main, header, footer, [id^="pb-s"]') : null; } catch { return null; }
+          try { const el = document.querySelector(t[0]); return el ? el === document.documentElement || el === document.body || !!el.closest('main, header, footer, [id^="pb-s"]') : null; } catch { return null; }
         })), results.violations.map((v) => v.nodes.map((n) => n.target)));
         results.violations.forEach((v, i) => v.nodes.forEach((n, j) => { if (flags[i][j] !== null) n.inScope = flags[i][j]; }));
         result.a11y = filterViolations(results.violations);

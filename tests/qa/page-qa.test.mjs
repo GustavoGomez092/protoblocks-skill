@@ -218,3 +218,16 @@ qtest('pageQa collects page errors raised during the axe run', async () => {
     assert.equal(r.pass, false);
   } finally { await srv.close(); }
 });
+
+qtest('pageQa reports document-level violations (html-has-lang on <html>) as blocking', async () => {
+  const { pageQa, shoot } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/no-lang.html`;
+    const design = await designOf(shoot, url, d, 800);
+    const r = await pageQa({ url, frames: [{ breakpoint: 'desktop', width: 800, scale: 1, image: design }], outDir: path.join(d, 'out') });
+    assert.ok(r.a11y.blocking.some((v) => v.id === 'html-has-lang'), JSON.stringify(r.a11y));
+    assert.equal(r.pass, false);
+  } finally { await srv.close(); }
+});
