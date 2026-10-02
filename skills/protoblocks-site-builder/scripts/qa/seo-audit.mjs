@@ -42,7 +42,7 @@ export function auditExtract(e, { focusKeyword, ogImageInfo }) {
   const kwWords = kw.split(' ').filter((w) => w.length >= 3);
   const slug = (() => { try { return new URL(e.url).pathname; } catch { return e.url ?? ''; } })();
   const slugTokens = slug.toLowerCase().split(/[-/_.]+/).filter(Boolean);
-  addKw('kw-slug', kwWords.every((w) => slugTokens.some((t) => t.startsWith(w))), slug, 'Consider a slug containing the keyword (ask before changing a published URL).', true);
+  addKw('kw-slug', kwWords.length > 0 && kwWords.every((w) => slugTokens.some((t) => t.startsWith(w))), kwWords.length ? slug : 'keyword has no words of 3+ characters to match', 'Consider a slug containing the keyword (ask before changing a published URL).', true);
   add('title-length', (e.title ?? '').length > 0 && (e.title ?? '').length <= 60, `${(e.title ?? '').length} chars`, 'Shorten the SEO title to ≤ 60 characters.');
   const dl = (e.metaDescription ?? '').length;
   add('description-length', dl >= 120 && dl <= 156, `${dl} chars`, 'Rewrite the meta description to 120–156 characters.');

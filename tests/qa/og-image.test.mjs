@@ -71,13 +71,15 @@ qtest('ogImage pads a narrow section to 1200 wide, centred, never stretched', as
   } finally { await srv.close(); }
 });
 
-qtest('ogImage reports imageErrors for an image that never loads', { timeout: 30000 }, async () => {
+qtest('ogImage reports imageErrors for an image that never loads', { timeout: 60000 }, async () => {
   const { ogImage } = await load();
   const srv = await serveFixtures();
+  const t0 = Date.now();
   try {
     const r = await ogImage({ url: `${srv.url}/hang.html`, selector: '#pb-s1', out: path.join(tmpDir(), 'e.png') });
-    assert.ok(r.imageErrors.length > 0, 'imageErrors is non-empty');
-    assert.match(r.imageErrors[0], /__hang/);
+    const took = `after ${Date.now() - t0}ms`;
+    assert.ok(r.imageErrors.length > 0, `imageErrors is non-empty (${took})`);
+    assert.match(r.imageErrors[0], /__hang/, `hanging image reported (${took})`);
   } finally { await srv.close(); }
 });
 

@@ -276,3 +276,10 @@ test('empty or whitespace keyword fails every kw-* check with "no focus keyword"
     }
   }
 });
+
+test('kw-slug warns (not a vacuous pass) when the keyword has no words of 3+ characters', () => {
+  const r = auditExtract(good(), { focusKeyword: 'a to', ogImageInfo: og });
+  const c = r.checks.find((x) => x.id === 'kw-slug');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.detail, 'keyword has no words of 3+ characters to match');
+});
