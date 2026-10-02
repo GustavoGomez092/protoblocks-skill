@@ -61,9 +61,11 @@ Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^
 | `pending` | `[{ label, page }]` page links still written as placeholder custom links (page missing or unpublished). |
 | `contentHash` | sha256 of the menu's `post_content` as protoblocks last wrote it. `upsert` refuses (`[EEDITED]`) when the live menu no longer matches (edited in the Site Editor) unless `--force`. |
 
+A design without navigation records `site.navigation = { "menus": {}, "none": true }` instead (site-setup Step 3); `status.mjs` then counts navigation as set up. A later `upsert` adds menus as usual.
+
 ## `site.parts.<slug>`
 
-Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.tokens`, `site.navigation.menus` and `site.parts.header` exist.
+Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true`) and `site.parts.header` exist; the header also counts once a page's `pb-header` section is `inPart`.
 
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 

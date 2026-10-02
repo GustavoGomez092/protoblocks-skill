@@ -19,7 +19,7 @@ node "$PB/lib/status.mjs" "$THEME"
 | State | `next.action` |
 |---|---|
 | no state | `setup` |
-| `site.tokens`, `site.navigation.menus` or `site.parts.header` missing (`why` names them) | `setup` |
+| `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true` for a design without navigation) or `site.parts.header` (or a `pb-header` section `inPart`) missing (`why` names them) | `setup` |
 | no pages, or every page `done` with no open section | `ask-more-pages` |
 | `planning`, no `plan.approvedAt` (or approved with no sections) | `breakdown` |
 | `planning` with `plan.approvedAt` | `build-page` |

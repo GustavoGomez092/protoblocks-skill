@@ -18,12 +18,22 @@ const byN = (a, b) => a.n - b.n;
 /** Sections of a page that are open work (building, verifying, animating), lowest n first. */
 export const openSections = (page) => [...(page.sections ?? [])].sort(byN).filter((s) => OPEN.has(s.status));
 
-/** Setup steps whose result is not in state yet (tokens, menus, the header part), in setup order. */
+/**
+ * Setup steps whose result is not in state yet (tokens, menus, the header part), in setup order. Navigation is done
+ * when a menu is recorded, or when the design has none (`site.navigation = {menus: {}, none: true}`). The header part
+ * is done when `site.parts.header` is recorded, or when a page's `pb-header` section is already rendered by the part
+ * (`inPart`; builds from before `site.parts` was recorded).
+ */
 export function setupGaps(state) {
   const gaps = [];
+  const nav = state.site.navigation;
+  const menus = nav?.menus;
+  const hasMenu = menus != null && typeof menus === 'object' && Object.keys(menus).length > 0;
+  const noNavigation = nav?.none === true && menus != null && typeof menus === 'object' && Object.keys(menus).length === 0;
+  const headerInPart = (state.pages ?? []).some((p) => (p.sections ?? []).some((s) => s.anchor === PART_ANCHORS.header && s.inPart === true));
   if (state.site.tokens == null) gaps.push('site.tokens (tokens.mjs apply)');
-  if (state.site.navigation?.menus == null) gaps.push('site.navigation.menus (navigation.mjs upsert)');
-  if (state.site.parts?.header == null) gaps.push('site.parts.header (parts.mjs write)');
+  if (!hasMenu && !noNavigation) gaps.push('site.navigation.menus (navigation.mjs upsert; a design without navigation: site.navigation.none: true with menus {})');
+  if (state.site.parts?.header == null && !headerInPart) gaps.push('site.parts.header (parts.mjs write)');
   return gaps;
 }
 
@@ -35,6 +45,8 @@ export function partsToMove(state, page) {
 
 /** A page's QA counts as passed when it passed, or the developer accepted its design differences. */
 export const pageQaPassed = (page) => page.pageQa?.pass === true || page.pageQa?.accepted === true;
+
+const pageQaWhy = (page) => (page.pageQa?.pass !== true && page.pageQa?.accepted === true ? 'page QA differences accepted by the developer' : 'page QA passed');
 
 function sectionAction(page, s, why) {
   const action = s.status === 'verifying' ? 'section-verify' : s.status === 'animating' ? 'section-animate' : 'section-build';
@@ -57,7 +69,7 @@ function decide(state) {
   if (page.status === 'seo' || page.status === 'done') {
     const reopened = openSections(page)[0];
     if (reopened) return sectionAction(page, reopened, `section ${reopened.n} was reopened (${reopened.status}) on a page in status ${page.status}`);
-    return { action: 'seo', page: page.slug, why: 'page QA passed' };
+    return { action: 'seo', page: page.slug, why: pageQaWhy(page) };
   }
   if (!page.sections.length) return { action: 'breakdown', page: page.slug, why: 'building page has no sections' };
   const open = [...page.sections].sort(byN).find((s) => !CLOSED.has(s.status));
@@ -67,7 +79,7 @@ function decide(state) {
     return { action: 'move-parts', page: page.slug, sections: unmoved.map((s) => s.n), why: `header/footer (${unmoved.map((s) => `#${s.anchor}`).join(', ')}) passed as sections but are not in the template parts yet` };
   }
   return pageQaPassed(page)
-    ? { action: 'seo', page: page.slug, why: page.pageQa.pass === true ? 'page QA passed' : 'page QA differences accepted by the developer' }
+    ? { action: 'seo', page: page.slug, why: pageQaWhy(page) }
     : { action: 'page-qa', page: page.slug, why: 'all sections closed' };
 }
 

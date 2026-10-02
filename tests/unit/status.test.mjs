@@ -220,6 +220,31 @@ test('move-parts: the first page header/footer passed as sections and are not in
   assert.equal(nextAction(base([{ ...home(), sections: [sec(1, 'skipped', { anchor: 'pb-header' }), sec(2, 'done')] }])).action, 'page-qa');
 });
 
+test('a design without navigation: menus {} with navigation.none true completes setup; {} alone does not', () => {
+  const pages = [{ slug: 'home', status: 'planning', sections: [] }];
+  const nav = (navigation) => { const st = base(pages); st.site.navigation = navigation; return st; };
+  assert.deepEqual(setupGaps(nav({ menus: {}, none: true })), []);
+  assert.equal(nextAction(nav({ menus: {}, none: true })).action, 'breakdown');
+  for (const n of [{ menus: {} }, { menus: {}, none: 'yes' }, { none: false, menus: {} }]) {
+    assert.match(setupGaps(nav(n)).join(), /site\.navigation\.menus/, JSON.stringify(n));
+  }
+  assert.match(nextAction(nav({ menus: {} })).why, /navigation\.none: true/, 'the why names the explicit no-navigation record');
+});
+
+test('setup: the header counts as present when a page has its pb-header section in the part (builds from before site.parts)', () => {
+  const st = base([{ slug: 'home', status: 'done', sections: [sec(1, 'done', { anchor: 'pb-header', inPart: true }), sec(2, 'done')] }]);
+  delete st.site.parts;
+  assert.deepEqual(setupGaps(st), []);
+  const notMoved = structuredClone(st); notMoved.pages[0].sections[0].inPart = false;
+  assert.match(setupGaps(notMoved).join(), /site\.parts\.header/);
+});
+
+test('the why on an seo/done page says whether page QA passed or was accepted', () => {
+  const pg = (status, pageQa) => base([{ slug: 'home', status, sections: [sec(1, 'done')], pageQa }]);
+  assert.equal(nextAction(pg('seo', { pass: true })).why, 'page QA passed');
+  assert.equal(nextAction(pg('seo', { pass: false, accepted: true, note: 'n' })).why, 'page QA differences accepted by the developer');
+});
+
 test('page QA accepted by the developer counts as passed; a fail without acceptance does not', () => {
   const pg = (pageQa) => base([{ slug: 'home', status: 'building', sections: [sec(1, 'done')], pageQa }]);
   const r = nextAction(pg({ pass: false, accepted: true, note: 'n' }));
@@ -256,4 +281,15 @@ test('CLI --root finds the theme with a build state: none, one, several; bad usa
   r = run('--root', path.join(root, 'nope'));
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^\[ENOTHEME\]/);
+});
+
+test('docs: site-setup records a design without navigation in a way status accepts, and the header part holds the header block alone', () => {
+  const doc = fs.readFileSync(new URL('../../skills/protoblocks-site-setup/SKILL.md', import.meta.url), 'utf8');
+  const m = doc.match(/<!-- test:run -->\n```bash\nnode "\$PB\/lib\/state\.mjs" set "\$THEME" site\.navigation '(\{[^']*\})'\n```/);
+  assert.ok(m, 'Step 3 has the runnable no-navigation recipe');
+  const st = base([]);
+  st.site.navigation = JSON.parse(m[1]);
+  assert.deepEqual(setupGaps(st), []);
+  assert.match(doc, /no navigation/i);
+  assert.match(doc, /node "\$PB\/lib\/parts\.mjs" markup site-header` without `--nav-ref`/);
 });
