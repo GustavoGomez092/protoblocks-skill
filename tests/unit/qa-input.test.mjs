@@ -19,10 +19,19 @@ function setup(max = 2) {
 
 const verdict = (pass, extra = {}) => ({ pass, anchor: 'pb-s1', numericPass: pass,
   breakpoints: [{ name: 'desktop', mode: 'diff', mismatch: pass ? 0.03 : 0.2, heightDelta: 0.01, widthDelta: 0, numericPass: pass, status: 200 },
+    { name: 'tablet', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true },
     { name: 'mobile', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true }],
   discrepancies: pass ? [] : [{ breakpoint: 'desktop', area: 'h1', issue: 'x', severity: 'high', fix: 'y' }], artifacts: [], ...extra });
 const errVerdict = () => ({ pass: false, anchor: 'pb-s1', numericPass: false, error: '[EINPUT] boom' });
-const writeV = (dir, v, name = 'verdict.json') => { const f = path.join(dir, name); fs.writeFileSync(f, JSON.stringify(v)); return f; };
+// What check-section would have written for this verdict (result.json uses `breakpoint`, the verdict `name`).
+const resultFor = (v) => ({ anchor: v.anchor ?? 'pb-s1', url: 'http://a.local/home/', numericPass: v.numericPass,
+  results: v.breakpoints.map(({ name, mode, mismatch, heightDelta, widthDelta, numericPass }) => ({ breakpoint: name, mode, mismatch, heightDelta, widthDelta, numericPass, ...(mode === 'diff' ? { fullyMasked: false } : {}) })) });
+const writeResult = (dir, r) => fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(r));
+// Writes the verdict and (unless result: false or an error verdict) the matching result.json.
+const writeV = (dir, v, name = 'verdict.json', { result = true } = {}) => {
+  if (result && v?.error === undefined && Array.isArray(v?.breakpoints)) writeResult(dir, resultFor(v));
+  const f = path.join(dir, name); fs.writeFileSync(f, JSON.stringify(v)); return f;
+};
 const code = (c) => (e) => e.code === c;
 
 test('buildCheckInput: diff for framed breakpoints, sanity for the rest, iteration numbering', () => {
@@ -127,7 +136,7 @@ test('validateVerdict: unsafe/duplicate breakpoint names and bad modes are rejec
 
 test('validateVerdict accepts a per-breakpoint error-mode result (check-section emits mode "error")', () => {
   const v = verdict(false);
-  v.breakpoints[1] = { name: 'mobile', mode: 'error', error: 'boom', numericPass: false };
+  v.breakpoints[2] = { name: 'mobile', mode: 'error', error: 'boom', numericPass: false };
   assert.deepEqual(validateVerdict(v), []);
   v.pass = true; v.numericPass = true; v.discrepancies = [];
   assert.ok(validateVerdict(v).length);
@@ -158,7 +167,7 @@ test('recordVerdict: fail → building and cap; pass → animating with baseline
   const r3 = recordVerdict(theme, 'home', 1, writeV(dir3, verdict(true)));
   assert.equal(r3.status, 'animating');
   const st = loadState(theme);
-  assert.equal(st.pages[0].sections[0].qa.filter((q) => q.iteration === 3).length, 2);
+  assert.equal(st.pages[0].sections[0].qa.filter((q) => q.iteration === 3).length, 3);
   assert.equal(st.library.hero.baselines[0].breakpoint, 'desktop');
   assert.ok(fs.existsSync(st.library.hero.baselines[0].file));
 
@@ -174,9 +183,9 @@ test('recordVerdict stores widthDelta, numericPass and status per breakpoint', (
   recordVerdict(theme, 'home', 1, writeV(dir, v));
   const q = loadState(theme).pages[0].sections[0].qa;
   assert.deepEqual(q[0], { iteration: 1, breakpoint: 'desktop', mode: 'diff', mismatch: 0.2, heightDelta: 0.01, widthDelta: 3, numericPass: false, status: 200, pass: false, verdict: path.join(dir, 'verdict.json') });
-  assert.equal(q[1].breakpoint, 'mobile');
-  assert.equal(q[1].numericPass, true);
-  assert.equal('mismatch' in q[1], false);
+  assert.equal(q[2].breakpoint, 'mobile');
+  assert.equal(q[2].numericPass, true);
+  assert.equal('mismatch' in q[2], false);
 });
 
 test('error verdicts are recorded but never consume an iteration (cap ignores them)', () => {
@@ -265,4 +274,118 @@ test('cap budget restarts after a passing iteration (fail, fail, pass, fail with
   assert.equal(run(verdict(true)).pass, true);
   assert.equal(run(verdict(false)).capReached, false);
   assert.equal(run(verdict(false)).capReached, true);
+});
+
+// ---- I2: the verdict is cross-checked against what check-section wrote ------------------------------------------
+const prep = (theme) => path.dirname(prepareCheck(theme, 'home', 1).input);
+const everdict = (re) => (e) => e.code === 'EVERDICT' && re.test(e.message);
+
+test('recordVerdict: a missing result.json means check-section did not run (EVERDICT)', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  assert.throws(() => recordVerdict(theme, 'home', 1, writeV(dir, verdict(true), 'verdict.json', { result: false })), everdict(/check-section did not run/));
+  assert.equal(loadState(theme).pages[0].sections[0].qa.length, 0);
+});
+
+test('recordVerdict: result.json for another anchor is rejected', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  const f = writeV(dir, verdict(true));
+  writeResult(dir, { ...resultFor(verdict(true)), anchor: 'pb-s2' });
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/anchor/));
+});
+
+test('recordVerdict: a self-consistent passing verdict that contradicts result.json numbers is rejected', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  const f = writeV(dir, verdict(true));
+  // check-section measured a failing desktop diff; the verdict claims a pass with made-up numbers
+  writeResult(dir, resultFor(verdict(false)));
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/numericPass/));
+  // same numericPass, different numbers
+  const r = resultFor(verdict(true)); r.results[0].mismatch = 0.031;
+  writeResult(dir, r);
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/desktop.*mismatch/));
+  const h = resultFor(verdict(true)); h.results[0].heightDelta = 0.02;
+  writeResult(dir, h);
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/desktop.*heightDelta/));
+  const w = resultFor(verdict(true)); w.results[1].widthDelta = -24;
+  writeResult(dir, w);
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/tablet.*widthDelta/));
+  const n = resultFor(verdict(true)); n.results[2].numericPass = false;
+  writeResult(dir, n);
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/mobile.*numericPass/));
+  assert.equal(loadState(theme).pages[0].sections[0].qa.length, 0);
+  // differences below 1e-9 are float noise and accepted
+  const ok = resultFor(verdict(true)); ok.results[0].mismatch += 1e-12;
+  writeResult(dir, ok);
+  assert.equal(recordVerdict(theme, 'home', 1, f).pass, true);
+});
+
+test('recordVerdict: the verdict must cover exactly the input breakpoints', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  const v = verdict(true);
+  v.breakpoints = v.breakpoints.filter((b) => b.name !== 'tablet');
+  const f = writeV(dir, v);
+  writeResult(dir, resultFor(v));
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/breakpoints/));
+});
+
+test('recordVerdict: only the newest prepared iteration can be recorded', () => {
+  const theme = setup();
+  const dir1 = prep(theme);
+  const dir2 = prep(theme);
+  assert.throws(() => recordVerdict(theme, 'home', 1, writeV(dir1, verdict(true))), everdict(/iteration 1.*newest.*2|newest prepared iteration is 2/));
+  assert.equal(recordVerdict(theme, 'home', 1, writeV(dir2, verdict(true))).iteration, 2);
+});
+
+test('recordVerdict re-applies the pass rule with the thresholds from site.qa (tampered input thresholds)', () => {
+  const theme = setup();
+  updateState(theme, (s) => { s.site.qa.mismatchMax = 0.02; });
+  const dir = prep(theme);
+  // result.json says numericPass true at mismatch 0.03 (as if input.json carried a looser mismatchMax)
+  assert.throws(() => recordVerdict(theme, 'home', 1, writeV(dir, verdict(true))), everdict(/mismatch 0\.03 > 0\.02/));
+  const fm = resultFor(verdict(true)); fm.results[0].fullyMasked = true;
+  updateState(theme, (s) => { s.site.qa.mismatchMax = 0.08; });
+  const dir2 = prep(theme);
+  const f = writeV(dir2, verdict(true));
+  writeResult(dir2, fm);
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/fully masked/));
+});
+
+test('pb-header anchors build an input and record like any section', () => {
+  const theme = setup();
+  updateState(theme, (s) => { s.pages[0].sections[0].anchor = 'pb-header'; });
+  const dir = prep(theme);
+  assert.ok(dir.endsWith(path.join('home', 'pb-header', 'iter-1')));
+  assert.equal(recordVerdict(theme, 'home', 1, writeV(dir, verdict(true, { anchor: 'pb-header' }))).pass, true);
+});
+
+// ---- I3: no stuck or regressed statuses ---------------------------------------------------------------------------
+test('prepareCheck refuses planned and skipped sections and writes nothing (EINPUT)', () => {
+  for (const status of ['planned', 'skipped']) {
+    const theme = setup();
+    updateState(theme, (s) => { s.pages[0].sections[0].status = status; });
+    assert.throws(() => prepareCheck(theme, 'home', 1), (e) => e.code === 'EINPUT' && /build it first/.test(e.message), status);
+    assert.equal(loadState(theme).pages[0].sections[0].status, status);
+    assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts', 'home')), false);
+  }
+});
+
+test('a pass on a section that was done before re-verification returns it to done, not animating', () => {
+  const theme = setup();
+  updateState(theme, (s) => { s.pages[0].sections[0].status = 'done'; });
+  const run = (v) => recordVerdict(theme, 'home', 1, writeV(prep(theme), v));
+  assert.equal(loadState(theme).pages[0].sections[0].status, 'done');
+  assert.equal(run(verdict(false)).status, 'building');
+  assert.equal(run(verdict(true)).status, 'done');
+  const sec = loadState(theme).pages[0].sections[0];
+  assert.equal(sec.status, 'done');
+  assert.equal(sec.prevStatus, undefined, 'cleared after the pass');
+  // a section verified for the first time still goes to animating
+  const t2 = setup();
+  assert.equal(recordVerdict(t2, 'home', 1, writeV(prep(t2), verdict(true))).status, 'animating');
+  // an animating section re-verified stays animating
+  assert.equal(recordVerdict(t2, 'home', 1, writeV(prep(t2), verdict(true))).status, 'animating');
 });

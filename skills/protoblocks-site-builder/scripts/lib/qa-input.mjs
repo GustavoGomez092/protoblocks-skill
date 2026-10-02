@@ -74,6 +74,9 @@ export function buildCheckInput(state, themeDir, slug, n) {
 export function prepareCheck(themeDir, slug, n) {
   const num = checkArgs(slug, n);
   const state = loadState(themeDir);
+  const { section: current } = findSection(state, slug, num);
+  if (current.status === 'planned') throw fail('EINPUT', `Section ${num} on "${slug}" is still planned: build it first (block, attrs, status building, page.mjs build), then verify.`);
+  if (current.status === 'skipped') throw fail('EINPUT', `Section ${num} on "${slug}" was skipped by the developer; it is not on the page. Ask before un-skipping it, then build it first.`);
   let input = build(state, themeDir, slug, num);
   let file;
   for (;;) {
@@ -87,8 +90,16 @@ export function prepareCheck(themeDir, slug, n) {
       input = build(state, themeDir, slug, num, Number(path.basename(input.iterDir).replace('iter-', '')) + 1);
     }
   }
-  updateState(themeDir, (s) => { findSection(s, slug, num).section.status = 'verifying'; });
-  return { input: file, iteration: Number(path.basename(input.iterDir).replace('iter-', '')) };
+  const iteration = Number(path.basename(input.iterDir).replace('iter-', ''));
+  updateState(themeDir, (s) => {
+    const { section } = findSection(s, slug, num);
+    // Remember where the section came from so a pass can return a finished section to `done`. A section that
+    // failed and is being rebuilt keeps the status it had before its first re-verification.
+    if (['done', 'animating'].includes(section.status) || section.prevStatus === undefined) section.prevStatus = section.status;
+    section.preparedIteration = iteration;
+    section.status = 'verifying';
+  });
+  return { input: file, iteration };
 }
 
 export function validateVerdict(v) {
@@ -138,14 +149,69 @@ function verdictIteration(themeDir, slug, anchor, verdictFile) {
   return { real, iterDir, iteration: Number(m[1]) };
 }
 
+const readJson = (file, what) => {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return undefined;
+    throw everdict(`${what} ${file} is not readable: ${e.message}`);
+  }
+  try { return JSON.parse(text); } catch (e) { throw everdict(`${what} ${file} is not valid JSON: ${e.message}`); }
+};
+const EPS = 1e-9;
+const sameNum = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= EPS;
+
+/**
+ * The verdict is written by the visual-qa subagent; result.json and input.json are written by the scripts. Never trust
+ * the verdict's numbers: they must equal what check-section measured, for the breakpoints prepare asked for, and the
+ * pass rule is re-applied with the thresholds from state (not from input.json).
+ */
+function crossCheck(verdict, iterDir, anchor, qa) {
+  const errors = [];
+  const result = readJson(path.join(iterDir, 'result.json'), 'Check result');
+  if (result === undefined) return [`${path.join(iterDir, 'result.json')} is missing: check-section did not run for this iteration (run it, then let visual-qa judge its output)`];
+  const input = readJson(path.join(iterDir, 'input.json'), 'Check input');
+  if (input === undefined) return [`${path.join(iterDir, 'input.json')} is missing: run qa-input.mjs prepare`];
+  if (!result || typeof result !== 'object' || !Array.isArray(result.results)) return ['result.json has no results list'];
+  if (result.anchor !== anchor) errors.push(`result.json is for anchor ${JSON.stringify(result.anchor)}, not the section anchor ${anchor}`);
+  if (verdict.numericPass !== result.numericPass) errors.push(`verdict numericPass ${verdict.numericPass} but check-section measured numericPass ${result.numericPass}`);
+  const want = (Array.isArray(input?.breakpoints) ? input.breakpoints : []).map((b) => b?.name).sort();
+  const got = verdict.breakpoints.map((b) => b.name).sort();
+  if (JSON.stringify(want) !== JSON.stringify(got)) errors.push(`verdict breakpoints [${got.join(', ')}] differ from the prepared breakpoints [${want.join(', ')}]`);
+  for (const b of verdict.breakpoints) {
+    const r = result.results.find((x) => x?.breakpoint === b.name);
+    if (!r) { errors.push(`breakpoint ${b.name}: not in result.json`); continue; }
+    if (r.mode !== b.mode) errors.push(`breakpoint ${b.name}: mode ${b.mode} but check-section ran ${r.mode}`);
+    if (r.numericPass !== b.numericPass) errors.push(`breakpoint ${b.name}: numericPass ${b.numericPass} but check-section measured ${r.numericPass}`);
+    for (const key of ['mismatch', 'heightDelta']) {
+      if ((r[key] !== undefined || b[key] !== undefined) && !sameNum(b[key], r[key])) errors.push(`breakpoint ${b.name}: ${key} ${JSON.stringify(b[key] ?? null)} but check-section measured ${JSON.stringify(r[key] ?? null)}`);
+    }
+    if (b.widthDelta !== undefined && !sameNum(b.widthDelta, r.widthDelta)) errors.push(`breakpoint ${b.name}: widthDelta ${JSON.stringify(b.widthDelta)} but check-section measured ${JSON.stringify(r.widthDelta ?? null)}`);
+  }
+  if (verdict.pass === true) {
+    if (result.numericPass !== true) errors.push('pass is true but check-section reported numericPass false');
+    for (const r of result.results) {
+      if (r?.numericPass !== true) errors.push(`pass is true but breakpoint ${r?.breakpoint} failed its numeric checks`);
+      if (r?.mode !== 'diff') continue;
+      if (r.fullyMasked) errors.push(`pass is true but breakpoint ${r.breakpoint} was fully masked (nothing compared)`);
+      if (!(r.mismatch <= qa.mismatchMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has mismatch ${r.mismatch} > ${qa.mismatchMax} (site.qa)`);
+      if (!(r.heightDelta <= qa.heightDeltaMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has heightDelta ${r.heightDelta} > ${qa.heightDeltaMax} (site.qa)`);
+    }
+  }
+  return errors;
+}
+
 export function recordVerdict(themeDir, slug, n, verdictFile) {
   const num = checkArgs(slug, n);
-  const { section: sec } = findSection(loadState(themeDir), slug, num);
+  const state = loadState(themeDir);
+  const { section: sec } = findSection(state, slug, num);
   const { real, iterDir, iteration } = verdictIteration(themeDir, slug, sec.anchor, verdictFile);
+  if (sec.preparedIteration === undefined) throw everdict(`Section ${num} has no prepared iteration: run qa-input.mjs prepare first.`);
+  if (iteration !== sec.preparedIteration) throw everdict(`Verdict ${verdictFile} is for iteration ${iteration}, but the newest prepared iteration is ${sec.preparedIteration}; record only the newest one (re-dispatch visual-qa for iter-${sec.preparedIteration}).`);
   let verdict;
   try { verdict = JSON.parse(fs.readFileSync(real, 'utf8')); } catch (e) { throw everdict(`Verdict ${verdictFile} is not valid JSON: ${e.message}`); }
   const errors = validateVerdict(verdict);
   if (verdict?.anchor !== undefined && verdict.anchor !== null && verdict.anchor !== sec.anchor) errors.push(`verdict anchor ${JSON.stringify(verdict.anchor)} does not match section anchor ${sec.anchor}`);
+  if (!errors.length && verdict.error === undefined) errors.push(...crossCheck(verdict, iterDir, sec.anchor, { ...DEFAULT_QA, ...(state.site.qa ?? {}) }));
   if (errors.length) throw everdict(`Inconsistent verdict ${verdictFile}:\n- ${errors.join('\n- ')}`);
   const isError = verdict.error !== undefined;
   let result;
@@ -166,7 +232,10 @@ export function recordVerdict(themeDir, slug, n, verdictFile) {
       });
     }
     if (verdict.pass) {
-      section.status = 'animating';
+      // A section that was finished before this re-verification (e.g. after the header moved into its part, or a
+      // shared-block edit) goes back to done; motion already ran for it.
+      section.status = section.prevStatus === 'done' ? 'done' : 'animating';
+      delete section.prevStatus;
       const lib = s.library[section.block] ??= { usedOn: [] };
       lib.baselines ??= [];
       for (const b of verdict.breakpoints.filter((x) => x.mode === 'diff')) {

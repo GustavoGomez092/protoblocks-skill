@@ -5,10 +5,10 @@
 ## Procedure
 
 1. Page is built and gates passed (`SKILL.md`, Build).
-2. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` returns `{input, iteration}` and sets status `verifying`. It needs `page.url` (run `page.mjs build` first) and the section's crops. Breakpoints without a design frame are checked with sanity checks only.
+2. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` returns `{input, iteration}` and sets status `verifying`. It needs `page.url` (run `page.mjs build` first) and the section's crops, and refuses a `planned` or `skipped` section (`[EINPUT]` build it first). Breakpoints without a design frame are checked with sanity checks only. Only the newest prepared iteration can be recorded.
 3. Dispatch the subagent `protoblocks-skill:visual-qa` with the prompt `CheckInput: <input path>`. It runs `check-section.mjs` (Bash timeout 600000, already in the agent file), reads the composites, writes `<iterDir>/verdict.json` and replies with it. Outside Claude Code run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the `design | render | heatmap` composites.
-4. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`. `[EVERDICT]` means the file is inconsistent (pass with failing numbers or a high discrepancy, anchor mismatch, outside the iteration folder): re-dispatch visual-qa; never edit the file.
-5. Pass: status is `animating`, baselines were stored for later regression checks. Fail: status is `building`; fix, re-run gates and `page.mjs build`, repeat from step 2.
+4. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`. `record` never trusts the verdict's numbers: it compares them with `<iterDir>/result.json` (written by `check-section.mjs`) and `input.json`, and re-applies the pass rule with the thresholds in `site.qa`. `[EVERDICT]` means the verdict is inconsistent (pass with failing numbers or a high discrepancy, numbers or breakpoints that differ from `result.json`, anchor mismatch, an older iteration, outside the iteration folder, or no `result.json` because check-section did not run): re-dispatch visual-qa for the newest iteration; never edit the file.
+5. Pass: status is `animating` (or back to `done` if the section was `done` before this re-verification), baselines were stored for later regression checks. Fail: status is `building`; fix, re-run gates and `page.mjs build`, repeat from step 2.
 
 ## Pass rule
 

@@ -58,10 +58,10 @@ Details and checklist: `references/build.md`.
 
 Procedure, result fields and fix strategies: `references/verify.md`.
 
-1. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` prints `{input, iteration}` and sets status `verifying`.
+1. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` prints `{input, iteration}` and sets status `verifying` (refuses `planned`/`skipped`: build first).
 2. Dispatch the `protoblocks-skill:visual-qa` subagent (Agent tool, subagent type `protoblocks-skill:visual-qa`) with the prompt `CheckInput: <input path>`. It needs a Bash timeout of 600000 (set in the agent). Elsewhere: run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the composites with the same rubric.
 3. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`.
-4. `pass: true`: status is now `animating`; go to Animate.
+4. `pass: true`: status is now `animating` (go to Animate), or `done` again for a section that was `done` before this re-verification (next section).
 5. `pass: false`: apply the verdict's fixes, highest severity first, re-run gates and page build, then Verify again. An error verdict (`error` set) stays `verifying`, does not count as an iteration, and means fix the environment and re-run.
 6. `capReached: true`: stop and ask the developer, never continue silently (see `references/verify.md`, "Iteration cap"). Their options: accept with notes, give guidance and continue, or skip the section.
 
