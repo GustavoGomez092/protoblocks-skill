@@ -1,0 +1,516 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { qtest, serveFixtures, QA_DIR, tmpDir } from './helpers.mjs';
+
+const PHP_FILE = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/theme-assets/inc/pb-motion.php', import.meta.url));
+const havePhp = spawnSync('php', ['-v']).status === 0;
+
+// Imported lazily so the file still loads (and qtest skips) when the QA deps are not installed.
+const launchBrowser = async () => (await import(path.join(QA_DIR, 'browser.mjs'))).launchBrowser();
+
+async function open(browser, url, { reducedMotion = false, block = [], waitUntil = 'load' } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e.message)));
+  for (const pattern of block) await page.route(pattern, (r) => r.abort());
+  await page.goto(url, { waitUntil });
+  return { ctx, page, errors };
+}
+
+const state = (page, sel) => page.$eval(sel, (el) => ({ s: el.getAttribute('data-proto-animate'), o: getComputedStyle(el).opacity, t: getComputedStyle(el).transform, text: el.textContent, label: el.getAttribute('aria-label') }));
+
+// Condition-based wait: every reveal element reports done (returns false on timeout so asserts give the detail).
+async function allDone(page, timeout = 6000) {
+  try {
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-pb-motion][data-proto-animate]')].every((e) => e.getAttribute('data-proto-animate') === 'done'), null, { timeout });
+  } catch { return false; }
+  await page.waitForTimeout(100); // settle: let the final frame (clearProps / counter text) flush
+  return true;
+}
+
+async function scrollThrough(page) {
+  await page.evaluate(async () => {
+    for (let y = 0; y <= document.documentElement.scrollHeight; y += 300) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 80)); }
+  });
+  await allDone(page);
+}
+
+async function withPage(fixture, opts, fn) {
+  const srv = await serveFixtures();
+  const browser = await launchBrowser();
+  try {
+    const { ctx, page, errors } = await open(browser, `${srv.url}/${fixture}`, opts);
+    await fn(page, errors);
+    await ctx.close();
+  } finally { await browser.close(); await srv.close(); }
+}
+
+qtest('reveal presets end visible and done; counters keep formatting', () => withPage('motion.html', {}, async (page, errors) => {
+  await scrollThrough(page);
+  for (const sel of ['#t1', '#t2', '#row', '#c1', '#clip']) {
+    const st = await state(page, sel);
+    assert.equal(st.s, 'done', `${sel} done`);
+    assert.equal(st.o, '1', `${sel} opacity`);
+  }
+  assert.equal((await state(page, '#t1')).t, 'none');
+  assert.equal((await state(page, '#c1')).text, '1,250+');
+  assert.equal((await state(page, '#c2')).text, '$4.9M');
+  assert.equal((await state(page, '#c3')).text, '98%');
+  assert.deepEqual(errors, []);
+}));
+
+qtest('reduced motion: everything done immediately, no tweens', () => withPage('motion.html', { reducedMotion: true }, async (page) => {
+  assert.ok(await allDone(page, 2000), 'all reveal elements done');
+  for (const sel of ['#t1', '#c2', '#clip']) assert.equal((await state(page, sel)).s, 'done', sel);
+  assert.equal((await state(page, '#c2')).text, '$4.9M');
+  // Why the filter: ScrollTrigger 3.15 self-registers on load and always leaves its own delayedCalls on the
+  // global timeline (a paused resize debounce + a 0.5s startup flag), even with pb-motion.js blocked.
+  // A delayedCall's target is its callback function, so they are excluded. Caveat: this would also hide a
+  // future gsap.delayedCall() added by the runtime; the triggers === 0 check below still catches scroll work.
+  const live = await page.evaluate(() => ({
+    tweens: window.gsap.globalTimeline.getChildren(true, true, false).filter((t) => typeof t.targets()[0] !== 'function').length,
+    triggers: window.ScrollTrigger.getAll().length,
+  }));
+  assert.deepEqual(live, { tweens: 0, triggers: 0 });
+}));
+
+qtest('GSAP missing: content revealed, no errors', () => withPage('motion.html', { block: ['**/vendor/*'] }, async (page, errors) => {
+  assert.ok(await allDone(page, 2000), 'all reveal elements done');
+  assert.equal((await state(page, '#t1')).s, 'done');
+  assert.equal((await state(page, '#t1')).o, '1');
+  assert.deepEqual(errors, []);
+}));
+
+qtest('init is idempotent and teardown/re-init does not duplicate ScrollTriggers', () => withPage('motion.html', {}, async (page) => {
+  const counts = await page.evaluate(() => {
+    const before = window.ScrollTrigger.getAll().length;
+    document.dispatchEvent(new CustomEvent('proto:page-ready', { detail: { container: document.body } }));
+    window.pbMotion.init(document.body);
+    const afterDup = window.ScrollTrigger.getAll().length;
+    document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } }));
+    const afterLeave = window.ScrollTrigger.getAll().length;
+    document.dispatchEvent(new CustomEvent('proto:page-ready', { detail: { container: document.body } }));
+    return { before, afterDup, afterLeave, afterReady: window.ScrollTrigger.getAll().length };
+  });
+  assert.ok(counts.before > 0);
+  assert.equal(counts.afterDup, counts.before);
+  assert.equal(counts.afterLeave, 0);
+  assert.equal(counts.afterReady, counts.before);
+}));
+
+qtest('above the fold: in-view elements reveal at scroll 0 without any scrolling', () => withPage('motion.html', {}, async (page) => {
+  const ok = await page.waitForFunction(() => ['t1', 't2', 'row'].every((id) => document.getElementById(id).getAttribute('data-proto-animate') === 'done'), null, { timeout: 4000 }).then(() => true, () => false);
+  await page.waitForTimeout(100);
+  const st = await state(page, '#t1');
+  assert.ok(ok, `hero revealed without scrolling: ${JSON.stringify(st)}`);
+  assert.equal(st.o, '1');
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+  assert.equal((await state(page, '#c1')).s, 'manual', 'below-the-fold content still waits for scroll');
+}));
+
+qtest('page bottom: elements below the 85% line still reveal at max scroll', () => withPage('motion-bottom.html', {}, async (page, errors) => {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await allDone(page);
+  for (const sel of ['#cta', '#cn']) {
+    const st = await state(page, sel);
+    assert.equal(st.s, 'done', `${sel} done`);
+    assert.equal(st.o, '1', `${sel} opacity`);
+  }
+  assert.equal((await state(page, '#cn')).text, '250+');
+  assert.deepEqual(errors, []);
+}));
+
+qtest('backstop: done set externally on an unrevealed element makes it visible', () => withPage('motion-bottom.html', {}, async (page) => {
+  await page.waitForTimeout(150);
+  assert.equal((await state(page, '#cta')).s, 'manual', 'precondition: CTA not revealed at scroll 0');
+  await page.evaluate(() => { for (const id of ['cta', 'cn']) document.getElementById(id).setAttribute('data-proto-animate', 'done'); });
+  const ok = await page.waitForFunction(() => getComputedStyle(document.getElementById('cta')).opacity === '1' && document.getElementById('cn').textContent === '250+', null, { timeout: 2000 }).then(() => true, () => false);
+  const cta = await state(page, '#cta');
+  const cn = await state(page, '#cn');
+  assert.ok(ok, `backstop revealed: cta ${JSON.stringify(cta)} cn ${JSON.stringify(cn)}`);
+  assert.equal(cta.t, 'none', 'transform cleared');
+  assert.equal(cn.label, null, 'counter aria-label removed once done');
+  assert.equal(await page.evaluate(() => window.ScrollTrigger.getAll().length), 0, 'triggers killed');
+}));
+
+qtest('counter: original text survives teardown/re-init and is exposed via aria-label while unrevealed', () => withPage('motion-extra.html', {}, async (page) => {
+  let cb = await state(page, '#cb');
+  assert.equal(cb.text, '0', 'counter starts from 0 before reveal');
+  assert.equal(cb.label, '500', 'unrevealed counter labelled with its real value');
+  await page.evaluate(() => { window.pbMotion.teardown(document.body); window.pbMotion.init(document.body); });
+  assert.equal((await state(page, '#cb')).label, '500', 'label after re-init');
+  await page.evaluate(() => document.getElementById('cb').scrollIntoView({ block: 'center' }));
+  assert.ok(await allDone(page), 'counter revealed');
+  cb = await state(page, '#cb');
+  assert.equal(cb.text, '500');
+  assert.equal(cb.label, null, 'aria-label removed once done');
+}));
+
+qtest('teardown with revert restores the counter text (DOM that stays on the page)', () => withPage('motion-extra.html', {}, async (page) => {
+  assert.equal(await page.evaluate(() => { window.pbMotion.teardown(document.body, { revert: true }); return document.getElementById('cb').textContent; }), '500');
+  assert.equal((await state(page, '#cb')).label, null);
+}));
+
+// Taxi discards the leaving view after a fade-out: page-leave must stop motion (tweens, triggers) without reverting
+// anything the visitor can still see (marquee position, a counter mid-count, a split heading).
+qtest('page-leave kills tweens and triggers with no visual change to the leaving view', () => withPage('motion-extra.html', {}, async (page) => {
+  await page.waitForTimeout(400); // marquee has moved
+  await page.evaluate(() => document.getElementById('cb').scrollIntoView({ block: 'center' }));
+  await page.waitForFunction(() => { const t = document.getElementById('cb').textContent; return t !== '0' && t !== '500'; }, null, { timeout: 3000, polling: 'raf' });
+  const r = await page.evaluate(() => {
+    const snap = () => ({
+      track: getComputedStyle(document.getElementById('track')).transform,
+      trackKids: document.getElementById('track').childNodes.length,
+      cb: document.getElementById('cb').textContent,
+      cbLabel: document.getElementById('cb').getAttribute('aria-label'),
+      sp: document.getElementById('sp').innerHTML,
+      spOpacity: getComputedStyle(document.getElementById('sp')).opacity,
+    });
+    const before = snap();
+    document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } }));
+    return { before, after: snap(), triggers: window.ScrollTrigger.getAll().length };
+  });
+  assert.notEqual(r.before.track, 'none', 'precondition: marquee moved');
+  assert.match(r.before.sp, /<div/, 'precondition: heading is split, waiting on its delay');
+  assert.deepEqual(r.after, r.before, 'no visual change on leave');
+  assert.equal(r.triggers, 0, 'triggers killed');
+  await page.waitForTimeout(300);
+  const later = await page.evaluate(() => ({ track: getComputedStyle(document.getElementById('track')).transform, cb: document.getElementById('cb').textContent, sp: document.getElementById('sp').innerHTML }));
+  assert.deepEqual(later, { track: r.before.track, cb: r.before.cb, sp: r.before.sp }, 'tweens killed: nothing moves after leave');
+}));
+
+qtest('re-init on the same DOM after a page-leave starts clean (split reverted once, counter from its text)', () => withPage('motion-extra.html', {}, async (page) => {
+  const r = await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } }));
+    document.dispatchEvent(new CustomEvent('proto:page-ready', { detail: { container: document.body } }));
+    const sp = document.getElementById('sp');
+    return { nested: sp.querySelectorAll('div div div').length, text: sp.textContent, cbLabel: document.getElementById('cb').getAttribute('aria-label'), clones: document.querySelectorAll('#track [data-pb-clone]').length };
+  });
+  assert.equal(r.text, 'Split heading waiting on its delay');
+  assert.equal(r.nested, 0, 'no split inside a split');
+  assert.equal(r.cbLabel, '500');
+  assert.equal(r.clones, 3, 'marquee copies not duplicated');
+  await page.evaluate(() => document.getElementById('sp').scrollIntoView({ block: 'center' }));
+  assert.ok(await allDone(page), 'revealed after re-init');
+  assert.equal(await page.$eval('#sp', (e) => e.innerHTML), 'Split heading waiting on its delay');
+}));
+
+// The plugin watchdog forces done 1.5s after an element enters view; a longer count would be cut short.
+qtest('counter: duration is capped at 1.2s even with a long profile duration', () => withPage('motion-counters.html', {}, async (page) => {
+  const durations = await page.evaluate(async () => {
+    for (let i = 0; i < 50; i++) {
+      const d = window.gsap.globalTimeline.getChildren(true, true, false).filter((t) => t.vars && t.vars.onUpdate).map((t) => t.duration());
+      if (d.length) return d;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return [];
+  });
+  assert.equal(durations.length, 3, JSON.stringify(durations));
+  for (const d of durations) assert.ok(d <= 1.2, `counter duration ${d}`);
+  assert.ok(await allDone(page, 3000));
+  assert.deepEqual(await page.$$eval('.stat span[id]', (els) => els.map((e) => e.textContent)), ['1,250+', '$4.9M', '98%']);
+}));
+
+// A counter that grows from "0" to "1,250+" widens its box and pushes every neighbour: the runtime reserves the final
+// width (min-width from the measured authored text) and uses tabular digits while counting.
+qtest('counter: a three-counter row counts with ~0 anchor CLS and leaves no reserved width behind', () => withPage('motion-counters.html', {}, async (page) => {
+  await page.evaluate(() => {
+    const anchorEl = document.getElementById('pb-s1');
+    window.__cls = 0;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if ((e.sources || []).some((x) => x.node && anchorEl.contains(x.node))) window.__cls += e.value;
+    }).observe({ type: 'layout-shift', buffered: true });
+  });
+  const during = await page.evaluate(async () => {
+    for (let i = 0; i < 50; i++) {
+      const el = document.getElementById('n1');
+      if (el.textContent !== '0' && el.textContent !== '1,250+') return { fvn: getComputedStyle(el).fontVariantNumeric, minWidth: el.style.minWidth };
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return null;
+  });
+  assert.ok(during, 'caught the counter mid-count');
+  assert.equal(during.fvn, 'tabular-nums');
+  assert.match(during.minWidth, /px$/);
+  assert.ok(await allDone(page, 3000));
+  await page.waitForTimeout(200);
+  const cls = await page.evaluate(() => window.__cls);
+  assert.ok(cls < 0.001, `anchor CLS ${cls}`);
+  const after = await page.$$eval('.stat span[id]', (els) => els.map((e) => ({ text: e.textContent, minWidth: e.style.minWidth, display: e.style.display, fvn: e.style.fontVariantNumeric })));
+  for (const a of after) assert.deepEqual({ minWidth: a.minWidth, display: a.display, fvn: a.fvn }, { minWidth: '', display: '', fvn: '' }, JSON.stringify(after));
+}));
+
+// SplitText measures lines from the current layout. Splitting before a web font arrives freezes fallback-font line
+// breaks into the line wrappers; the split must wait for the font.
+qtest('split-lines waits for a late web font: one split, made with the font, with its line count', () => withPage('motion-font.html', {}, async (page, errors) => {
+  assert.ok(await allDone(page, 6000), 'heading revealed');
+  const r = await page.evaluate(() => ({ splits: window.__splits, height: document.getElementById('t2').getBoundingClientRect().height, html: document.getElementById('t2').innerHTML, fontLoaded: document.fonts.check('40px PbWide') }));
+  assert.equal(r.fontLoaded, true, 'precondition: the web font loaded');
+  const lines = Math.round(r.height / 50);
+  assert.equal(lines, 3, `precondition: the font-loaded heading wraps to 3 lines (${r.height}px)`);
+  assert.equal(r.splits.length, 1, JSON.stringify(r.splits));
+  assert.deepEqual(r.splits[0], { lines, font: true });
+  assert.equal(r.html, 'Split lines heading that wraps', 'split reverted after the reveal');
+  assert.deepEqual(errors, []);
+}));
+
+// The late font holds the load event, so the page is taken at DOMContentLoaded, while the split is still waiting.
+qtest('split-lines torn down while waiting for its font never splits', () => withPage('motion-font.html', { waitUntil: 'domcontentloaded' }, async (page) => {
+  assert.equal(await page.evaluate(() => document.fonts.check('40px PbWide')), false, 'precondition: font still loading');
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } })));
+  await page.waitForFunction(() => document.fonts.check('40px PbWide'), null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  const r = await page.evaluate(() => ({ splits: window.__splits.length, html: document.getElementById('t2').innerHTML, triggers: window.ScrollTrigger.getAll().length }));
+  assert.deepEqual(r, { splits: 0, html: 'Split lines heading that wraps', triggers: 0 });
+}));
+
+// A font request that never answers also holds the load event, so this page is opened at DOMContentLoaded.
+qtest('split-lines whose font never loads still reveals the heading, unsplit', () => withPage('motion-font.html?font=hang', { waitUntil: 'domcontentloaded' }, async (page) => {
+  assert.ok(await allDone(page, 6000), 'heading revealed');
+  const st = await state(page, '#t2');
+  assert.equal(st.o, '1');
+  assert.equal(await page.evaluate(() => window.__splits.length), 0, 'no split with the fallback font');
+}));
+
+qtest('split-lines with a late font: motion check passes with anchor CLS within budget', async () => {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await motionCheck({ url: `${srv.url}/motion-font.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.ok(r.cls <= 0.01, `cls ${r.cls} (motion ${r.clsMotion}, baseline ${r.clsBaseline})`);
+    assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+  } finally { await srv.close().catch(() => {}); }
+});
+
+// The reserved width is the text's, not the box's: a block-level counter takes its width from its container, and
+// pinning that width would stop the container shrinking (a grid column at 1280px forced onto a 390px phone).
+qtest('counter: a block-level counter does not pin its container width (grid at 1280px, then 390px)', () => withPage('motion-counter-width.html', {}, async (page) => {
+  await page.waitForTimeout(200);
+  assert.equal(await page.$eval('#g1', (e) => e.getAttribute('data-proto-animate')), 'manual', 'precondition: not yet revealed');
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, minWidth: document.getElementById('g1').style.minWidth }));
+  assert.ok(r.sw <= r.cw, `no horizontal overflow at 390px: ${JSON.stringify(r)}`);
+}));
+
+// Fonts whose default digits are proportional: tabular digits (used while counting) can be wider than the authored
+// text, so the reserved width is the larger of the two and the neighbour does not move while the number counts.
+qtest('counter: with proportional default digits the neighbour stays put while counting', () => withPage('motion-counter-width.html', {}, async (page) => {
+  await page.waitForFunction(() => document.fonts.check('72px PbDigits'), null, { timeout: 5000 });
+  const r = await page.evaluate(async () => {
+    const d1 = document.getElementById('d1');
+    const dn = document.getElementById('dn');
+    d1.scrollIntoView({ block: 'center' });
+    const xs = [];
+    const texts = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < 3000) {
+      await new Promise((res) => requestAnimationFrame(res));
+      if (d1.getAttribute('data-proto-animate') === 'done' || d1.textContent === '1,111+') break;
+      texts.push(d1.textContent);
+      xs.push(Math.round(dn.getBoundingClientRect().left * 10) / 10);
+    }
+    return { xs: [...new Set(xs)], texts: [...new Set(texts)] };
+  });
+  assert.ok(r.texts.some((t) => t.startsWith('1,')), `counted through the thousands: ${r.texts.slice(-5)}`);
+  assert.equal(r.xs.length, 1, `neighbour x while counting: ${r.xs.join(', ')}`);
+}));
+
+qtest('marquee: clone copy is hidden from AT, inert, and has no duplicate ids', () => withPage('motion-extra.html', {}, async (page) => {
+  const dom = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);
+    const track = document.getElementById('track');
+    const hidden = [...track.childNodes].filter((n) => n.nodeType === 1 && n.getAttribute('aria-hidden') === 'true');
+    return { dupIds: ids.filter((id, i) => ids.indexOf(id) !== i), hidden: hidden.length, inert: hidden.every((n) => n.inert), text: track.textContent };
+  });
+  assert.deepEqual(dom.dupIds, []);
+  assert.ok(dom.hidden > 0 && dom.inert, `clone marked aria-hidden + inert (${JSON.stringify(dom)})`);
+  assert.equal(dom.text.split('Alpha').length - 1, 2, 'content visually duplicated for the loop');
+  assert.equal(await page.getByRole('link', { name: 'Alpha' }).count(), 1, 'one accessible link');
+  const aria = await page.locator('#mq').ariaSnapshot();
+  for (const word of ['Alpha', 'Beta', 'loose text']) assert.equal(aria.split(word).length - 1, 1, `${word} once in a11y tree:\n${aria}`);
+}));
+
+qtest('preset error path: element left visible and done', () => withPage('motion-error.html', {}, async (page, errors) => {
+  assert.ok(await allDone(page, 2000));
+  const st = await state(page, '#e1');
+  assert.equal(st.s, 'done');
+  assert.equal(st.o, '1', 'opacity');
+  assert.equal(st.t, 'none', 'transform');
+  assert.deepEqual(errors, []);
+}));
+
+qtest('preset error path: stagger-children leaves every child visible', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const kids = await page.$$eval('#e2 > .kid', (els) => els.map((e) => ({ o: getComputedStyle(e).opacity, t: getComputedStyle(e).transform, style: e.getAttribute('style') })));
+  assert.equal(kids.length, 3);
+  for (const k of kids) assert.deepEqual({ o: k.o, t: k.t }, { o: '1', t: 'none' }, JSON.stringify(kids));
+  assert.equal((await state(page, '#e2')).o, '1');
+}));
+
+qtest('preset error path: split-lines restores the original heading markup', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const h = await page.$eval('#e3', (e) => ({ html: e.innerHTML, o: getComputedStyle(e).opacity, wrappers: e.querySelectorAll('div, [aria-hidden]').length, label: e.getAttribute('aria-label') }));
+  assert.equal(h.html, 'Split <em>heading</em> that fails');
+  assert.equal(h.wrappers, 0, 'no split wrappers left');
+  assert.equal(h.label, null, 'SplitText aria-label removed');
+  assert.equal(h.o, '1');
+}));
+
+qtest('preset error path: counter shows its original text and no aria-label', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const c = await state(page, '#e4');
+  assert.equal(c.text, '1,250+');
+  assert.equal(c.label, null);
+  assert.equal(c.o, '1');
+  assert.equal(await page.evaluate(() => window.gsap.getTweensOf(document.getElementById('e4')).length + window.gsap.globalTimeline.getChildren(true, true, false).filter((t) => t.vars && t.vars.onUpdate).length), 0, 'counter tween killed');
+}));
+
+(havePhp ? qtest : (n, f) => qtest(`${n} (skipped: php not on PATH)`, () => {}))('pb-motion.php: no-JS fallback shows content; profile is escaped', async () => {
+  const dir = tmpDir('pb-motion-php-');
+  fs.mkdirSync(path.join(dir, 'inc'));
+  fs.writeFileSync(path.join(dir, 'inc', 'pb-motion-profile.json'), JSON.stringify({ duration: '1.2', ease: "</script><script>alert(1)</script>&'\"", stagger: 0.1, distance: 40, evil: 'x' }));
+  const harness = path.join(dir, 'harness.php');
+  fs.writeFileSync(harness, `<?php
+define('ABSPATH', '/');
+$hooks = [];
+function add_action($h, $cb, $p = 10) { global $hooks; $hooks[] = [$h, $cb, $p]; }
+function is_admin() { return false; }
+function get_stylesheet_directory() { return ${JSON.stringify(dir)}; }
+function wp_json_encode($d, $f = 0) { return json_encode($d, $f); }
+require ${JSON.stringify(PHP_FILE)};
+foreach ($hooks as [$h, $cb, $p]) { if ($h === 'wp_head' && $p === 2) $cb(); }
+`);
+  const r = spawnSync('php', [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const head = r.stdout;
+  assert.ok(!head.includes('</script><script>alert'), 'ease escaped');
+  assert.match(head, /"duration":1\.2,/);
+  assert.ok(!head.includes('evil'));
+  const html = `<!doctype html><html><head>${head}</head><body><h1 id="n" data-pb-motion="fade-up" data-proto-animate="manual">Hi</h1></body></html>`;
+  const browser = await launchBrowser();
+  try {
+    const opacity = async (javaScriptEnabled) => {
+      const ctx = await browser.newContext({ javaScriptEnabled });
+      const page = await ctx.newPage();
+      await page.route('http://pb.test/', (route) => route.fulfill({ contentType: 'text/html', body: html }));
+      await page.goto('http://pb.test/');
+      const o = await page.$eval('#n', (el) => getComputedStyle(el).opacity);
+      await ctx.close();
+      return o;
+    };
+    assert.equal(await opacity(false), '1', 'no-JS: content visible');
+    assert.equal(await opacity(true), '0', 'JS on: anti-flash CSS still hides until the runtime reveals');
+  } finally { await browser.close(); }
+});
+
+// The <head> pb-motion.php prints in WordPress, rendered by a stub harness.
+function phpHead() {
+  const dir = tmpDir('pb-motion-php-');
+  const harness = path.join(dir, 'harness.php');
+  fs.writeFileSync(harness, `<?php
+define('ABSPATH', '/');
+$hooks = [];
+function add_action($h, $cb, $p = 10) { global $hooks; $hooks[] = [$h, $cb, $p]; }
+function is_admin() { return false; }
+function get_stylesheet_directory() { return ${JSON.stringify(dir)}; }
+function wp_json_encode($d, $f = 0) { return json_encode($d, $f); }
+require ${JSON.stringify(PHP_FILE)};
+foreach ($hooks as [$h, $cb, $p]) { if ($h === 'wp_head' && $p === 2) $cb(); }
+`);
+  const r = spawnSync('php', [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+}
+
+// A page with the real head CSS: one hero reveal (#hero) and one far below the fold (#low).
+const failsafePage = (head) => `<!doctype html><html><head>${head}</head><body>
+  <h1 id="hero" data-pb-motion="fade-up" data-proto-animate="manual">Hero</h1>
+  <div style="height:3000px"></div>
+  <p id="low" data-pb-motion="fade-in" data-proto-animate="manual">Low</p>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/__runtime"></script>
+  <script src="/__other"></script>
+</body></html>`;
+
+async function withFailsafePage({ reducedMotion = false, runtime = 'now', otherMs = 0, waitUntil = 'domcontentloaded' } = {}, fn) {
+  const srv = await serveFixtures({ '/failsafe.html': { body: failsafePage(phpHead()), type: 'text/html' } });
+  const browser = await launchBrowser();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
+    const page = await ctx.newPage();
+    // The runtime script: served now, served late (a JS-delaying optimizer), or never (blocked).
+    await page.route(`${srv.url}/__runtime`, async (route) => {
+      if (runtime === 'blocked') return route.abort();
+      if (runtime === 'late') await new Promise((r) => setTimeout(r, 4600));
+      return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(RUNTIME_SRC, 'utf8') });
+    });
+    // Another plugin's script after the runtime; when slow, it holds DOMContentLoaded back.
+    await page.route(`${srv.url}/__other`, async (route) => {
+      if (otherMs) await new Promise((r) => setTimeout(r, otherMs));
+      return route.fulfill({ contentType: 'text/javascript', body: '' });
+    });
+    await page.goto(`${srv.url}/failsafe.html`, { waitUntil });
+    await page.waitForSelector('#low', { state: 'attached' });
+    await fn(page);
+    await ctx.close();
+  } finally { await browser.close(); await srv.close(); }
+}
+const RUNTIME_SRC = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/theme-assets/assets/js/pb-motion.js', import.meta.url));
+const opacityOf = (page, sel) => page.$eval(sel, (el) => getComputedStyle(el).opacity);
+const phpTest = havePhp ? qtest : (n, f) => qtest(`${n} (skipped: php not on PATH)`, () => {});
+
+phpTest('hide CSS failsafe: with the runtime blocked, hidden content shows after ~4s', () => withFailsafePage({ runtime: 'blocked' }, async (page) => {
+  await page.waitForTimeout(1000);
+  assert.equal(await opacityOf(page, '#hero'), '0', 'still hidden at 1s (anti-flash)');
+  await page.waitForTimeout(3600);
+  assert.equal(await opacityOf(page, '#hero'), '1', 'failsafe revealed the hero');
+  assert.equal(await opacityOf(page, '#low'), '1', 'failsafe revealed content below the fold');
+}));
+
+phpTest('hide CSS failsafe: a running runtime (html.pb-motion-on) keeps unrevealed content hidden past 4s', () => withFailsafePage({}, async (page) => {
+  await page.waitForTimeout(4600);
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains('pb-motion-on')), true);
+  assert.equal(await opacityOf(page, '#hero'), '1', 'hero revealed by its tween');
+  assert.equal(await opacityOf(page, '#low'), '0', 'below-the-fold content still waits for scroll');
+}));
+
+phpTest('hide CSS: nothing is hidden under reduced motion, even without the runtime', () => withFailsafePage({ reducedMotion: true, runtime: 'blocked' }, async (page) => {
+  assert.equal(await opacityOf(page, '#hero'), '1');
+  assert.equal(await opacityOf(page, '#low'), '1');
+}));
+
+// A JS-delaying optimizer starts the runtime after the failsafe showed the content: it must not hide it again.
+phpTest('hide CSS failsafe: a runtime starting after the failsafe leaves revealed content visible', () => withFailsafePage({ runtime: 'late' }, async (page) => {
+  await page.waitForTimeout(4300);
+  assert.equal(await opacityOf(page, '#low'), '1', 'failsafe showed it before the runtime');
+  await page.waitForFunction(() => document.documentElement.classList.contains('pb-motion-on'), null, { timeout: 3000 });
+  const seen = [];
+  for (let i = 0; i < 8; i++) { seen.push(await opacityOf(page, '#hero'), await opacityOf(page, '#low')); await page.waitForTimeout(50); }
+  assert.ok(seen.every((o) => o === '1'), `never hidden again: ${seen.join(',')}`);
+  assert.equal(await page.$eval('#low', (el) => el.getAttribute('data-proto-animate')), 'done');
+}));
+
+// The late runtime runs at ~4.6s but a slower script after it holds DOMContentLoaded until ~6.5s. The failsafe has
+// shown the content by then; nothing may hide it again in that window (reviewer saw 1 at 4.07s, 0 at 4.68s, 1 at 6.71s).
+phpTest('hide CSS failsafe: a late runtime followed by a slow script never re-hides content before DOMContentLoaded', () => withFailsafePage({ runtime: 'late', otherMs: 6500, waitUntil: 'commit' }, async (page) => {
+  const samples = await page.evaluate(async () => {
+    const out = [];
+    const t0 = performance.now();
+    while (performance.now() < 7500 && performance.now() - t0 < 8000) {
+      out.push({ t: Math.round(performance.now()), hero: getComputedStyle(document.getElementById('hero')).opacity, low: document.getElementById('low') ? getComputedStyle(document.getElementById('low')).opacity : null, rs: document.readyState, on: document.documentElement.classList.contains('pb-motion-on') });
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return out;
+  });
+  const shown = samples.findIndex((x) => x.hero === '1');
+  assert.ok(shown >= 0 && samples[shown].t < 4500, `failsafe showed the hero around 4s: ${JSON.stringify(samples[shown])}`);
+  const hidden = samples.slice(shown).filter((x) => x.hero !== '1' || (x.low !== null && x.low !== '1'));
+  assert.deepEqual(hidden, [], 'never re-hidden after the failsafe');
+  assert.ok(samples.some((x) => x.rs !== 'loading' && x.on), `runtime started: ${JSON.stringify(samples.at(-1))}`);
+}));

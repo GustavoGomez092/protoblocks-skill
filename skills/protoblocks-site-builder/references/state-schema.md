@@ -23,7 +23,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
     "theme": { "slug": "acme", "forkedFrom": "proto-blocks-theme@1.1.3" },
     "tokens": { "colors": {…}, "fonts": {…}, "type": {…}, "radii": {…}, "shadows": {…} },
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
-    "qa": { "mismatchMax": 0.08, "heightDeltaMax": 0.03, "maxIterations": 5 },
+    "qa": { "mismatchMax": 0.08, "heightDeltaMax": 0.03, "maxIterations": 5, "motionMaxAttempts": 3 },
     "navigation": { "menus": { "primary": { "id": 123, "spec": { "title": "Primary", "items": […] }, "pending": [{ "label": "Pricing", "page": "pricing" }], "contentHash": "<sha256>" } } },
     "parts": { "header": { "block": "site-header", "status": "done" }, "footer": { … } }
   },
@@ -77,6 +77,18 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` on the first page (`references/header-footer.md`) and by `plan.mjs record` on later pages (`reuse` rows with `part`). |
 | `sections[j].prevStatus`, `sections[j].preparedIteration` | Set by `qa-input.mjs prepare`: the status before verification (a pass on a section that was `done` returns it to `done`) and the newest prepared iteration (`record` only accepts a verdict from that iteration). |
 
+## `sections[j].motion` (written by `motion.mjs record`)
+
+| Field | Meaning |
+|---|---|
+| `presets` | pb-motion preset names used in the section (validated against the runtime's list). Set on a pass or acceptance. |
+| `check` | `pass`, `accepted` (developer accepted a failing check; the section `notes` get "motion accepted by developer") or `fail` (last recorded check failed). |
+| `result` | Path of the `motion-check.json` that closed the section (pass or acceptance). |
+| `attempts` | Failed checks recorded since the last pass or acceptance; `record` reports `capReached` when it reaches `site.qa.motionMaxAttempts` (default 3; separate from the visual-QA `maxIterations`). Removed by a pass or acceptance. |
+| `lastResult` | Path of the last failing `motion-check.json`. Removed by a pass or acceptance. |
+
+`notes` is the section's own free-form field (see above), not part of `motion`.
+
 Find pages by `slug` and sections by `n`, not by array position.
 
 ## Enums and defaults
@@ -88,7 +100,7 @@ Find pages by `slug` and sections by `n`, not by array position.
 | section `status` | `planned`, `building`, `verifying`, `animating`, `done`, `skipped` |
 | section `decision` | `new`, `reuse`, `extend` |
 
-QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax` 0.08, `heightDeltaMax` 0.03, `maxIterations` 5.
+QA defaults (filled by `init` when `site.qa` is absent or partial): `mismatchMax` 0.08, `heightDeltaMax` 0.03, `maxIterations` 5, `motionMaxAttempts` 3.
 
 ## CLI
 

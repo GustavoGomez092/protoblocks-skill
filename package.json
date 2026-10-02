@@ -8,5 +8,10 @@
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "test:integration:page": "node --test --test-concurrency=1 tests/integration/page.test.mjs"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "gsap": "^3.15.0"
+  }
 }
