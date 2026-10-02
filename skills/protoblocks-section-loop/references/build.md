@@ -57,7 +57,7 @@ An index of `-1` means the slug or `n` is not in state: stop. `[EINVALID]` or `[
 
 ## Gate failures
 
-`gates.mjs` prints `{ok, steps:[{id, ok, detail}]}` and stops at the first failing step. Exit 1 when `ok` is false.
+`node "$PB/lib/gates.mjs" "$THEME" --from-state <page> <n>` reads the section's `block` and `attrs` from state (write them first, recipe above) and prints `{ok, steps:[{id, ok, detail}]}`, stopping at the first failing step. Exit 1 when `ok` is false. Attrs reach WordPress as a payload file, never as shell arguments. `[EWRONGTHEME]`: `$THEME` is not the active theme (WordPress would render another copy of the block); activate the fork. `[EINPUT]` "no block yet": write `block`/`attrs` first.
 
 | step | typical cause | fix |
 |---|---|---|

@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { WpError } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
-import { runGates } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
+import { runGates, gateInputFromState } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
+import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 function setup({ anchor = true, validate, cache, tailwind = { enabled: false }, compile, render } = {}) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-'));
@@ -19,12 +20,19 @@ function setup({ anchor = true, validate, cache, tailwind = { enabled: false }, 
       if (args[1] === 'cache') return cache ?? { code: 0, stdout: 'Success\n', stderr: '' };
       return compile ?? { code: 0, stdout: 'compiled\n', stderr: '' };
     },
-    evalFile: (file) => {
+    evalFile: (file, args = []) => {
       calls.push(path.basename(file));
-      return path.basename(file) === 'tailwind.php' ? tailwind : (render ?? { ok: true, errors: [], other: [] });
+      if (path.basename(file) === 'render-block.php') throw new Error(`render-block.php must get its attrs through evalFilePayload, not argv: ${JSON.stringify(args)}`);
+      return tailwind;
+    },
+    evalFilePayload: (file, cmd, data) => {
+      calls.push(`${path.basename(file)} ${cmd}`);
+      payloads.push(data);
+      return render ?? { ok: true, errors: [], other: [] };
     },
   };
-  return { wp, calls };
+  const payloads = [];
+  return { wp, calls, payloads, theme };
 }
 const ids = (r) => r.steps.map((s) => s.id);
 
@@ -86,11 +94,7 @@ test('validate fails when the block is absent from the JSON rows', () => {
 
 test('a fatal in render-block.php (evalFile throws) is recorded as a failing render step', () => {
   const { wp } = setup();
-  const orig = wp.evalFile;
-  wp.evalFile = (file, args) => {
-    if (path.basename(file) === 'render-block.php') throw new WpError(['eval-file'], { code: 255, stdout: '', stderr: 'PHP Parse error: syntax error' });
-    return orig(file, args);
-  };
+  wp.evalFilePayload = () => { throw new WpError(['eval-file'], { code: 255, stdout: '', stderr: 'PHP Parse error: syntax error' }); };
   const r = runGates(wp, { block: 'b' });
   assert.equal(r.ok, false);
   assert.equal(r.steps.at(-1).id, 'render');
@@ -113,11 +117,7 @@ test('validate parsing skips an earlier "[" that is not the JSON array', () => {
 
 function fatalWp(result) {
   const { wp } = setup();
-  const orig = wp.evalFile;
-  wp.evalFile = (file, args) => {
-    if (path.basename(file) === 'render-block.php') throw new WpError(['eval-file'], result);
-    return orig(file, args);
-  };
+  wp.evalFilePayload = () => { throw new WpError(['eval-file'], result); };
   return wp;
 }
 
@@ -145,4 +145,55 @@ test('a WpError for non-JSON output keeps the first 2000 chars of stdout as deta
   assert.equal(last.ok, false);
   assert.equal(last.detail.raw, stdout.slice(0, 2000));
   assert.match(last.detail.fatal, /did not print JSON/);
+});
+
+test('attrs reach render-block.php through a payload file, never argv (hostile text stays data)', () => {
+  const { wp, payloads, calls } = setup();
+  const attrs = { heading: '--path=/tmp --require=/evil.php', n: 2 };
+  assert.equal(runGates(wp, { block: 'b', attrs }).ok, true);
+  assert.deepEqual(payloads, [{ block: 'b', attrs }]);
+  assert.ok(calls.includes('render-block.php render'));
+});
+
+test('an unsafe block slug is refused before anything runs (EINPUT)', () => {
+  for (const block of ['../x', 'B', 'a/b', '', 'a--b']) {
+    const { wp, calls } = setup();
+    let checked = false;
+    wp.check = () => { checked = true; return ''; };
+    assert.throws(() => runGates(wp, { block }), (e) => e.code === 'EINPUT', block);
+    assert.equal(checked, false);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('the theme passed in must be the active stylesheet directory (EWRONGTHEME); symlinks resolve', () => {
+  const { wp, theme, calls } = setup();
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-other-'));
+  assert.throws(() => runGates(wp, { block: 'b', themeDir: other }), (e) => e.code === 'EWRONGTHEME' && e.message.includes(other) && e.message.includes(theme) && /active/.test(e.message));
+  assert.deepEqual(calls, []);
+  const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gates-link-')), 'theme');
+  fs.symlinkSync(theme, link);
+  assert.equal(runGates(wp, { block: 'b', themeDir: link }).ok, true);
+});
+
+test('block json falls back to <name>.json like the plugin discovery', () => {
+  const { wp, theme } = setup();
+  const dir = path.join(theme, 'proto-blocks', 'b');
+  fs.renameSync(path.join(dir, 'block.json'), path.join(dir, 'b.json'));
+  const r = runGates(wp, { block: 'b' });
+  assert.equal(r.steps[0].ok, true, JSON.stringify(r.steps[0]));
+  assert.equal(r.ok, true);
+});
+
+test('gateInputFromState reads block and attrs of a section by page slug and n', () => {
+  const t = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-state-'));
+  initState(t, { url: 'http://a.local', path: '/x' });
+  updateState(t, (s) => {
+    s.pages.push({ slug: 'other', status: 'building', sections: [{ n: 3, anchor: 'pb-s3', status: 'building', block: 'cta', attrs: { a: 1 } }] });
+    s.pages.push({ slug: 'home', status: 'building', sections: [{ n: 3, anchor: 'pb-s3', status: 'building', block: 'hero-split', attrs: { heading: 'Hi "there"' } }, { n: 4, anchor: 'pb-s4', status: 'planned' }] });
+  });
+  assert.deepEqual(gateInputFromState(loadState(t), 'home', '3'), { block: 'hero-split', attrs: { heading: 'Hi "there"' } });
+  assert.throws(() => gateInputFromState(loadState(t), 'home', 4), (e) => e.code === 'EINPUT' && /no block/.test(e.message));
+  assert.throws(() => gateInputFromState(loadState(t), 'home', 9), (e) => e.code === 'ENOSECTION');
+  assert.throws(() => gateInputFromState(loadState(t), 'About_Us', 1), (e) => e.code === 'EINPUT');
 });

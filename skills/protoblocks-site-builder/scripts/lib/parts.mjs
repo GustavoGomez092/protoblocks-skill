@@ -5,14 +5,17 @@ import { pathToFileURL } from 'node:url';
 import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { assertFork } from './guards.mjs';
 import { blockComment } from './blocks.mjs';
+import { loadState, getSection } from './state.mjs';
+import { assertSlug } from './slugs.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'parts.php');
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const THEME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export function partMarkup({ block, attrs = {}, navRef }) {
+export function partMarkup({ block, attrs = {}, navRef, innerRaw }) {
   if (navRef !== undefined && !(Number.isInteger(navRef) && navRef > 0)) throw new Error(`navRef must be a positive integer, got ${String(navRef)}`);
-  const inner = navRef === undefined ? undefined : blockComment('navigation', { ref: navRef });
+  if (navRef !== undefined && innerRaw !== undefined) throw new Error('Pass navRef or innerRaw, not both');
+  const inner = navRef === undefined ? innerRaw : blockComment('navigation', { ref: navRef });
   return `${blockComment(block, attrs, inner)}\n`;
 }
 
@@ -84,13 +87,30 @@ function idArg(argv) {
   return i >= 0 ? Number(argv[i + 1]) : undefined;
 }
 
-const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>] | markup <block> [--attrs <json>] [--nav-ref <id>]\n';
+const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>] | markup <block> [--attrs <json>] [--nav-ref <id>] | markup <themeDir> --from-state <page> <n>\n';
 
 /**
  * Pure CLI behind `markup`: parses `<block> [--attrs <json>] [--nav-ref <id>]` and returns partMarkup(...) text.
  * A bare block slug gets the proto-blocks/ namespace. Throws EINPUT (bad block/attrs/nav-ref) or EUSAGE (bad argv).
  */
+const nsBlock = (block) => (block.includes('/') ? block : `proto-blocks/${block}`);
+
+// `markup <themeDir> --from-state <page> <n>`: the section's block, attrs (+ its anchor) and inner, straight from state,
+// so no JSON is ever hand-copied into a shell command.
+function markupFromState(args) {
+  const [themeDir, flag, page, n, ...extra] = args;
+  if (flag !== '--from-state' || !themeDir || page === undefined || n === undefined || extra.length) throw fail('EUSAGE', USAGE.trim());
+  assertSlug(page, 'page slug');
+  const { section } = getSection(loadState(themeDir), page, n);
+  if (typeof section.block !== 'string' || !section.block) throw fail('EINPUT', `Section ${section.n} on "${page}" has no block yet; build it first.`);
+  if (!/^(?:[a-z0-9][a-z0-9-]*\/)?[a-z0-9][a-z0-9-]*$/.test(section.block)) throw fail('EINPUT', `Invalid block name ${JSON.stringify(section.block)} in state`);
+  const attrs = { ...(section.attrs ?? {}), anchor: section.anchor };
+  const innerRaw = Array.isArray(section.inner) && section.inner.length ? section.inner.join('\n') : undefined;
+  return partMarkup({ block: nsBlock(section.block), attrs, innerRaw });
+}
+
 export function markupFromArgs(args) {
+  if (args.includes('--from-state')) return markupFromState(args);
   const rest = [...args];
   const block = rest.shift();
   if (!block || block.startsWith('--')) throw fail('EUSAGE', USAGE.trim());
@@ -113,7 +133,7 @@ export function markupFromArgs(args) {
     if (!/^[1-9][0-9]*$/.test(vals['--nav-ref'])) throw fail('ENAVREF', `--nav-ref must be a positive integer (the menu id), got ${JSON.stringify(vals['--nav-ref'])}`);
     navRef = Number(vals['--nav-ref']);
   }
-  return partMarkup({ block: block.includes('/') ? block : `proto-blocks/${block}`, attrs, navRef });
+  return partMarkup({ block: nsBlock(block), attrs, navRef });
 }
 
 function main(argv) {

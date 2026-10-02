@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { readBlockJson } from './library.mjs';
+import { loadState, getSection } from './state.mjs';
+import { assertSlug } from './slugs.mjs';
 
 // The plugin prints the JSON array and may append text ("Success: ...") on the same line;
 // earlier output may itself contain "[". Try each "[" start until one parses to an array.
@@ -15,15 +18,37 @@ function parseJsonArray(text) {
   return [];
 }
 
-export function runGates(wp, { block, attrs = {} }) {
+const realOrSelf = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+
+/** `--from-state <page> <n>`: the section's block and attrs, looked up by page slug and n. */
+export function gateInputFromState(state, page, n) {
+  assertSlug(page, 'page slug');
+  const { section } = getSection(state, page, n);
+  if (typeof section.block !== 'string' || !section.block) throw Object.assign(new Error(`Section ${section.n} on "${page}" has no block yet: write block and attrs to state first.`), { code: 'EINPUT' });
+  return { block: section.block, attrs: section.attrs ?? {} };
+}
+
+/**
+ * themeDir (the CLI's <themeDir>) must be the theme WordPress renders with: the gate reads the block from the active
+ * stylesheet directory, so a mismatch would test a different copy of the block (EWRONGTHEME).
+ */
+export function runGates(wp, { block, attrs = {}, themeDir: expectedTheme } = {}) {
+  assertSlug(block, 'block slug');
   const steps = [];
   const step = (id, ok, detail) => { steps.push({ id, ok, detail }); return ok; };
   const done = () => ({ ok: steps.every((s) => s.ok), steps });
 
   const themeDir = wp.check(['eval', 'echo get_stylesheet_directory();']).trim();
+  if (expectedTheme !== undefined && realOrSelf(expectedTheme) !== realOrSelf(themeDir)) {
+    throw Object.assign(new Error(`${expectedTheme} is not the active theme: WordPress renders with ${themeDir} (get_stylesheet_directory). Gates would test that theme's copy of "${block}". Activate the fork (wp theme activate <slug>) or pass the active theme's directory.`), { code: 'EWRONGTHEME' });
+  }
   const jsonPath = path.join(themeDir, 'proto-blocks', block, 'block.json');
   let json = null;
-  try { json = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); } catch (e) { step('anchor-support', false, `Cannot read ${jsonPath}: ${e.message}`); return done(); }
+  try {
+    // Same lookup as the plugin's discovery (and library.mjs): block.json, then <name>.json.
+    json = readBlockJson(themeDir, block);
+    if (json === null) throw new Error(`neither block.json nor ${block}.json exists`);
+  } catch (e) { step('anchor-support', false, `Cannot read ${jsonPath}: ${e.message}`); return done(); }
   if (!step('anchor-support', json?.supports?.anchor === true, json?.supports?.anchor === true ? 'supports.anchor true' : 'block.json must declare "supports": { "anchor": true } (QA targets #pb-s<n>)')) return done();
 
   const v = wp.run(['proto-blocks', 'validate', block, '--format=json']);
@@ -47,7 +72,8 @@ export function runGates(wp, { block, attrs = {} }) {
 
   let render;
   try {
-    render = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'render-block.php'), [block, JSON.stringify(attrs)]);
+    // attrs carry free text (copy, URLs): they travel as a JSON payload file, never as WP-CLI argv.
+    render = wp.evalFilePayload(path.join(WP_SCRIPTS_DIR, 'render-block.php'), 'render', { block, attrs });
   } catch (e) {
     // An uncatchable PHP fatal (E_ERROR, out of memory) kills the wp process before the normal JSON is printed.
     const r = e.result ?? {};
@@ -66,11 +92,25 @@ export function runGates(wp, { block, attrs = {} }) {
   return done();
 }
 
+const USAGE = "Usage: node gates.mjs <themeDir> <block> [--attrs '<json>'] | <themeDir> --from-state <page> <n>\n";
+
 function main(argv) {
-  const [themeDir, block, ...rest] = argv;
-  if (!themeDir || !block) { process.stderr.write("Usage: node gates.mjs <themeDir> <block> [--attrs '<json>']\n"); process.exit(64); }
-  const i = rest.indexOf('--attrs');
-  const r = runGates(createWp(loadRuntime(themeDir)), { block, attrs: i >= 0 ? JSON.parse(rest[i + 1]) : {} });
+  const [themeDir, ...rest] = argv;
+  let input;
+  if (rest[0] === '--from-state') {
+    if (!themeDir || rest.length !== 3) { process.stderr.write(USAGE); process.exit(64); }
+    input = gateInputFromState(loadState(themeDir), rest[1], rest[2]);
+  } else {
+    const [block, ...flags] = rest;
+    if (!themeDir || !block || block.startsWith('--')) { process.stderr.write(USAGE); process.exit(64); }
+    const i = flags.indexOf('--attrs');
+    let attrs = {};
+    if (i >= 0) {
+      try { attrs = JSON.parse(flags[i + 1]); } catch (e) { throw Object.assign(new Error(`--attrs is not valid JSON: ${e.message}`), { code: 'EINPUT' }); }
+    }
+    input = { block, attrs };
+  }
+  const r = runGates(createWp(loadRuntime(themeDir)), { ...input, themeDir });
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
   if (!r.ok) process.exit(1);
 }

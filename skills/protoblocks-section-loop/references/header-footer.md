@@ -22,12 +22,12 @@ Run steps 1-8 once, when every section of the first page has passed Verify (head
 
 1. List Site Editor copies that would shadow the file: `node "$PB/lib/parts.mjs" overrides "$THEME"` (`[]` means none).
 2. If a `header` (or `footer`) copy exists, show the developer what would be discarded and ask. Run the preview once: `node "$PB/lib/parts.mjs" remove-override "$THEME" header` prints `[ECONFIRM]` with the id. Only after their explicit OK: `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`. The copy goes to Trash, not deleted; relay the printed recovery command. `[ESTALE]` means the id changed: preview again. `[EAMBIGUOUS]` or `[ETHEMEMISMATCH]`: nothing removed; tell the developer. `[ENOTRASH]`: Trash is disabled so removal would be permanent; ask the developer to use "Clear customizations" on the part in the Site Editor.
-3. Generate the part markup. It is a pure command (no WordPress needed): the block's attrs from state, with the same `anchor` the section used, and the menu id as `--nav-ref`:
+3. Generate the part markup from state (a pure command, no WordPress needed): `--from-state` takes the section's `block`, `attrs`, its `anchor` (`pb-header` / `pb-footer`) and its `inner` (the navigation block with the menu `ref`), so nothing is hand-copied:
    ```bash
-   node "$PB/lib/parts.mjs" markup site-header --attrs '{"anchor":"pb-header","sticky":true}' --nav-ref 15 > "$THEME/.protoblocks/header.html"
+   node "$PB/lib/parts.mjs" markup "$THEME" --from-state <page> <n> > "$THEME/.protoblocks/header.html"
    node "$PB/lib/parts.mjs" write "$THEME" header "$THEME/.protoblocks/header.html"
    ```
-   Repeat for `footer` (`site-footer`, its own anchor, `footer.html`). `--attrs` must be the section's `attrs` (copy them from state; the anchor is not stored in `attrs`, add it). Bad JSON gives `[EINPUT]`, a bad `--nav-ref` gives `[ENAVREF]`. The part keeps the anchor, so the header still renders with `id="pb-header"` and can be verified by `qa-input.mjs`.
+   Repeat for `footer` (its own `n`, `footer.html`). `[ENOSECTION]` / `[ENOPAGE]`: wrong page or `n`; `[EINPUT]` "no block yet": the section was never built. The part keeps the anchor, so the header still renders with `id="pb-header"` and can be verified by `qa-input.mjs`.
 4. Mark the section as rendered by the part, in one atomic write (look up by slug and `n`; set `inPart` and `status` together). `page.mjs` skips sections with `inPart: true`:
 
 <!-- test:run -->

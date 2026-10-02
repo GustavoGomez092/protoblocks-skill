@@ -43,8 +43,8 @@ Details and checklist: `references/build.md`.
    - `reuse`: no block changes; set attrs only.
 3. Assets cropped from the design: `node "$PB/lib/media.mjs" import "$THEME" <file> --alt "<text>"`. Alt is required. Put the printed `attr` object into `section.attrs`.
 4. Write `block`, `attrs` and `inner` with `state.mjs set` (recipe in `references/build.md`).
-5. Gates until `ok: true`; a failing step names the cause:
-   `node "$PB/lib/gates.mjs" "$THEME" <block> --attrs '<attrs json>'`
+5. Gates until `ok: true`; a failing step names the cause. They read `block` and `attrs` from state (never hand-copy JSON into the shell):
+   `node "$PB/lib/gates.mjs" "$THEME" --from-state <page> <n>`
 6. Assemble the page (creates it on first run, then rewrites it):
    `node "$PB/lib/page.mjs" build "$THEME" <page>`
    `EEDITED`, `ESLUGTAKEN`, `EFOREIGN`, `ENOTPAGE` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). `ESTALE` is different: the page changed during the build; just re-run the build (it re-plans and re-backs-up), never `--force`. Relay `warnings` (kept developer title/slug/status).

@@ -1,11 +1,13 @@
 <?php
 /**
  * Render smoke test for one Proto-Block (frontend + editor preview).
- * Usage: wp eval-file render-block.php <slug> '<attrs json>'
+ * Usage: wp eval-file render-block.php render <payload.json>   payload: {"block": "<slug>", "attrs": {...}}
+ * The attrs travel in a file (wp.evalFilePayload): free text never reaches WP-CLI argv.
  */
-$slug = sanitize_key($args[0] ?? '');
-$attrs = json_decode($args[1] ?? '{}', true);
-if ($slug === '' || !is_array($attrs)) { fwrite(STDERR, "Usage: render-block.php <slug> '<attrs json>'\n"); exit(1); }
+$payload = (($args[0] ?? '') === 'render' && isset($args[1])) ? json_decode((string) @file_get_contents($args[1]), true) : null;
+$slug = is_array($payload) && is_string($payload['block'] ?? null) ? sanitize_key($payload['block']) : '';
+$attrs = is_array($payload) ? ($payload['attrs'] ?? []) : null;
+if ($slug === '' || $slug !== ($payload['block'] ?? null) || !is_array($attrs)) { fwrite(STDERR, "Usage: render-block.php render <payload.json> ({\"block\":\"<slug>\",\"attrs\":{}})\n"); exit(1); }
 $attrs['anchor'] = 'pb-gate';
 
 $admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID']);

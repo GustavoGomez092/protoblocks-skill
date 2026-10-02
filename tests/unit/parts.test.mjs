@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { initState, updateState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import { markupFromArgs, partMarkup, writePart, removeOverride, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
@@ -213,4 +214,39 @@ test('parts.mjs markup runs as a CLI without a WordPress runtime', () => {
   assert.match(run('site-footer', '--nav-ref', 'x').stderr, /\[ENAVREF\]/);
   assert.equal(run().status, 64);
   assert.equal(run('site-footer', '--wat').status, 64);
+});
+
+function stateTheme() {
+  const t = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-markup-'));
+  initState(t, { url: 'http://a.local', path: '/x' });
+  updateState(t, (s) => {
+    s.pages.push({ slug: 'other', status: 'building', sections: [{ n: 1, anchor: 'pb-s1', status: 'done', block: 'cta' }] });
+    s.pages.push({ slug: 'home', status: 'building', sections: [
+      { n: 2, anchor: 'pb-s2', status: 'building', block: 'hero' },
+      { n: 1, anchor: 'pb-header', status: 'done', block: 'site-header', attrs: { sticky: true, cta: 'Book "now" -- <b>' }, inner: ['<!-- wp:navigation {"ref":15} /-->'] },
+      { n: 3, anchor: 'pb-s3', status: 'planned' },
+    ] });
+  });
+  return t;
+}
+
+test('markup --from-state reads block, attrs, anchor and inner from state (page by slug, section by n)', () => {
+  const t = stateTheme();
+  const out = markupFromArgs([t, '--from-state', 'home', '1']);
+  assert.equal(out, markupFromArgs(['site-header', '--attrs', JSON.stringify({ sticky: true, cta: 'Book "now" -- <b>', anchor: 'pb-header' }), '--nav-ref', '15']));
+  const script = path.resolve('skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  const cli = spawnSync(process.execPath, [script, 'markup', t, '--from-state', 'home', '1'], { encoding: 'utf8', cwd: os.tmpdir() });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout, out);
+});
+
+test('markup --from-state errors: unknown page/section, no block yet, mixing with --attrs', () => {
+  const t = stateTheme();
+  const code = (args) => { try { markupFromArgs(args); } catch (e) { return e.code; } return null; };
+  assert.equal(code([t, '--from-state', 'nope', '1']), 'ENOPAGE');
+  assert.equal(code([t, '--from-state', 'home', '9']), 'ENOSECTION');
+  assert.equal(code([t, '--from-state', 'home', '3']), 'EINPUT');
+  assert.equal(code([t, '--from-state', 'home', 'x']), 'EINPUT');
+  assert.equal(code([t, '--from-state', 'home']), 'EUSAGE');
+  assert.equal(code([t, '--from-state', 'home', '1', '--attrs', '{}']), 'EUSAGE');
 });

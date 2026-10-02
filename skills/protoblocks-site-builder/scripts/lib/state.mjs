@@ -227,6 +227,17 @@ export function updateState(themeDir, fn, opts = {}) {
   }
 }
 
+/** Looks a section up by page slug and section number n (never by array position). */
+export function getSection(state, slug, n) {
+  const num = typeof n === 'string' && /^[1-9][0-9]*$/.test(n) ? Number(n) : n;
+  if (!Number.isInteger(num) || num <= 0) throw new StateError(`Section number must be a positive integer, got ${JSON.stringify(n ?? null)}`, 'EINPUT');
+  const page = state.pages.find((p) => p.slug === slug);
+  if (!page) throw new StateError(`No page "${slug}" in state.`, 'ENOPAGE');
+  const section = page.sections.find((s) => s.n === num);
+  if (!section) throw new StateError(`No section n=${num} on page "${slug}".`, 'ENOSECTION');
+  return { page, section };
+}
+
 const segs = (dotted) => (dotted === '' ? [] : dotted.split('.'));
 const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
 

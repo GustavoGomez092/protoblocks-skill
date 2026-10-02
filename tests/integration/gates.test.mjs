@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
@@ -166,4 +167,18 @@ itest('warnings from a symlinked block folder are attributed to the block', asyn
     if (real) fs.rmSync(real, { recursive: true, force: true });
     restoreTheme(wp);
   }
+});
+
+itest('gates accept the active theme dir, refuse another (EWRONGTHEME), and render hostile attrs via the payload file', async () => {
+  const wp = testWp();
+  try {
+    const theme = await install(wp, 'pb-gate-ok');
+    const hostile = { heading: '--require=/nonexistent.php "quoted" & <b>' };
+    const ok = runGates(wp, { block: 'pb-gate-ok', attrs: hostile, themeDir: theme });
+    assert.equal(ok.ok, true, JSON.stringify(ok, null, 2));
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-itest-notatheme-'));
+    try {
+      assert.throws(() => runGates(wp, { block: 'pb-gate-ok', themeDir: other }), (e) => e.code === 'EWRONGTHEME');
+    } finally { fs.rmSync(other, { recursive: true, force: true }); }
+  } finally { restoreTheme(wp); }
 });
