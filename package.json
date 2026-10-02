@@ -12,7 +12,7 @@
     "test:recover": "node tests/recover.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9"
   },
   "devDependencies": {
     "gsap": "^3.15.0"

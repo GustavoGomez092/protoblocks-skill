@@ -23,7 +23,7 @@ Shell variables do not persist between Bash commands. Start every command with `
 
 ## The loop (always)
 
-1. `node "$PB/lib/preflight.mjs" [--site "<Local site name>"]`. Exit 2 = a check failed. A `site` failure that lists available sites: ask the developer which one and re-run with `--site`. Any other failure: relay its `fix` text verbatim and stop. `warn`: note it and go on.
+1. `node "$PB/lib/preflight.mjs" [--site "<Local site name>"]`. Exit 2 = a check failed. A `site` failure that lists available sites: ask the developer which one and re-run with `--site`. Any other failure: relay its `fix` text verbatim and stop. `warn`: note it and go on, except `qa-deps` (visual QA's packages or Chromium are missing): show its `fix` command, ask once to run it, and run it with the OK before `breakdown` (QA cannot run without it).
 2. Find the theme: `node "$PB/lib/status.mjs" --root "<report.publicPath>"`. `themeDir` set: that is `THEME`. `themeDir: null`: `setup`. A `themes` list (several forks have a build state): ask the developer which one.
 3. `node "$PB/lib/status.mjs" "$THEME"`, then do exactly `next.action` (table below) for `next.page` / `next.section`.
 4. After every step, re-run `status.mjs`. Never keep the plan in your head: the state is the plan.

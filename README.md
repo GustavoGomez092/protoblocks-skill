@@ -21,7 +21,7 @@ Add this repo as a plugin marketplace, then install the plugin:
 
 - `protoblocks-skill` is the plugin name; `protoblocks` is the marketplace name (both defined in `.claude-plugin/`).
 - Or run `/plugin`, open **Browse marketplaces → protoblocks**, and install from the menu.
-- Restart Claude Code if prompted. That's it — no build step, no dependencies.
+- Restart Claude Code if prompted. The docs hub needs nothing else; the site builder needs Node and its visual-QA dependencies (see [Site builder](#site-builder)).
 
 ### Manual (any Claude environment)
 
@@ -157,7 +157,7 @@ Seven skills, four commands and one agent.
 ### Requirements
 
 - [Local by Flywheel](https://localwp.com/) or any local WordPress with WP-CLI.
-- Node 18 or newer.
+- Node 20.9 or newer.
 - Proto-Blocks 2.10.1 or newer (setup installs it).
 - A fork of `proto-blocks-theme` (setup creates and activates it).
 - Yoast SEO (setup installs it).
@@ -179,11 +179,13 @@ The builder runs this pipeline:
 7. **Yoast SEO**: infers and applies SEO data, audits the rendered page, fixes failures.
 8. **Menu and more pages**: asks whether to add the page to the primary menu and whether you have other landing pages to build.
 
-Install the QA dependencies once (screenshots and diffs):
+Visual QA (screenshots, diffs, accessibility) needs its own dependencies: sharp, pixelmatch, Playwright with its Chromium build, and axe. Preflight checks them (`qa-deps`) and prints the command to install them, with the absolute path of the installed plugin; the builder shows it and asks once before the breakdown. For a marketplace install it looks like this (the plugin cache folder is versioned):
 
 ```bash
-cd skills/protoblocks-site-builder/scripts/qa && npm install
+cd "$HOME/.claude/plugins/cache/protoblocks/protoblocks-skill/<version>/skills/protoblocks-site-builder/scripts/qa" && npm install && npx playwright install chromium
 ```
+
+Run it again after every plugin update: each version is a new folder without the dependencies.
 
 ### State and resume
 

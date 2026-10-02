@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exec as realExec } from './exec.mjs';
@@ -7,6 +8,30 @@ import { resolveLocalSite, writeWrapper } from './local-site.mjs';
 
 export const MIN_PROTO_BLOCKS = '2.10.1';
 const DEFAULT_QA_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'qa');
+// Oldest supported Node: the QA dependencies (sharp, playwright) need 20.9.
+export const MIN_NODE = '20.9';
+export const nodeOk = (version) => compareVersions(String(version).replace(/^v/, ''), MIN_NODE) >= 0;
+// The visual-QA scripts' dependencies (scripts/qa/package.json), resolved from the QA folder itself.
+export const QA_PACKAGES = ['sharp', 'pixelmatch', 'playwright', '@axe-core/playwright'];
+
+/**
+ * The QA dependencies as Node resolves them from `qaDir`, plus Playwright's Chromium build on disk. `resolve`,
+ * `chromiumPath` and `exists` are injectable (tests). Returns a preflight check; its fix is the absolute install command.
+ */
+export function checkQaDeps(qaDir, {
+  resolve = (name) => createRequire(path.join(path.resolve(qaDir), 'package.json')).resolve(name),
+  chromiumPath = () => createRequire(path.join(path.resolve(qaDir), 'package.json'))('playwright').chromium.executablePath(),
+  exists = fs.existsSync,
+} = {}) {
+  const abs = path.resolve(qaDir);
+  const fix = `cd "${abs}" && npm install && npx playwright install chromium`;
+  const missing = QA_PACKAGES.filter((name) => { try { resolve(name); return false; } catch { return true; } });
+  if (missing.length) return { id: 'qa-deps', status: 'warn', detail: `QA dependencies missing: ${missing.join(', ')} (needed for visual QA; install once, and again after every plugin update)`, fix };
+  let exe = '';
+  try { exe = chromiumPath() ?? ''; } catch { exe = ''; }
+  if (!exe || !exists(exe)) return { id: 'qa-deps', status: 'warn', detail: `Playwright's Chromium is not installed${exe ? ` (${exe})` : ''} (needed for visual QA)`, fix };
+  return { id: 'qa-deps', status: 'pass', detail: `QA dependencies and Chromium installed in ${abs}` };
+}
 
 export function compareVersions(a, b) {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
@@ -33,16 +58,15 @@ export function findWpRoot(dir) {
 
 export function runPreflight({
   cwd = process.cwd(), site, path: wpPath, env = process.env, exec = realExec,
-  nodeVersion = process.versions.node, qaDir = DEFAULT_QA_DIR,
+  nodeVersion = process.versions.node, qaDir = DEFAULT_QA_DIR, qaDeps = {},
 } = {}) {
   const checks = [];
   const add = (id, status, detail, fix) => checks.push({ id, status, detail, ...(fix ? { fix } : {}) });
   const report = { ok: false, mode: null, wp: null, url: null, publicPath: null, localSite: null, runtimeDir: null, checks };
 
   // 1. Node (independent of the site)
-  const major = parseInt(nodeVersion.split('.')[0], 10);
-  if (major >= 18) add('node', 'pass', `Node ${nodeVersion}`);
-  else add('node', 'fail', `Node ${nodeVersion} is too old`, 'Install Node 18 or newer (e.g. `brew install node`).');
+  if (nodeOk(nodeVersion)) add('node', 'pass', `Node ${nodeVersion}`);
+  else add('node', 'fail', `Node ${nodeVersion} is too old`, `Install Node ${MIN_NODE} or newer (e.g. \`brew install node\`).`);
 
   // 2. Resolve the site: Local first, then native.
   let wpCmd = null;
@@ -138,10 +162,9 @@ export function runPreflight({
     else add('block-theme', 'warn', 'Active theme is not a block theme', 'Run /protoblocks-skill:setup-site (installs the proto-blocks-theme fork).');
   }
 
-  // 5. Playwright (only needed for QA stages)
-  const pw = path.join(qaDir, 'node_modules', 'playwright');
-  if (fs.existsSync(pw)) add('playwright', 'pass', 'Playwright installed');
-  else add('playwright', 'warn', 'Playwright not installed (needed for visual QA)', `cd "${qaDir}" && npm install && npx playwright install chromium`);
+  // 5. QA dependencies and Chromium (only needed for the QA stages; a warn: ask, then install before breakdown)
+  const qa = checkQaDeps(qaDir, qaDeps);
+  add(qa.id, qa.status, qa.detail, qa.fix);
 
   report.ok = !checks.some((c) => c.status === 'fail');
 
