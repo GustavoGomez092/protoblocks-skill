@@ -60,7 +60,7 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
 5. Fix by symptom (`references/check.md`), then re-run.
 6. Record:
    `node "$PB/lib/motion.mjs" record "$THEME" <page> <n> "<out>/motion-check.json" --presets a,b`
-   It prints `{pass, attempts, capReached, status}` (also on a failure, which exits 1 with `[EMOTION]` on stderr). It refuses a check of another anchor or page URL, an unknown preset, and a section that is not `animating` (`ESTATUS`). A pass sets the section `done`; a failure sets `motion.check: "fail"` and counts `motion.attempts` (fields: `state-schema.md`). On `capReached: true` (`site.qa.maxIterations` failed checks) stop and ask the developer: simplify the motion, accept it (`record ... --accepted`, which notes "motion accepted by developer"), or remove it (revert the attributes, then record a passing check).
+   It prints `{pass, attempts, capReached, status}` (also on a failure, which exits 1 with `[EMOTION]` on stderr). It refuses a check of another anchor or page URL, an unknown preset, and a section that is not `animating` (`ESTATUS`). A pass sets the section `done`; a failure sets `motion.check: "fail"` and counts `motion.attempts` (fields: `state-schema.md`). On `capReached: true` (`site.qa.motionMaxAttempts` failed checks, default 3) stop and ask the developer: simplify the motion, accept it (`record ... --accepted`, which notes "motion accepted by developer"), or remove it (revert the attributes, then record a passing check).
 7. Commit in the theme fork: `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(page): <page> section <n>"`.
 
 ## Bespoke motion

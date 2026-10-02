@@ -196,6 +196,9 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       const measured = await readCls(page);
       const clsMotion = round4(measured.anchor);
       const clsBaseline = round4(shot.inspected.anchor);
+      // Caveat: baseline and motion come from two separate page loads. Load-time shifts are not perfectly repeatable,
+      // and a large baseline (e.g. a font swap reflowing the section) can absorb a motion shift of similar size, so a
+      // passing cls with a large clsBaseline is weak evidence. Both inputs are reported (clsMotion, clsBaseline).
       const cls = round4(Math.max(0, measured.anchor - shot.inspected.anchor));
       const clsPage = round4(measured.page);
 

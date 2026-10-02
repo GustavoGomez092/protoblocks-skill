@@ -165,8 +165,8 @@ const checkFiles = (t) => {
 };
 const sectionOf = (t) => loadState(t).pages[0].sections[0];
 
-test('failed motion checks are counted in state; the third reports capReached (site.qa.maxIterations 3)', () => {
-  const t = theme({ maxIterations: 3 });
+test('failed motion checks are counted in state; the third reports capReached (default motionMaxAttempts)', () => {
+  const t = theme();
   const { fail } = checkFiles(t);
   const attempt = () => { try { recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail }); } catch (e) { return e; } return null; };
   let e = attempt();
@@ -248,16 +248,18 @@ test('a failed record sets motion.check to "fail"', () => {
   assert.equal(sectionOf(t).motion.check, 'fail');
 });
 
-test('the attempt cap comes from site.qa.maxIterations, default 3 when unset', () => {
+test('the attempt cap is site.qa.motionMaxAttempts (default 3), not the visual-QA maxIterations', () => {
   const run = (t) => { const { fail } = checkFiles(t); const out = []; for (let i = 0; i < 3; i++) { try { recordMotion(t, 'home', 1, { checkFile: fail }); } catch (e) { out.push(e.capReached); } } return out; };
-  assert.deepEqual(run(theme({ maxIterations: 2 })), [false, true, true]);
+  assert.equal(loadState(theme()).site.qa.motionMaxAttempts, 3, 'init fills the default');
+  assert.deepEqual(run(theme({ motionMaxAttempts: 2 })), [false, true, true]);
+  assert.deepEqual(run(theme({ maxIterations: 1 })), [false, false, true], 'maxIterations does not cap motion');
   const t = theme();
-  updateState(t, (s) => { delete s.site.qa.maxIterations; });
+  updateState(t, (s) => { delete s.site.qa.motionMaxAttempts; }); // state initialised before the setting existed
   assert.deepEqual(run(t), [false, false, true]);
 });
 
 test('recordMotion returns {pass, attempts, capReached, status}; a failure carries the same shape', () => {
-  const t = theme({ maxIterations: 3 });
+  const t = theme();
   const { fail, pass } = checkFiles(t);
   let err;
   try { recordMotion(t, 'home', 1, { checkFile: fail }); } catch (e) { err = e; }
@@ -274,7 +276,7 @@ test('recordMotion rejects unknown presets as EMOTION before touching state', ()
 });
 
 test('CLI record prints {pass, attempts, capReached, status} JSON on stdout for a pass and for a failure', () => {
-  const t = theme({ maxIterations: 3 });
+  const t = theme();
   const { fail, pass } = checkFiles(t);
   let r = cli('record', t, 'home', '1', fail, '--presets', 'fade-up');
   assert.equal(r.status, 1);

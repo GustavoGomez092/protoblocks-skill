@@ -43,7 +43,7 @@ export function installMotion(themeDir) {
   return r;
 }
 
-// Default attempt cap when site.qa.maxIterations is not set.
+// Default motion attempt cap when site.qa.motionMaxAttempts is not set (state initialised before it existed).
 export const MAX_ATTEMPTS = 3;
 
 // The preset names the shipped runtime knows (its REVEAL and CONTINUOUS lists), read from pb-motion.js itself.
@@ -65,7 +65,7 @@ function assertCheckFor(check, page, sec, checkFile) {
 
 // A failing check (not accepted) is persisted as an attempt on the section (check "fail"), in its own state write,
 // then reported as EMOTION with the count; e.result carries { pass, attempts, capReached, status }. A pass or an
-// acceptance replaces section.motion, which resets the count. The cap is site.qa.maxIterations (default 3).
+// acceptance replaces section.motion, which resets the count. The cap is site.qa.motionMaxAttempts (default 3).
 // Closing a section needs status "animating"; only an explicit acceptance may close it from another status.
 export function recordMotion(themeDir, slug, n, { presets = [], checkFile, accepted = false }) {
   const known = runtimePresets();
@@ -82,7 +82,7 @@ export function recordMotion(themeDir, slug, n, { presets = [], checkFile, accep
     assertCheckFor(check, page, sec, checkFile);
     return sec;
   };
-  const capOf = (s) => s.site.qa?.maxIterations ?? MAX_ATTEMPTS;
+  const capOf = (s) => s.site.qa?.motionMaxAttempts ?? MAX_ATTEMPTS;
   if (!passed && !accepted) {
     let attempts;
     let cap;

@@ -23,12 +23,20 @@
   function noop() {}
 
   var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  // pb-motion.php's failsafe shows hidden reveal elements 4 s in unless the runtime has started (this class). A
-  // runtime that starts later than that (held by a JS-delaying optimizer) finds the content already visible: its
-  // first pass marks the reveals done instead of hiding them again to animate.
+  // pb-motion.php's failsafe shows hidden reveal elements 4 s in unless html.pb-motion-on is set. The class is set,
+  // and lateness decided, at the same moment: the first init pass (DOMContentLoaded or the first page-ready), never
+  // earlier, so content is never hidden again between the script running and that pass (a slow script after this
+  // one delays DOMContentLoaded). A first pass later than the failsafe (a JS-delaying optimizer) finds the content
+  // already visible and marks its reveals done instead of hiding them again to animate.
   var FAILSAFE_MS = 4000;
-  var lateStart = !!(window.performance && performance.now() > FAILSAFE_MS - 250);
-  document.documentElement.classList.add('pb-motion-on');
+  var started = false;
+  var lateStart = false;
+  function start() {
+    if (started) return;
+    started = true;
+    lateStart = !!(window.performance && performance.now() > FAILSAFE_MS - 250);
+    document.documentElement.classList.add('pb-motion-on');
+  }
   var profile = Object.assign({}, DEFAULTS, window.pbMotionProfile || {});
 
   function gsapReady() { return !!(window.gsap && window.ScrollTrigger); }
@@ -117,37 +125,51 @@
         g.set(el, { opacity: 1 });
         if (!c) return g.fromTo(el, { opacity: 0 }, Object.assign({ opacity: 1 }, base));
         var state = { v: 0 };
-        // Hold the box at the authored text's width while counting (and while hidden at "0"), with tabular digits,
-        // so a growing number never pushes its neighbours. min-width needs a box: an inline element counts as an
-        // inline-block, which lays the same text out identically. All of it is removed when the count ends.
+        // Hold the box at least as wide as the final number while counting (and while hidden at "0"), with tabular
+        // digits, so a growing number never pushes its neighbours. The reservation is the TEXT's width (a Range over
+        // the contents), never the box's: a block-level counter takes its width from its container and must keep
+        // shrinking with it. It is the wider of the authored text and its tabular form (fonts whose default digits
+        // are proportional), re-measured on start (late web fonts) and on resize (viewport-relative font sizes).
+        // min-width needs a box: an inline element counts as an inline-block, which lays the text out identically.
+        // All of it is removed when the count ends.
         var inline = window.getComputedStyle(el).display === 'inline';
-        // Measured with the element's own digits: the authored text is what stays when the count ends.
-        var reserve = function () {
-          el.style.minWidth = '';
-          el.style.fontVariantNumeric = '';
-          el.textContent = original;
-          var cs = window.getComputedStyle(el);
-          var w = el.getBoundingClientRect().width;
-          if (cs.boxSizing !== 'border-box') w -= (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
-          el.style.minWidth = w + 'px';
-          el.style.fontVariantNumeric = 'tabular-nums';
+        var textWidth = function () {
+          var r = document.createRange();
+          r.selectNodeContents(el);
+          return r.getBoundingClientRect().width;
         };
+        var reserve = function () {
+          var shown = el.textContent;
+          el.style.minWidth = '';
+          el.textContent = original;
+          el.style.fontVariantNumeric = '';
+          var w = textWidth();
+          el.style.fontVariantNumeric = 'tabular-nums';
+          w = Math.max(w, textWidth());
+          var cs = window.getComputedStyle(el);
+          if (cs.boxSizing === 'border-box') w += (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+          el.style.minWidth = w + 'px';
+          el.textContent = shown;
+        };
+        var onResize = function () { reserve(); };
         var finish = function () {
+          window.removeEventListener('resize', onResize);
           el.textContent = original;
           el.removeAttribute('aria-label');
           el.style.minWidth = '';
           el.style.fontVariantNumeric = '';
           if (inline) el.style.display = '';
         };
-        own(el, null, finish);
+        own(el, function () { window.removeEventListener('resize', onResize); }, finish);
         el.setAttribute('aria-label', original); // screen readers get the real value while the visible text counts up
         if (inline) el.style.display = 'inline-block';
         reserve();
+        window.addEventListener('resize', onResize);
         el.textContent = formatCounter(c, 0);
         // Capped so the plugin watchdog (done 1.5 s after entering view) never cuts the count short.
         return g.to(state, Object.assign({
           v: c.value, duration: Math.min(1.2, Math.max(1, o.duration * 2)),
-          onStart: function () { reserve(); el.textContent = formatCounter(c, state.v); }, // re-measure: web fonts may have loaded since init
+          onStart: reserve, // re-measure: web fonts may have loaded since init
           onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish
         }, { ease: o.ease, delay: o.delay }));
       }
@@ -257,6 +279,7 @@
   }
 
   function init(root) {
+    start();
     var scope = root || document;
     var els = scope.querySelectorAll ? scope.querySelectorAll(SEL) : [];
     Array.prototype.forEach.call(els, function (el) {

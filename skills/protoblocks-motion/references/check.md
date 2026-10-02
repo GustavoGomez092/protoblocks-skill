@@ -10,6 +10,8 @@
 | `settledHeightDelta` | must be 0 |
 | `cls` | at most 0.01: `clsMotion` (layout shifts with a source in the anchor, motion page) minus `clsBaseline` (same measure on the reduced page: font swaps, late images, load-time scripts) |
 | `clsPage` | information: every shift on the motion page |
+
+`cls` subtracts two separate page loads. Load-time shifts do not repeat exactly, and a large `clsBaseline` (a web font swap reflowing the section, late images without dimensions) can hide a motion shift of similar size. When `clsBaseline` is above about 0.01, fix the load-time shift first (font metrics, image dimensions) or compare `clsMotion` with `clsBaseline` yourself before trusting a pass.
 | `unsettled` | empty: `[data-pb-motion][data-proto-animate]` elements not `done` within 6 s |
 | `imageErrors` | empty: anchor images broken or stalled (`pageImageWarnings` elsewhere do not fail) |
 | `pageErrors` | empty: uncaught page errors |

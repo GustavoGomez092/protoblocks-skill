@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const SCHEMA_VERSION = 1;
-export const DEFAULT_QA = Object.freeze({ mismatchMax: 0.08, heightDeltaMax: 0.03, maxIterations: 5 });
+export const DEFAULT_QA = Object.freeze({ mismatchMax: 0.08, heightDeltaMax: 0.03, maxIterations: 5, motionMaxAttempts: 3 });
 export const SECTION_STATUS = ['planned', 'building', 'verifying', 'animating', 'done', 'skipped'];
 export const PAGE_STATUS = ['planning', 'building', 'seo', 'done'];
 const DECISIONS = ['new', 'reuse', 'extend'];
@@ -30,7 +30,7 @@ export const schema = {
         wp: { type: 'object', required: ['mode'], properties: { mode: { type: 'string', enum: ['local-wrapper', 'native'] }, wrapper: str } },
         theme: { type: 'object', properties: { slug: str, forkedFrom: str } },
         tokens: obj, motionProfile: obj, navigation: obj, parts: obj,
-        qa: { type: 'object', properties: { mismatchMax: { type: 'number' }, heightDeltaMax: { type: 'number' }, maxIterations: { type: 'integer' } } },
+        qa: { type: 'object', properties: { mismatchMax: { type: 'number' }, heightDeltaMax: { type: 'number' }, maxIterations: { type: 'integer' }, motionMaxAttempts: { type: 'integer' } } },
       },
     },
     library: {

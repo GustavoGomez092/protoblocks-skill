@@ -286,6 +286,40 @@ qtest('split-lines with a late font: motion check passes with anchor CLS within 
   } finally { await srv.close().catch(() => {}); }
 });
 
+// The reserved width is the text's, not the box's: a block-level counter takes its width from its container, and
+// pinning that width would stop the container shrinking (a grid column at 1280px forced onto a 390px phone).
+qtest('counter: a block-level counter does not pin its container width (grid at 1280px, then 390px)', () => withPage('motion-counter-width.html', {}, async (page) => {
+  await page.waitForTimeout(200);
+  assert.equal(await page.$eval('#g1', (e) => e.getAttribute('data-proto-animate')), 'manual', 'precondition: not yet revealed');
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, minWidth: document.getElementById('g1').style.minWidth }));
+  assert.ok(r.sw <= r.cw, `no horizontal overflow at 390px: ${JSON.stringify(r)}`);
+}));
+
+// Fonts whose default digits are proportional: tabular digits (used while counting) can be wider than the authored
+// text, so the reserved width is the larger of the two and the neighbour does not move while the number counts.
+qtest('counter: with proportional default digits the neighbour stays put while counting', () => withPage('motion-counter-width.html', {}, async (page) => {
+  await page.waitForFunction(() => document.fonts.check('72px PbDigits'), null, { timeout: 5000 });
+  const r = await page.evaluate(async () => {
+    const d1 = document.getElementById('d1');
+    const dn = document.getElementById('dn');
+    d1.scrollIntoView({ block: 'center' });
+    const xs = [];
+    const texts = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < 3000) {
+      await new Promise((res) => requestAnimationFrame(res));
+      if (d1.getAttribute('data-proto-animate') === 'done' || d1.textContent === '1,111+') break;
+      texts.push(d1.textContent);
+      xs.push(Math.round(dn.getBoundingClientRect().left * 10) / 10);
+    }
+    return { xs: [...new Set(xs)], texts: [...new Set(texts)] };
+  });
+  assert.ok(r.texts.some((t) => t.startsWith('1,')), `counted through the thousands: ${r.texts.slice(-5)}`);
+  assert.equal(r.xs.length, 1, `neighbour x while counting: ${r.xs.join(', ')}`);
+}));
+
 qtest('marquee: clone copy is hidden from AT, inert, and has no duplicate ids', () => withPage('motion-extra.html', {}, async (page) => {
   const dom = await page.evaluate(() => {
     const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);
@@ -401,9 +435,10 @@ const failsafePage = (head) => `<!doctype html><html><head>${head}</head><body>
   <script src="/vendor/gsap.min.js"></script>
   <script src="/vendor/ScrollTrigger.min.js"></script>
   <script src="/__runtime"></script>
+  <script src="/__other"></script>
 </body></html>`;
 
-async function withFailsafePage({ reducedMotion = false, runtime = 'now' } = {}, fn) {
+async function withFailsafePage({ reducedMotion = false, runtime = 'now', otherMs = 0, waitUntil = 'domcontentloaded' } = {}, fn) {
   const srv = await serveFixtures({ '/failsafe.html': { body: failsafePage(phpHead()), type: 'text/html' } });
   const browser = await launchBrowser();
   try {
@@ -415,7 +450,13 @@ async function withFailsafePage({ reducedMotion = false, runtime = 'now' } = {},
       if (runtime === 'late') await new Promise((r) => setTimeout(r, 4600));
       return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(RUNTIME_SRC, 'utf8') });
     });
-    await page.goto(`${srv.url}/failsafe.html`, { waitUntil: 'domcontentloaded' });
+    // Another plugin's script after the runtime; when slow, it holds DOMContentLoaded back.
+    await page.route(`${srv.url}/__other`, async (route) => {
+      if (otherMs) await new Promise((r) => setTimeout(r, otherMs));
+      return route.fulfill({ contentType: 'text/javascript', body: '' });
+    });
+    await page.goto(`${srv.url}/failsafe.html`, { waitUntil });
+    await page.waitForSelector('#low', { state: 'attached' });
     await fn(page);
     await ctx.close();
   } finally { await browser.close(); await srv.close(); }
@@ -453,4 +494,23 @@ phpTest('hide CSS failsafe: a runtime starting after the failsafe leaves reveale
   for (let i = 0; i < 8; i++) { seen.push(await opacityOf(page, '#hero'), await opacityOf(page, '#low')); await page.waitForTimeout(50); }
   assert.ok(seen.every((o) => o === '1'), `never hidden again: ${seen.join(',')}`);
   assert.equal(await page.$eval('#low', (el) => el.getAttribute('data-proto-animate')), 'done');
+}));
+
+// The late runtime runs at ~4.6s but a slower script after it holds DOMContentLoaded until ~6.5s. The failsafe has
+// shown the content by then; nothing may hide it again in that window (reviewer saw 1 at 4.07s, 0 at 4.68s, 1 at 6.71s).
+phpTest('hide CSS failsafe: a late runtime followed by a slow script never re-hides content before DOMContentLoaded', () => withFailsafePage({ runtime: 'late', otherMs: 6500, waitUntil: 'commit' }, async (page) => {
+  const samples = await page.evaluate(async () => {
+    const out = [];
+    const t0 = performance.now();
+    while (performance.now() < 7500 && performance.now() - t0 < 8000) {
+      out.push({ t: Math.round(performance.now()), hero: getComputedStyle(document.getElementById('hero')).opacity, low: document.getElementById('low') ? getComputedStyle(document.getElementById('low')).opacity : null, rs: document.readyState, on: document.documentElement.classList.contains('pb-motion-on') });
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return out;
+  });
+  const shown = samples.findIndex((x) => x.hero === '1');
+  assert.ok(shown >= 0 && samples[shown].t < 4500, `failsafe showed the hero around 4s: ${JSON.stringify(samples[shown])}`);
+  const hidden = samples.slice(shown).filter((x) => x.hero !== '1' || (x.low !== null && x.low !== '1'));
+  assert.deepEqual(hidden, [], 'never re-hidden after the failsafe');
+  assert.ok(samples.some((x) => x.rs !== 'loading' && x.on), `runtime started: ${JSON.stringify(samples.at(-1))}`);
 }));

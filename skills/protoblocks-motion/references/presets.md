@@ -51,7 +51,7 @@ The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into vi
 
 ## Counters
 
-The element must contain only the number text (no child elements): it is replaced while counting. The authored text is restored at the end and `aria-label` carries it meanwhile. While counting (and while hidden at 0) the element keeps the authored text's width (`min-width`, `inline-block` if it was inline) and uses `tabular-nums`, so neighbours never move; all three are removed at the end.
+The element must contain only the number text (no child elements): it is replaced while counting. The authored text is restored at the end and `aria-label` carries it meanwhile. While counting (and while hidden at 0) the element keeps at least the final number's text width (`min-width`: the wider of the authored text and its `tabular-nums` form; `inline-block` if it was inline) and uses `tabular-nums`, so neighbours do not move while it counts; all three are removed at the end. Only the text width is reserved, so a block-level counter still shrinks with its container. In a font whose tabular digits are wider than its default ones, the box narrows by that difference when the count ends (one small shift).
 
 - Supported: `1,250+`, `$4.9M`, `98%`, `4.5`. Prefix, suffix, thousands commas and decimal places are preserved at every frame.
 - Not supported: ranges such as `10-20` (only the first number counts, the rest stays as typed); `1.250,5` style European separators (the comma is read as a thousands separator). Avoid both: use `fade-up` instead.
