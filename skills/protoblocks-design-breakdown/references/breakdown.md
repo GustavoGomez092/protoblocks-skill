@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 ## Band rules
 
 - A section is one full-width band with its own background, or a run of content separated from its neighbours by a clear vertical gap.

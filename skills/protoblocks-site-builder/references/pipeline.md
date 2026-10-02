@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 What `status.mjs` returns, what to run for each `next.action`, what each step writes to state, and how to recover. The phase skills hold the details of each step; this file only sequences them. `PB`, `THEME`, `WP` as in `SKILL.md`.
 
 ## Status
@@ -14,7 +13,7 @@ node "$PB/lib/status.mjs" "$THEME"
 
 `--root` scans `<publicPath>/wp-content/themes/*/.protoblocks/build.json`: one match prints `themeDir` (use it as `THEME`) plus the summary; none prints `{"themeDir": null, "next": {"action": "setup"}}`; several print `{"themes": [{themeDir, url, pages}], "next": null}`: ask the developer which one. With a theme folder it prints `{themeDir, site, pages: [{slug, status, sections: [{n, label, block, status, iterations, lastPass}]}], next: {action, page, section, sections, why}}`; without a `build.json` only `next` (`setup`). `[ENOTHEME]`: not a directory (wrong path, or setup never ran). `[EPARSE]` / `[EINVALID]`: see Recovery.
 
-`nextAction` takes the first page whose status is not `done`, or that has a reopened section, in state order. "Open" sections are `building`, `verifying` or `animating`; `skipped` never blocks page QA or SEO. Only actions in `ACTIONS` are ever returned.
+`nextAction` takes the first page whose status is not `done`, or that has a reopened section, in state order. A section reopened on an `seo` or `done` page goes back through Verify (and Animate) only; page QA is not re-run (the page stays `seo` or `done`). "Open" sections are `building`, `verifying` or `animating`; `skipped` never blocks page QA or SEO. Only actions in `ACTIONS` are ever returned.
 
 | State | `next.action` |
 |---|---|

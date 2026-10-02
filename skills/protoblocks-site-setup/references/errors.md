@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 ## Step 1 - Theme fork rules
 - A folder whose `style.css` has the `Proto Fork:` marker is always reused, with or without `--force`, and nothing is downloaded (re-runs work offline).
 - `--force` only applies to a foreign (non-fork) folder with the same slug.
@@ -12,7 +11,6 @@ Shell variables do not persist between Bash commands: start each command with th
 - The fork gets its own git repo, unless the themes folder is already inside a git work tree.
 
 Plugins already installed are never replaced. When a newer Proto-Blocks release exists the result says `"updateAvailable": "<version>"` on the `proto-blocks` entry; tell the developer. Only with their explicit OK re-run with `--update-plugins`, which reinstalls Proto-Blocks from the release zip. It refuses with `EPLUGINDEV` when the plugin folder is a symlink or a git checkout (WordPress would delete the checkout, `.git` included); the developer updates that copy themselves (e.g. `git pull`).
-
 
 ## Step 1 errors
 
@@ -30,7 +28,6 @@ Plugins already installed are never replaced. When a newer Proto-Blocks release 
 - `EWP` - a WP-CLI call failed; the message has its output.
 - `EMANAGEDBLOCK` - the managed block in the theme's functions.php is broken; ask the developer to fix it by hand.
 - `ENOFUNCTIONS` - the theme has no `functions.php`, so the managed assets cannot be wired; check the theme folder.
-
 
 ## Motion errors
 

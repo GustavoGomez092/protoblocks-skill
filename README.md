@@ -25,7 +25,7 @@ Add this repo as a plugin marketplace, then install the plugin:
 
 ### Manual (any Claude environment)
 
-Copy the skill folder into your personal skills directory:
+This installs the docs hub only (the `protoblocks` skill). The site builder (its skills, commands, agent and scripts) needs the plugin install above. Copy the skill folder into your personal skills directory:
 
 ```bash
 git clone https://github.com/GustavoGomez092/protoblocks-skill.git
@@ -50,7 +50,7 @@ In Claude Code:
 /plugin
 ```
 
-`protoblocks-skill` should appear under installed plugins. You can also just ask: *"List your available skills"* — `protoblocks` should be listed.
+`protoblocks-skill` should appear under installed plugins. You can also just ask: *"List your available skills"*: `protoblocks` and the site builder's skills (`protoblocks-site-builder`, `protoblocks-site-setup`, `protoblocks-design-breakdown`, `protoblocks-section-loop`, `protoblocks-motion`, `protoblocks-seo`) should be listed, and `/protoblocks-skill:build-page` should be among the commands. A manual install lists only `protoblocks`.
 
 ---
 
@@ -73,7 +73,7 @@ There is no single `/plugin update` command today — reinstalling is the suppor
 
 > Use the `plugin@marketplace` form (`protoblocks-skill@protoblocks`) for `install`/`uninstall`, and the bare marketplace name (`protoblocks`) for `marketplace update`.
 
-> **Maintainers — bump the version every release.** The install cache is keyed by the `version` in `.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`. If you push content changes without bumping that version, `marketplace update` + reinstall sees "already at 1.x" and keeps serving the **stale cached copy** — the new content never lands. Bump both `version` fields (e.g. `1.0.0` → `1.1.0`) in the same commit as any skill content change.
+> **Maintainers — bump the version every release.** The install cache is keyed by the `version` in `.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`. If you push content changes without bumping that version, `marketplace update` + reinstall sees the version it already has and keeps serving the **stale cached copy** — the new content never lands. Bump both `version` fields (e.g. `1.0.0` → `1.1.0`) in the same commit as any skill content change.
 
 ### Manual install
 
@@ -156,7 +156,7 @@ Seven skills, four commands and one agent.
 
 ### Requirements
 
-- [Local by Flywheel](https://localwp.com/) or any local WordPress with WP-CLI.
+- macOS for Local by Flywheel sites: the builder finds [Local](https://localwp.com/) sites, their PHP and WP-CLI through Local's macOS folders (`~/Library/Application Support/Local`, `/Applications/Local.app`). Elsewhere, use any local WordPress with WP-CLI on the `PATH` (preflight `--path <wp root>`).
 - Node 20.9 or newer.
 - Proto-Blocks 2.10.1 or newer (setup installs it).
 - A fork of `proto-blocks-theme` (setup creates and activates it).
@@ -196,8 +196,8 @@ Build state lives in the theme fork at `.protoblocks/build.json`. If a session i
 - Work only touches the site that preflight resolved.
 - Anything overwritten with a forced write is backed up first.
 - If you edited a page, menu or its SEO in WordPress, the builder stops with `EEDITED` and asks before overwriting.
-- Approvals (the plan, a section, a page) are recorded only after you have seen the preview.
-- Theme forks are always reused, never recreated.
+- Nothing is built before you approve the plan. Guarded actions (`--force`, `--refork`, `--update-plugins`, removing a template-part override, accepting page-QA differences) run only on an OK you give after you have seen their refusal or preview.
+- An existing theme fork is always reused. Only `--refork <slug>`, with your OK, replaces it, and the old folder is moved to `wp-content/.protoblocks/backups/` first.
 
 ### Tests for this repo
 
@@ -207,9 +207,10 @@ Build state lives in the theme fork at `.protoblocks/build.json`. If a session i
 | `npm run test:qa` | QA scripts against fixture pages. |
 | `npm run test:integration` | WP-CLI, PHP writers and theme forks on a Local site. |
 | `npm run test:integration:page` | The page integration test only. |
-| `npm run test:e2e` | The whole pipeline, design to finished page. |
+| `npm run test:e2e` | The whole pipeline, design to finished page (WP global styles off, then on). |
+| `npm run test:recover` | Restores the site after an interrupted site-test run (lock script only). |
 
-The integration and e2e tests touch a real Local site, so run them only through the lock script. See [tests/README.md](tests/README.md).
+The integration and e2e tests touch a real Local site, so run them only through the lock script `tests/pb-site-test.sh` (`tests/pb-site-test.sh <worktree> test:e2e`). Each run records what it changes in a manifest (`tests/.tmp/site-run-*.json`) and restores it on SIGTERM/SIGINT; after a run that was killed or timed out, the site tests refuse to start until `tests/pb-site-test.sh <worktree> test:recover` has restored the site. See [tests/README.md](tests/README.md).
 
 ## Docs hub
 

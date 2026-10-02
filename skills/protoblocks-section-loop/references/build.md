@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 Authoring rules (field types, controls, templates, Tailwind) live in the `protoblocks` skill; load it first. This file lists what the builder adds on top. `PB`, `THEME`, `WP` as in `SKILL.md`.
 
 ## Scaffold (decision `new`)
@@ -69,6 +68,8 @@ An index of `-1` means the slug or `n` is not in state: stop. `[EINVALID]` or `[
 | `cache` | WP-CLI problem | check `"$WP"` works; relay the error |
 | `tailwind` | compile failed (bad `@apply`, unknown token) | fix the class or token; re-run |
 | `render` | PHP error in the block's own files, empty output, missing `id="pb-gate"`, preview REST not 200 | read `detail` (message, file, line); fix `template.php`; `other` errors from other files do not fail the gate |
+
+`proto-blocks validate` may warn 'unknown type inner-blocks' on Proto-Blocks ≤ 2.10.1: expected (fixed in the plugin's next release); never switch to `innerblocks`.
 
 Re-run the gate after every fix. Pass attrs that exercise the template (all fields filled), not `{}`.
 

@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 `PB`, `THEME` as in `SKILL.md`. A section passes only through a recorded verdict.
 
 ## Procedure

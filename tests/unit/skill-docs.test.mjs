@@ -304,3 +304,49 @@ test('no doc, command, agent or script uses the wrong /protoblocks: prefix (plug
     }
   }
 });
+
+test('docs: no double blank lines in the builder skills\' prose (outside code fences)', () => {
+  for (const { skill, file } of DOCS) {
+    if (skill === 'protoblocks') continue; // the docs hub is maintained separately
+    const prose = fs.readFileSync(file, 'utf8').replace(/```[\s\S]*?```/g, '```code```');
+    assert.ok(!prose.includes('\n\n\n'), `${path.relative(ROOT, file)} has a double blank line`);
+  }
+});
+
+test('docs: pipeline says a section reopened on an seo/done page does not re-run page QA', () => {
+  const pipeline = fs.readFileSync(path.join(SKILLS, 'protoblocks-site-builder', 'references', 'pipeline.md'), 'utf8');
+  assert.match(pipeline, /reopened [^\n]*`seo`[^\n]*`done`[^\n]*page QA is not re-run/i);
+});
+
+test('docs: the inPart resume row points at header-footer.md step 7 after a failed re-verification', () => {
+  const row = fs.readFileSync(path.join(SKILLS, 'protoblocks-section-loop', 'SKILL.md'), 'utf8').split('\n').find((l) => l.startsWith('| `building` with `inPart: true`'));
+  assert.match(row, /step 7/);
+});
+
+test('docs: build.md explains the inner-blocks validate warning on Proto-Blocks <= 2.10.1', () => {
+  const build = fs.readFileSync(path.join(SKILLS, 'protoblocks-section-loop', 'references', 'build.md'), 'utf8');
+  assert.ok(build.includes("`proto-blocks validate` may warn 'unknown type inner-blocks' on Proto-Blocks ≤ 2.10.1: expected (fixed in the plugin's next release); never switch to `innerblocks`."));
+});
+
+test('docs: /setup-site takes the design as an argument', () => {
+  const cmd = fs.readFileSync(path.join(ROOT, 'commands', 'setup-site.md'), 'utf8');
+  assert.match(cmd.match(/^argument-hint: (.*)$/m)[1], /design/);
+});
+
+test('docs: README requirements, install scope, versions, approvals, refork and recovery', () => {
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const req = readme.slice(readme.indexOf('### Requirements'), readme.indexOf('### First run'));
+  assert.match(req, /macOS/, 'Local detection is macOS-only');
+  const manual = readme.slice(readme.indexOf('### Manual (any Claude environment)'), readme.indexOf('### Other agent environments'));
+  assert.match(manual, /docs hub only/i);
+  assert.match(manual, /site builder/i);
+  assert.doesNotMatch(readme, /already at 1\.x/);
+  const verify = readme.slice(readme.indexOf('## Verify it'), readme.indexOf('## Updating'));
+  assert.match(verify, /protoblocks-site-builder/);
+  const rails = readme.slice(readme.indexOf('### Safety rails'), readme.indexOf('### Tests for this repo'));
+  assert.match(rails, /after you have seen/);
+  assert.match(rails, /--refork/);
+  const tests = readme.slice(readme.indexOf('### Tests for this repo'));
+  assert.match(tests, /test:recover/);
+  assert.match(tests, /tests\/pb-site-test\.sh/);
+});

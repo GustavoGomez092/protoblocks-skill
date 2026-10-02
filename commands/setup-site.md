@@ -1,6 +1,6 @@
 ---
 description: Prepare the current Local site for a Proto-Blocks build (plugins, theme fork, motion, tokens, menus)
-argument-hint: "[project name] [--site <Local site name>]"
+argument-hint: "[project name] [design file, Figma/Penpot link or URL] [--site <Local site name>]"
 ---
 Load the `protoblocks-site-builder` skill. Arguments: $ARGUMENTS
 

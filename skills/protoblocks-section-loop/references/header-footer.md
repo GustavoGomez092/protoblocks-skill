@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 Header and footer are sections of the first page (labels `header` and `footer`, blocks `site-header` and `site-footer`) with the fixed anchors `pb-header` and `pb-footer` (set at intake/plan time, never `pb-s<n>`). On the first page they go through the same Build and Verify loop as every other section. Once, after the last section of the first page has passed, they are moved into the theme's template parts (steps 1-8 below) so they render once for every page. On later pages they are `reuse` with `inPart: true` (recorded by `plan.mjs record`): nothing to build, `page.mjs` leaves them out, and they are only verified, through the part's anchor (`#pb-header`, `#pb-footer`). `PB`, `THEME` as in `SKILL.md`.
 
 ## Differences from other sections

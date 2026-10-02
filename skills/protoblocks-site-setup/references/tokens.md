@@ -2,7 +2,6 @@
 
 Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
 
-
 `tokens.mjs apply` turns one JSON file into `tailwind-theme.css` (Tailwind v4 `@theme`), the `theme.json` palette/fonts/sizes and the site's body font, self-hosts the Google fonts, then compiles Tailwind and saves the tokens to `site.tokens` in the build state.
 
 ```bash
