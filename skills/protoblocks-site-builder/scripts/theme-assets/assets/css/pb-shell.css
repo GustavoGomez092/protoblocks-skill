@@ -1,0 +1,20 @@
+/*
+ * Managed by protoblocks-site-builder: overwritten on every install. Do not edit.
+ * Page-shell fixes so sections built to the design's full width render at that width in the proto-blocks-theme fork.
+ * Enqueued by inc/pb-assets.php (after WordPress' global styles when they are on).
+ */
+
+/* WordPress prints this reset in its global styles. With Proto-Blocks' "Disable WP Global Styles" on it is missing and
+   the browser's 8px body margin makes every full-bleed section 16px narrower than the viewport. Zero specificity, so
+   any body rule of the theme still wins. */
+:where(body) { margin: 0; }
+
+/* The theme pads `.wp-site-blocks > header/footer` with side gutters and caps them at 1440px. Once the design's header
+   and footer blocks live in the template parts (#pb-header, #pb-footer after move-parts) they draw their own full-bleed
+   band and inner container, so the part wrapper must not shrink them. */
+body .wp-site-blocks > :has(#pb-header),
+body .wp-site-blocks > :has(#pb-footer) { max-width: none; padding-inline: 0; }
+
+/* With global styles on, WordPress puts the root blockGap (24px) between the header part, the page content and the
+   footer part. The design has no such gap: sections carry their own spacing. */
+body .wp-site-blocks > * { margin-block: 0; }

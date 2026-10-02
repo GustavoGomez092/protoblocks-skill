@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureManagedBlock, installThemeAssets, MANAGED_START } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
+import { ensureManagedBlock, installThemeAssets, MANAGED_START, DEFAULT_ASSETS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 
 const FORK_STYLE = '/*\nTheme Name: T\nProto Fork: proto-blocks-theme@1.1.3\n*/';
 
@@ -77,4 +77,17 @@ test('installThemeAssets without functions.php throws ENOFUNCTIONS and copies no
   const { theme, assets } = fixture(null);
   assert.throws(() => installThemeAssets(theme, assets), (e) => e.code === 'ENOFUNCTIONS');
   assert.ok(!fs.existsSync(path.join(theme, 'inc')));
+});
+
+test('the shipped theme assets include the page-shell stylesheet (assets/css/pb-shell.css) and its enqueue', () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-theme-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), FORK_STYLE);
+  fs.writeFileSync(path.join(theme, 'functions.php'), '<?php\n');
+  const r = installThemeAssets(theme);
+  assert.ok(r.copied.includes('assets/css/pb-shell.css'), JSON.stringify(r.copied));
+  const css = fs.readFileSync(path.join(theme, 'assets/css/pb-shell.css'), 'utf8');
+  for (const rule of [':where(body) { margin: 0; }', 'body .wp-site-blocks > :has(#pb-header)', 'body .wp-site-blocks > :has(#pb-footer)', 'body .wp-site-blocks > * { margin-block: 0; }']) assert.ok(css.includes(rule), rule);
+  const php = fs.readFileSync(path.join(DEFAULT_ASSETS_DIR, 'inc/pb-assets.php'), 'utf8');
+  assert.match(php, /glob\(\$css_dir \. '\/pb-\*\.css'\)/);
+  assert.match(php, /wp_style_is\('global-styles', 'registered'\) \? \['global-styles'\] : \[\]/);
 });

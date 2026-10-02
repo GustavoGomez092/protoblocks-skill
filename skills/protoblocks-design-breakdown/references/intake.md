@@ -50,7 +50,7 @@ Say which server failed and the error. Offer the fallback: the developer exports
 
 ## Shell cap (desktop frames above 1440px)
 
-The base theme caps `header`, `main` and `footer` at `max-width: 1440px` (theme `style.css`, the `.wp-site-blocks > header, > footer, main` rule). If the desktop frame width W is greater than 1440, every section verified against it fails with `widthDelta = 1440 - W`. Before any section is verified:
+The base theme caps `header`, `main` and `footer` at `max-width: 1440px` and pads them with side gutters (theme `style.css`, the `.wp-site-blocks > header, > footer, main` rule). The builder's managed `assets/css/pb-shell.css` (installed by setup) lifts cap and gutters for the template parts that hold the design's header and footer (`#pb-header`, `#pb-footer`, after `move-parts`), resets the body margin and removes WordPress' blockGap between the parts and the page; `main` keeps the cap. So if the desktop frame width W is greater than 1440, every page section verified against it fails with `widthDelta = 1440 - W`. Before any section is verified:
 
 1. `grep -n "max-width: 1440px" "$THEME/style.css"` and edit that one rule (and the comment above it) so it reads `max-width: Wpx`. Edit the forked theme in `$THEME` only, never the upstream `proto-blocks-theme` checkout.
 2. Record it in state notes (`PI` is the page index, found by slug as in SKILL.md Step 5; this example uses W = 1600):
