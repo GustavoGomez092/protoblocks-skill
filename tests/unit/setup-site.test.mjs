@@ -108,8 +108,8 @@ test('zip cleanup runs when forkTheme throws, and the error propagates', async (
 
 test('parseArgs: values, boolean --force, defaults', () => {
   assert.deepEqual(parseArgs(['--name', 'A B', '--slug', 's', '--site', 'Local X', '--cwd', '/d', '--force']),
-    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true });
-  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false });
+    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true, updatePlugins: false });
+  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false, updatePlugins: false });
 });
 
 test('parseArgs rejects a missing value, an unknown flag and a stray positional (EUSAGE)', () => {
@@ -134,4 +134,15 @@ test('force: true is passed through to forkTheme', async () => {
   const h = harness();
   await setupSite({ name: 'Acme', force: true }, h.deps);
   assert.equal(h.calls.find((c) => c[0] === 'fork')[1].force, true);
+});
+
+test('--update-plugins is opt-in and reaches ensurePlugins', async () => {
+  assert.equal(parseArgs(['--name', 'A']).updatePlugins, false);
+  assert.equal(parseArgs(['--name', 'A', '--update-plugins']).updatePlugins, true);
+  const h = harness();
+  const seen = [];
+  h.deps.ensurePlugins = async (_wp, opts) => { seen.push(opts); return { plugins: [], options: [] }; };
+  await setupSite({ name: 'Acme' }, h.deps);
+  await setupSite({ name: 'Acme', updatePlugins: true }, h.deps);
+  assert.deepEqual(seen.map((o) => o?.updatePlugins), [false, true]);
 });
