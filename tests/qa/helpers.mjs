@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -13,7 +13,10 @@ export const qtest = (name, optsOrFn, maybeFn) => {
   const [opts, fn] = typeof optsOrFn === 'function' ? [{}, optsOrFn] : [optsOrFn, maybeFn];
   return haveQaDeps ? test(name, opts, fn) : test.skip(`${name} (run npm install in scripts/qa first)`, opts, fn);
 };
-export const tmpDir = (prefix = 'pb-qa-') => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+// Every directory made here is removed when the importing test file finishes.
+const madeDirs = [];
+after(() => { for (const d of madeDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
+export const tmpDir = (prefix = 'pb-qa-') => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); madeDirs.push(d); return d; };
 
 export async function makeImage({ width, height, bg = [255, 255, 255], rects = [] }, file) {
   const sharp = createRequire(path.join(QA_DIR, 'package.json'))('sharp');

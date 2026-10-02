@@ -64,15 +64,75 @@ qtest('openPage scrolls through the page so lazy images are complete before retu
   } finally { await b.close(); await srv.close(); }
 });
 
-qtest('shoot does not wait forever on a stalled image and reports it in imageErrors', { timeout: 20000 }, async () => {
+qtest('shoot does not wait forever on a stalled image inside the anchor and reports it in imageErrors', { timeout: 20000 }, async () => {
   const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
   const srv = await serveFixtures();
   try {
     const t = Date.now();
-    const r = await shoot({ url: `${srv.url}/hang.html`, selector: '#pb-s1', width: 800, out: path.join(tmpDir(), 'h.png') });
+    const r = await shoot({ url: `${srv.url}/hang.html`, selector: '#pb-hang', width: 800, out: path.join(tmpDir(), 'h.png') });
     assert.ok(Date.now() - t < 15000, `resolved in ${Date.now() - t}ms`);
     assert.equal(r.imageErrors.length, 1);
     assert.match(r.imageErrors[0], /__hang/);
+    assert.deepEqual(r.pageImageWarnings, []);
+  } finally { await srv.close(); }
+});
+
+qtest('shoot reports a stalled image outside the anchor as a pageImageWarning, not an imageError', { timeout: 20000 }, async () => {
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await shoot({ url: `${srv.url}/hang.html`, selector: '#pb-s1', width: 800, imageWaitMs: 1500, out: path.join(tmpDir(), 'h.png') });
+    assert.deepEqual(r.imageErrors, []);
+    assert.equal(r.pageImageWarnings.length, 1, JSON.stringify(r.pageImageWarnings));
+    assert.match(r.pageImageWarnings[0], /__hang/);
+  } finally { await srv.close(); }
+});
+
+for (const [hiddenBy, anchor] of [['display:none', '#pb-none'], ['a visibility:hidden ancestor', '#pb-vis']]) {
+  qtest(`shoot neither waits for nor reports a lazy image hidden by ${hiddenBy} inside the anchor`, { timeout: 60000 }, async () => {
+    const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+    const srv = await serveFixtures();
+    try {
+      const imageWaitMs = 15000;
+      const t = Date.now();
+      const r = await shoot({ url: `${srv.url}/hidden-lazy.html`, selector: anchor, width: 1024, imageWaitMs, out: path.join(tmpDir(), 'hl.png') });
+      const ms = Date.now() - t;
+      assert.deepEqual(r.imageErrors, [], JSON.stringify(r.imageErrors));
+      assert.deepEqual(r.pageImageWarnings, [], 'hidden images elsewhere on the page are not warnings either');
+      assert.ok(ms < imageWaitMs / 2, `took ${ms}ms (imageWaitMs ${imageWaitMs})`);
+    } finally { await srv.close(); }
+  });
+}
+
+const HEADER = [220, 38, 38];
+const SUBNAV = [22, 163, 74];
+const SECTION = [30, 58, 138];
+
+qtest('shoot keeps fixed and sticky elements outside the anchor out of a tall section render', async () => {
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const { loadRaw } = await import(path.join(QA_DIR, 'image.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await shoot({ url: `${srv.url}/fixed-header.html`, selector: '#pb-tall', width: 1024, out: path.join(tmpDir(), 'tall.png') });
+    const raw = await loadRaw(r.out);
+    assert.equal(raw.height, 1400);
+    for (const y of [0, 10, 40, 79, 80, 100, 119, 700, 1399]) {
+      for (const x of [0, 512, 1023]) assert.deepEqual(pixel(raw, x, y), SECTION, `pixel ${x},${y} is section background`);
+    }
+    assert.ok(!hasPixel(raw, HEADER), 'no fixed-header pixels anywhere in the render');
+    assert.ok(!hasPixel(raw, SUBNAV), 'no sticky-subnav pixels anywhere in the render');
+  } finally { await srv.close(); }
+});
+
+qtest('shoot still captures a fixed header when it is the anchor', async () => {
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const { loadRaw } = await import(path.join(QA_DIR, 'image.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await shoot({ url: `${srv.url}/fixed-header.html`, selector: '#pb-header', width: 1024, out: path.join(tmpDir(), 'hdr.png') });
+    const raw = await loadRaw(r.out);
+    assert.deepEqual([raw.width, raw.height], [1024, 80]);
+    assert.deepEqual(pixel(raw, 512, 40), HEADER);
   } finally { await srv.close(); }
 });
 
@@ -93,6 +153,22 @@ qtest('shoot captures uncaught page errors', async () => {
     const r = await shoot({ url: `${srv.url}/throws.html`, selector: '#pb-s1', width: 800, out: path.join(tmpDir(), 't.png') });
     assert.equal(r.pageErrors.length, 1);
     assert.match(r.pageErrors[0], /fixture-boom/);
+    assert.equal(r.status, 200);
+  } finally { await srv.close(); }
+});
+
+qtest('shoot attaches page errors and HTTP status to a thrown ENOSELECTOR', async () => {
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const srv = await serveFixtures();
+  try {
+    await assert.rejects(shoot({ url: `${srv.url}/throws.html`, selector: '#pb-s9', width: 800, out: path.join(tmpDir(), 'x.png') }), (e) => {
+      assert.equal(e.code, 'ENOSELECTOR');
+      assert.equal(e.status, 200);
+      assert.ok(Array.isArray(e.consoleErrors));
+      assert.equal(e.pageErrors.length, 1);
+      assert.match(e.pageErrors[0], /fixture-boom/);
+      return true;
+    });
   } finally { await srv.close(); }
 });
 
