@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "proto-blocks/pb-gate-ok",
+  "title": "Gate OK",
+  "category": "proto-blocks",
+  "supports": { "html": false, "anchor": true },
+  "protoBlocks": { "version": "1.0", "template": "template.php", "useTailwind": false,
+    "fields": { "heading": { "type": "text", "tagName": "h2" } } }
+}
