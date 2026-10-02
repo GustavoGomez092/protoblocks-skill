@@ -9,9 +9,13 @@ if ($slug === '' || !is_array($attrs)) { fwrite(STDERR, "Usage: render-block.php
 $attrs['anchor'] = 'pb-gate';
 
 $admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID']);
-wp_set_current_user((int) ($admins[0] ?? 0));
+if (empty($admins)) { echo wp_json_encode(['ok' => false, 'environment' => 'no administrator user found']) . "\n"; exit(0); }
+wp_set_current_user((int) $admins[0]);
 
 $block_dir = wp_normalize_path(get_stylesheet_directory() . '/proto-blocks/' . $slug . '/');
+// PHP reports resolved paths, so a symlinked theme or block folder must match by its real path too.
+$real = realpath($block_dir);
+$block_real = $real !== false ? wp_normalize_path($real . '/') : $block_dir;
 $errors = [];
 $other = [];
 $sev = function (int $no): string {
@@ -19,9 +23,10 @@ $sev = function (int $no): string {
         : (in_array($no, [E_NOTICE, E_USER_NOTICE], true) ? 'notice'
         : (in_array($no, [E_DEPRECATED, E_USER_DEPRECATED], true) ? 'deprecated' : 'error'));
 };
-set_error_handler(function ($no, $str, $file, $line) use (&$errors, &$other, $block_dir, $sev) {
+set_error_handler(function ($no, $str, $file, $line) use (&$errors, &$other, $block_dir, $block_real, $sev) {
     $entry = ['message' => $str, 'file' => $file, 'line' => $line, 'severity' => $sev($no)];
-    if (str_starts_with(wp_normalize_path($file), $block_dir)) { $errors[] = $entry; } else { $other[] = $entry; }
+    $f = wp_normalize_path($file);
+    if (str_starts_with($f, $block_dir) || str_starts_with($f, $block_real)) { $errors[] = $entry; } else { $other[] = $entry; }
     return true;
 });
 
@@ -32,10 +37,13 @@ try {
     $errors[] = ['message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine(), 'severity' => 'error'];
 }
 
-$req = new WP_REST_Request('POST', '/proto-blocks/v1/preview');
-$req->set_body_params(['template' => $slug, 'attributes' => $attrs]);
-$res = rest_do_request($req);
-restore_error_handler();
+try {
+    $req = new WP_REST_Request('POST', '/proto-blocks/v1/preview');
+    $req->set_body_params(['template' => $slug, 'attributes' => $attrs]);
+    $res = rest_do_request($req);
+} finally {
+    restore_error_handler();
+}
 
 $status = $res->get_status();
 $data = $res->get_data();

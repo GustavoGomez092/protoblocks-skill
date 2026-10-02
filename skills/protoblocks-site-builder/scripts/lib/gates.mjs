@@ -4,12 +4,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 
-// The plugin prints the JSON array and may append text ("Success: ...") on the same line.
+// The plugin prints the JSON array and may append text ("Success: ...") on the same line;
+// earlier output may itself contain "[". Try each "[" start until one parses to an array.
 function parseJsonArray(text) {
-  const start = text.indexOf('[');
-  if (start < 0) return [];
-  for (let end = text.lastIndexOf(']'); end > start; end = text.lastIndexOf(']', end - 1)) {
-    try { const r = JSON.parse(text.slice(start, end + 1)); if (Array.isArray(r)) return r; } catch { /* try a shorter slice */ }
+  for (let start = text.indexOf('['); start >= 0; start = text.indexOf('[', start + 1)) {
+    for (let end = text.lastIndexOf(']'); end > start; end = text.lastIndexOf(']', end - 1)) {
+      try { const r = JSON.parse(text.slice(start, end + 1)); if (Array.isArray(r)) return r; } catch { /* try a shorter slice */ }
+    }
   }
   return [];
 }
@@ -44,7 +45,16 @@ export function runGates(wp, { block, attrs = {} }) {
     step('tailwind', true, 'disabled');
   }
 
-  const render = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'render-block.php'), [block, JSON.stringify(attrs)]);
+  let render;
+  try {
+    render = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'render-block.php'), [block, JSON.stringify(attrs)]);
+  } catch (e) {
+    // An uncatchable PHP fatal (E_ERROR, out of memory) kills the wp process before any JSON is printed.
+    const r = e.result ?? {};
+    step('render', false, { fatal: String(r.stderr || r.stdout || e.message).slice(0, 2000) });
+    return done();
+  }
+  if (render.environment) { step('render', false, { environment: render.environment }); return done(); }
   step('render', render.ok === true, render);
   return done();
 }

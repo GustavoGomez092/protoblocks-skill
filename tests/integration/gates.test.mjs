@@ -106,3 +106,59 @@ itest('warnings from outside the block folder go to other and do not fail render
     assert.equal(r.ok, true);
   } finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }); restoreTheme(wp); }
 });
+
+itest('a parse error in a template fails the gates without throwing', async () => {
+  const wp = testWp();
+  let dir;
+  try {
+    dir = await installVariant(wp, 'pb-gate-parse', '<?php echo ;\n');
+    let r;
+    assert.doesNotThrow(() => { r = runGates(wp, { block: 'pb-gate-parse' }); });
+    assert.equal(r.ok, false);
+    assert.equal(r.steps.at(-1).ok, false);
+  } finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }); restoreTheme(wp); }
+});
+
+// ParseError is catchable in PHP; memory exhaustion is a true E_ERROR fatal that kills the wp process.
+itest('an uncatchable fatal in a template fails the render step with fatal detail', async () => {
+  const wp = testWp();
+  let dir;
+  try {
+    dir = await installVariant(wp, 'pb-gate-fatal', "<?php ini_set('memory_limit', '48M'); $a = str_repeat('x', 200000000); echo strlen($a); ?>\n");
+    let r;
+    assert.doesNotThrow(() => { r = runGates(wp, { block: 'pb-gate-fatal' }); });
+    assert.equal(r.ok, false);
+    const last = r.steps.at(-1);
+    assert.equal(last.id, 'render', JSON.stringify(r));
+    assert.equal(last.ok, false);
+    assert.ok(last.detail.fatal && /critical error|memory|fatal/i.test(last.detail.fatal), JSON.stringify(last.detail));
+  } finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }); restoreTheme(wp); }
+});
+
+itest('warnings from a symlinked block folder are attributed to the block', async () => {
+  const wp = testWp();
+  let link, real;
+  try {
+    const theme = await install(wp, 'pb-gate-ok');
+    real = path.join(theme, 'pb-gate-link-real');
+    fs.cpSync(path.join(FIX, 'pb-gate-bad'), real, { recursive: true });
+    const bj = path.join(real, 'block.json');
+    const json = JSON.parse(fs.readFileSync(bj, 'utf8'));
+    json.name = 'proto-blocks/pb-gate-link';
+    fs.writeFileSync(bj, JSON.stringify(json));
+    link = path.join(theme, 'proto-blocks', 'pb-gate-link');
+    fs.rmSync(link, { recursive: true, force: true });
+    fs.symlinkSync(real, link, 'dir');
+    wp.check(['proto-blocks', 'cache', 'clear']);
+    const r = runGates(wp, { block: 'pb-gate-link' });
+    const render = r.steps.find((s) => s.id === 'render');
+    assert.ok(render, `plugin discovery/validate did not reach render: ${JSON.stringify(r)}`);
+    assert.equal(r.ok, false);
+    assert.ok(render.detail.errors.some((e) => /Undefined array key/.test(e.message)), JSON.stringify(render.detail));
+    assert.equal(render.detail.other.length, 0, JSON.stringify(render.detail));
+  } finally {
+    if (link) fs.unlinkSync(link);
+    if (real) fs.rmSync(real, { recursive: true, force: true });
+    restoreTheme(wp);
+  }
+});
