@@ -1,5 +1,8 @@
 # Navigation and header/footer parts
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Block themes ignore classic menus: `register_nav_menus` locations and `wp_nav_menu` are not used by the theme's templates, so menus here are `wp_navigation` posts built from `core/navigation-link` and `core/navigation-submenu` blocks. They appear in the Site Editor (Appearance > Editor > Navigation).
 
 ## Spec

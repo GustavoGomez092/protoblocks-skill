@@ -1,5 +1,8 @@
 # Build state schema
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 ## Files
 
 | Path (under `wp-content/themes/<fork>/.protoblocks/`) | Purpose |

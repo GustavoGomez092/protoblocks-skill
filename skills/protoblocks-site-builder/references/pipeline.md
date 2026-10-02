@@ -1,5 +1,8 @@
 # Pipeline
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 What `status.mjs` returns, what to run for each `next.action`, what each step writes to state, and how to recover. The phase skills hold the details of each step; this file only sequences them. `PB`, `THEME`, `WP` as in `SKILL.md`.
 
 ## Status

@@ -1,5 +1,8 @@
 # JSON-LD (schema)
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Custom JSON-LD is the `schema` leaf of `seo.json`; `apply` stores it in the page's post meta `_proto_jsonld` and the theme prints it inside Yoast's single graph. It needs a proto-blocks-theme release with the Yoast JSON-LD extension (`node "$PB/lib/jsonld.mjs" check "$THEME"` prints `{"supported":true}`). Without it `apply` reports `jsonld: "unsupported"` and writes nothing.
 
 ## How the theme merges it

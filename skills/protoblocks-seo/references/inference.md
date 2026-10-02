@@ -1,5 +1,8 @@
 # SEO inference
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 What to put in `seo.json` when the developer did not provide a value. Never block on missing input; flag it.
 
 ## `seo.json` shape
