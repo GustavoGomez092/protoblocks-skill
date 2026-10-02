@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const QA_DIR = path.resolve(HERE, '../../skills/protoblocks-site-builder/scripts/qa');
 export const haveQaDeps = fs.existsSync(path.join(QA_DIR, 'node_modules', 'playwright')) && fs.existsSync(path.join(QA_DIR, 'node_modules', 'sharp'));
-export const qtest = (name, fn) => (haveQaDeps ? test(name, fn) : test.skip(`${name} (run npm install in scripts/qa first)`, fn));
+export const qtest = (name, optsOrFn, maybeFn) => {
+  const [opts, fn] = typeof optsOrFn === 'function' ? [{}, optsOrFn] : [optsOrFn, maybeFn];
+  return haveQaDeps ? test(name, opts, fn) : test.skip(`${name} (run npm install in scripts/qa first)`, opts, fn);
+};
 export const tmpDir = (prefix = 'pb-qa-') => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 
 export async function makeImage({ width, height, bg = [255, 255, 255], rects = [] }, file) {
@@ -44,6 +47,7 @@ function resolveFixture(root, pathname) {
 export function serveFixtures() {
   const root = path.join(HERE, 'fixtures');
   const server = http.createServer((req, res) => {
+    if (new URL(req.url, 'http://x').pathname === '/__hang') return; // never responds (stalled request)
     let pathname;
     try { pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { pathname = null; }
     const p = pathname && resolveFixture(root, pathname);
@@ -52,6 +56,6 @@ export function serveFixtures() {
     fs.createReadStream(p).pipe(res);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
-    resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => server.close(r)) });
+    resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => { server.close(r); server.closeAllConnections(); }) });
   }));
 }
