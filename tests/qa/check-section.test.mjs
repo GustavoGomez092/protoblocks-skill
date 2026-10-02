@@ -46,19 +46,133 @@ qtest('checkSection fails on image errors in diff and sanity modes', { timeout: 
   try {
     const d = tmpDir();
     const url = `${srv.url}/hang.html`;
-    // design identical to the render so only the image error can fail the diff
-    const design = (await shoot({ url, selector: '#pb-s1', width: 1000, imageWaitMs: 1500, out: path.join(d, 'design.png') })).out;
-    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA, imageWaitMs: 1500,
+    // design identical to the render so only the (in-anchor) image error can fail the diff
+    const design = (await shoot({ url, selector: '#pb-hang', width: 1000, imageWaitMs: 1500, out: path.join(d, 'design.png') })).out;
+    const r = await checkSection({ url, anchor: 'pb-hang', iterDir: path.join(d, 'i'), qa: QA, imageWaitMs: 1500,
       breakpoints: [{ name: 'desktop', width: 1000, design }] });
     assert.ok(r.results[0].imageErrors.length > 0, JSON.stringify(r.results[0]));
     assert.ok(r.results[0].mismatch <= QA.mismatchMax);
     assert.equal(r.results[0].numericPass, false);
     assert.equal(r.numericPass, false);
 
-    const sOnly = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'j'), qa: QA, imageWaitMs: 1500,
+    const sOnly = await checkSection({ url, anchor: 'pb-hang', iterDir: path.join(d, 'j'), qa: QA, imageWaitMs: 1500,
       breakpoints: [{ name: 'tablet', width: 834, sanityOnly: true }] });
     assert.ok(sOnly.results[0].imageErrors.length > 0);
     assert.equal(sOnly.numericPass, false, 'sanity breakpoint image errors must flip overall numericPass');
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection does not fail on a stalled image outside the anchor and reports it in pageImageWarnings', { timeout: 60000 }, async () => {
+  const { checkSection } = await load();
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/hang.html`;
+    const design = (await shoot({ url, selector: '#pb-s1', width: 1000, imageWaitMs: 1500, out: path.join(d, 'design.png') })).out;
+    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA, imageWaitMs: 1500,
+      breakpoints: [{ name: 'desktop', width: 1000, design }, { name: 'mobile', width: 390, sanityOnly: true }] });
+    for (const res of r.results) {
+      assert.deepEqual(res.imageErrors, [], JSON.stringify(res));
+      assert.equal(res.pageImageWarnings.length, 1, JSON.stringify(res));
+      assert.match(res.pageImageWarnings[0], /__hang/);
+      assert.equal(res.numericPass, true, JSON.stringify(res));
+    }
+    assert.equal(r.numericPass, true);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection does not fail or stall on lazy images hidden inside the anchor', { timeout: 60000 }, async () => {
+  const { checkSection } = await load();
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/hidden-lazy.html`;
+    const design = (await shoot({ url, selector: '#pb-none', width: 1024, out: path.join(d, 'design.png') })).out;
+    const imageWaitMs = 15000;
+    const t = Date.now();
+    const r = await checkSection({ url, anchor: 'pb-none', iterDir: path.join(d, 'i'), qa: QA, imageWaitMs,
+      breakpoints: [{ name: 'desktop', width: 1024, design }] });
+    const ms = Date.now() - t;
+    assert.deepEqual(r.results[0].imageErrors, [], JSON.stringify(r.results[0]));
+    assert.equal(r.numericPass, true, JSON.stringify(r.results[0]));
+    assert.ok(ms < imageWaitMs / 2, `took ${ms}ms (imageWaitMs ${imageWaitMs})`);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection fails a section narrower than the breakpoint with widthDelta instead of silently rescaling it', async () => {
+  const { checkSection } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    // 1200x400 solid section; once rescaled to 1440 it is 1440x480 and would match this design pixel-for-pixel
+    const design = await makeImage({ width: 1440, height: 480, bg: [30, 58, 138] }, path.join(d, 'design.png'));
+    const r = await checkSection({ url: `${srv.url}/narrow.html`, anchor: 'pb-narrow', iterDir: path.join(d, 'i'), qa: QA,
+      breakpoints: [{ name: 'desktop', width: 1440, design }] });
+    const res = r.results[0];
+    assert.equal(res.mode, 'diff');
+    assert.equal(res.mismatch, 0, 'pixels alone would pass');
+    assert.equal(res.heightDelta, 0);
+    assert.equal(res.widthDelta, -240);
+    assert.equal(res.numericPass, false);
+    assert.equal(r.numericPass, false);
+
+    const full = await checkSection({ url: `${srv.url}/narrow.html`, anchor: 'pb-narrow', iterDir: path.join(d, 'j'), qa: QA,
+      breakpoints: [{ name: 'desktop', width: 1200, design }, { name: 'mobile', width: 390, sanityOnly: true }] });
+    assert.equal(full.results[0].widthDelta, 0, 'section spans the 1200 breakpoint');
+    assert.equal(full.results[1].widthDelta, 810, 'fixed 1200px section overflows a 390 viewport');
+    assert.equal(full.results[1].numericPass, false);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection error results keep page errors, console errors and HTTP status captured before the throw', async () => {
+  const { checkSection } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const r = await checkSection({ url: `${srv.url}/throws.html`, anchor: 'pb-s9', iterDir: path.join(d, 'i'), qa: QA,
+      breakpoints: [{ name: 'm', width: 390, sanityOnly: true }] });
+    const res = r.results[0];
+    assert.equal(res.mode, 'error');
+    assert.match(res.error, /ENOSELECTOR/);
+    assert.equal(res.numericPass, false);
+    assert.equal(res.pageErrors.length, 1, JSON.stringify(res));
+    assert.match(res.pageErrors[0], /fixture-boom/);
+    assert.ok(Array.isArray(res.consoleErrors));
+    assert.equal(res.status, 200);
+    assert.doesNotMatch(res.error, /HTTP/);
+
+    const nf = await checkSection({ url: `${srv.url}/no-such-page.html`, anchor: 'pb-s1', iterDir: path.join(d, 'j'), qa: QA,
+      breakpoints: [{ name: 'm', width: 390, sanityOnly: true }] });
+    assert.equal(nf.results[0].status, 404);
+    assert.match(nf.results[0].error, /ENOSELECTOR.*HTTP 404/);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection reports the HTTP status on diff and sanity results', async () => {
+  const { checkSection } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const design = await makeImage({ width: 1440, height: 400, bg: [30, 58, 138] }, path.join(d, 'design.png'));
+    const r = await checkSection({ url: `${srv.url}/section.html`, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA,
+      breakpoints: [{ name: 'desktop', width: 1440, design }, { name: 'mobile', width: 390, sanityOnly: true }] });
+    assert.deepEqual(r.results.map((x) => x.status), [200, 200]);
+    assert.deepEqual(r.results.map((x) => typeof x.numericPass), ['boolean', 'boolean']);
+  } finally { await srv.close(); }
+});
+
+qtest('checkSection resolves a relative iterDir', async () => {
+  const { checkSection } = await load();
+  const srv = await serveFixtures();
+  try {
+    const rel = path.relative(process.cwd(), path.join(tmpDir(), 'i'));
+    assert.ok(!path.isAbsolute(rel));
+    const r = await checkSection({ url: `${srv.url}/section.html`, anchor: 'pb-s1', iterDir: rel, qa: QA, breakpoints: [{ name: 'm', width: 390, sanityOnly: true }] });
+    assert.ok(path.isAbsolute(r.results[0].render), r.results[0].render);
+    assert.equal(r.results[0].render, path.resolve(rel, 'm-render.png'));
+    assert.ok(fs.existsSync(path.resolve(rel, 'result.json')));
   } finally { await srv.close(); }
 });
 
@@ -107,6 +221,16 @@ qtest('checkSection rejects bad input with EINPUT before launching a browser', a
     'qa missing': { ...base, qa: undefined, breakpoints: [bp] },
     'mismatchMax not number': { ...base, qa: { mismatchMax: '0.1', heightDeltaMax: 0.03 }, breakpoints: [bp] },
     'heightDeltaMax missing': { ...base, qa: { mismatchMax: 0.1 }, breakpoints: [bp] },
+    'iterDir missing': { ...base, iterDir: undefined, breakpoints: [bp] },
+    'iterDir empty': { ...base, iterDir: '', breakpoints: [bp] },
+    'iterDir not string': { ...base, iterDir: 42, breakpoints: [bp] },
+    'url missing': { ...base, url: undefined, breakpoints: [bp] },
+    'url not a URL': { ...base, url: 'localhost/page', breakpoints: [bp] },
+    'url not http(s)': { ...base, url: 'file:///etc/passwd', breakpoints: [bp] },
+    'scale zero': { ...base, breakpoints: [{ ...bp, scale: 0 }] },
+    'scale negative': { ...base, breakpoints: [{ ...bp, scale: -2 }] },
+    'scale not number': { ...base, breakpoints: [{ ...bp, scale: '2' }] },
+    'masks not array': { ...base, breakpoints: [{ name: 'd', width: 1440, design, masks: { x: 0, y: 0, w: 1, h: 1 } }] },
   };
   for (const [name, input] of Object.entries(cases)) {
     await assert.rejects(() => checkSection(input), (e) => e.code === 'EINPUT' && e.message.length > 10, name);

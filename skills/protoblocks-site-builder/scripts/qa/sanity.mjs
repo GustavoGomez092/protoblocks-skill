@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { launchBrowser, openPage } from './browser.mjs';
+import { launchBrowser, openPage, withDiagnostics } from './browser.mjs';
 
 function inspect({ selector, minFontPx, minTapPx, checkTaps, pendingImages }) {
   const root = selector ? document.querySelector(selector) : document.body;
@@ -66,7 +66,7 @@ export async function sanity({ url, selector, width, height = 900, browser, minF
   const own = !browser;
   const b = browser ?? await launchBrowser();
   try {
-    const { page, context, errors } = await openPage(b, { url, width, height, imageWaitMs });
+    const { page, context, errors, status } = await openPage(b, { url, width, height, imageWaitMs });
     try {
       const raw = await page.evaluate(inspect, { selector: selector ?? null, minFontPx, minTapPx, checkTaps: width <= 480, pendingImages: errors.images });
       const seen = new Set();
@@ -74,7 +74,9 @@ export async function sanity({ url, selector, width, height = 900, browser, minF
       const found = raw.filter((i) => i.type !== 'note').filter((i) => { const k = `${i.type}|${i.detail}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 50);
       const issues = [...found, ...notes];
       // notes are informational and never fail the check
-      return { url, selector: selector ?? null, width, ok: issues.every((i) => i.type === 'note'), issues };
+      return { url, selector: selector ?? null, width, status, ok: issues.every((i) => i.type === 'note'), issues };
+    } catch (e) {
+      throw withDiagnostics(e, errors, status);
     } finally { await context.close(); }
   } finally { if (own) await b.close(); }
 }

@@ -46,6 +46,15 @@ qtest('sanity reports a missing selector', async () => {
   } finally { await srv.close(); }
 });
 
+qtest('sanity reports the HTTP status of the page', async () => {
+  const { sanity } = await load();
+  const srv = await serveFixtures();
+  try {
+    assert.equal((await sanity({ url: `${srv.url}/broken.html`, selector: '#pb-s1', width: 390 })).status, 200);
+    assert.equal((await sanity({ url: `${srv.url}/no-such-page.html`, selector: '#pb-s1', width: 390 })).status, 404);
+  } finally { await srv.close(); }
+});
+
 qtest('sanity does not flag tap targets above 480px', async () => {
   const { sanity } = await load();
   const srv = await serveFixtures();
