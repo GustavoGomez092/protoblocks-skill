@@ -199,6 +199,51 @@ qtest('re-init on the same DOM after a page-leave starts clean (split reverted o
   assert.equal(await page.$eval('#sp', (e) => e.innerHTML), 'Split heading waiting on its delay');
 }));
 
+// The plugin watchdog forces done 1.5s after an element enters view; a longer count would be cut short.
+qtest('counter: duration is capped at 1.2s even with a long profile duration', () => withPage('motion-counters.html', {}, async (page) => {
+  const durations = await page.evaluate(async () => {
+    for (let i = 0; i < 50; i++) {
+      const d = window.gsap.globalTimeline.getChildren(true, true, false).filter((t) => t.vars && t.vars.onUpdate).map((t) => t.duration());
+      if (d.length) return d;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return [];
+  });
+  assert.equal(durations.length, 3, JSON.stringify(durations));
+  for (const d of durations) assert.ok(d <= 1.2, `counter duration ${d}`);
+  assert.ok(await allDone(page, 3000));
+  assert.deepEqual(await page.$$eval('.stat span[id]', (els) => els.map((e) => e.textContent)), ['1,250+', '$4.9M', '98%']);
+}));
+
+// A counter that grows from "0" to "1,250+" widens its box and pushes every neighbour: the runtime reserves the final
+// width (min-width from the measured authored text) and uses tabular digits while counting.
+qtest('counter: a three-counter row counts with ~0 anchor CLS and leaves no reserved width behind', () => withPage('motion-counters.html', {}, async (page) => {
+  await page.evaluate(() => {
+    const anchorEl = document.getElementById('pb-s1');
+    window.__cls = 0;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if ((e.sources || []).some((x) => x.node && anchorEl.contains(x.node))) window.__cls += e.value;
+    }).observe({ type: 'layout-shift', buffered: true });
+  });
+  const during = await page.evaluate(async () => {
+    for (let i = 0; i < 50; i++) {
+      const el = document.getElementById('n1');
+      if (el.textContent !== '0' && el.textContent !== '1,250+') return { fvn: getComputedStyle(el).fontVariantNumeric, minWidth: el.style.minWidth };
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return null;
+  });
+  assert.ok(during, 'caught the counter mid-count');
+  assert.equal(during.fvn, 'tabular-nums');
+  assert.match(during.minWidth, /px$/);
+  assert.ok(await allDone(page, 3000));
+  await page.waitForTimeout(200);
+  const cls = await page.evaluate(() => window.__cls);
+  assert.ok(cls < 0.001, `anchor CLS ${cls}`);
+  const after = await page.$$eval('.stat span[id]', (els) => els.map((e) => ({ text: e.textContent, minWidth: e.style.minWidth, display: e.style.display, fvn: e.style.fontVariantNumeric })));
+  for (const a of after) assert.deepEqual({ minWidth: a.minWidth, display: a.display, fvn: a.fvn }, { minWidth: '', display: '', fvn: '' }, JSON.stringify(after));
+}));
+
 qtest('marquee: clone copy is hidden from AT, inert, and has no duplicate ids', () => withPage('motion-extra.html', {}, async (page) => {
   const dom = await page.evaluate(() => {
     const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);

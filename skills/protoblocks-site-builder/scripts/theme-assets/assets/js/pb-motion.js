@@ -111,11 +111,39 @@
         g.set(el, { opacity: 1 });
         if (!c) return g.fromTo(el, { opacity: 0 }, Object.assign({ opacity: 1 }, base));
         var state = { v: 0 };
-        var finish = function () { el.textContent = original; el.removeAttribute('aria-label'); };
+        // Hold the box at the authored text's width while counting (and while hidden at "0"), with tabular digits,
+        // so a growing number never pushes its neighbours. min-width needs a box: an inline element counts as an
+        // inline-block, which lays the same text out identically. All of it is removed when the count ends.
+        var inline = window.getComputedStyle(el).display === 'inline';
+        // Measured with the element's own digits: the authored text is what stays when the count ends.
+        var reserve = function () {
+          el.style.minWidth = '';
+          el.style.fontVariantNumeric = '';
+          el.textContent = original;
+          var cs = window.getComputedStyle(el);
+          var w = el.getBoundingClientRect().width;
+          if (cs.boxSizing !== 'border-box') w -= (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+          el.style.minWidth = w + 'px';
+          el.style.fontVariantNumeric = 'tabular-nums';
+        };
+        var finish = function () {
+          el.textContent = original;
+          el.removeAttribute('aria-label');
+          el.style.minWidth = '';
+          el.style.fontVariantNumeric = '';
+          if (inline) el.style.display = '';
+        };
         own(el, null, finish);
         el.setAttribute('aria-label', original); // screen readers get the real value while the visible text counts up
+        if (inline) el.style.display = 'inline-block';
+        reserve();
         el.textContent = formatCounter(c, 0);
-        return g.to(state, Object.assign({ v: c.value, duration: Math.max(1, o.duration * 2), onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish }, { ease: o.ease, delay: o.delay }));
+        // Capped so the plugin watchdog (done 1.5 s after entering view) never cuts the count short.
+        return g.to(state, Object.assign({
+          v: c.value, duration: Math.min(1.2, Math.max(1, o.duration * 2)),
+          onStart: function () { reserve(); el.textContent = formatCounter(c, state.v); }, // re-measure: web fonts may have loaded since init
+          onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish
+        }, { ease: o.ease, delay: o.delay }));
       }
     }
     return null;

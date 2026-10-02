@@ -32,7 +32,7 @@ Options (all optional, numbers except `start`):
 | `data-pb-distance` | px travelled; default from the profile | `fade-up`, `stagger-children`; half of it for `split-chars` |
 | `data-pb-speed` | factor, default 1 | `parallax` (drift), `marquee` (loop takes 20 s / speed) |
 
-The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + profile duration + stagger x (n - 1) must stay under about 1.4 s (counters run at least 1 s, or twice the duration). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
+The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + profile duration + stagger x (n - 1) must stay under about 1.4 s (counters run twice the duration, between 1 s and 1.2 s). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
 
 ## Choosing per pattern
 
@@ -51,7 +51,7 @@ The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into vi
 
 ## Counters
 
-The element must contain only the number text (no child elements): it is replaced while counting. The authored text is restored at the end and `aria-label` carries it meanwhile.
+The element must contain only the number text (no child elements): it is replaced while counting. The authored text is restored at the end and `aria-label` carries it meanwhile. While counting (and while hidden at 0) the element keeps the authored text's width (`min-width`, `inline-block` if it was inline) and uses `tabular-nums`, so neighbours never move; all three are removed at the end.
 
 - Supported: `1,250+`, `$4.9M`, `98%`, `4.5`. Prefix, suffix, thousands commas and decimal places are preserved at every frame.
 - Not supported: ranges such as `10-20` (only the first number counts, the rest stays as typed); `1.250,5` style European separators (the comma is read as a thousands separator). Avoid both: use `fade-up` instead.
