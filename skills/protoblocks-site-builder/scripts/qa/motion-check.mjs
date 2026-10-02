@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchBrowser, openPage } from './browser.mjs';
-import { shoot } from './shoot.mjs';
+import { shoot, anchorImages, hideChrome } from './shoot.mjs';
 import { diffImages } from './diff.mjs';
 
 export const MOTION_THRESHOLDS = {
@@ -163,7 +163,14 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       await scrollThrough(page, selector);
       const unsettled = await waitSettled(page, selector);
       await page.waitForTimeout(MOTION_THRESHOLDS.settleMs);
-      await page.locator(selector).first().screenshot({ path: settled });
+      // Same framing as shoot's reduced frame: hide fixed/sticky chrome outside the anchor, or a fixed header stitched
+      // into a taller-than-viewport anchor shot reads as settle residue. Animations are deliberately NOT disabled here:
+      // this frame is the post-motion state, and freezing animations would hide exactly the residue being measured.
+      const loc = page.locator(selector).first();
+      const motionImages = await anchorImages(loc);
+      await hideChrome(loc);
+      await page.waitForTimeout(150);
+      await loc.screenshot({ path: settled });
       const { cls, clsPage } = await page.evaluate(() => ({ cls: Math.round(window.__pbCls * 10000) / 10000, clsPage: Math.round(window.__pbClsPage * 10000) / 10000 }));
 
       const hasTaxi = await page.evaluate(() => !!(window.protoTaxi && window.protoTaxi.core && window.ScrollTrigger));
@@ -172,7 +179,9 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       // Both shots are the anchor element itself, so no masks; fullyMasked would mean nothing was compared.
       const d = await diffImages({ design: reduced, render: settled });
       const pageErrors = uniq(shot.pageErrors, errors.page);
-      const imageErrors = uniq(shot.imageErrors, errors.images);
+      // Only the anchor's images can fail the check (as in shoot); stalled images elsewhere are warnings.
+      const imageErrors = uniq(shot.imageErrors, motionImages.errors);
+      const pageImageWarnings = uniq(shot.pageImageWarnings, motionImages.warnings);
       const result = {
         url, anchor,
         settledMismatch: d.mismatch,
@@ -181,6 +190,7 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
         clsPage,
         pageErrors,
         imageErrors,
+        pageImageWarnings,
         unsettled,
         taxi,
         reduced, settled,

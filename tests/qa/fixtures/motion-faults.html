@@ -16,7 +16,8 @@
        cls-outside  same, but the block sits below the section, so only content outside the anchor shifts
        error  an uncaught exception
        stuck  an empty (invisible) reveal element whose tween is delayed 30s, so it never reports done
-       hang   a lazy image far down the page whose request never answers -->
+       hang   a lazy image far down the page, in its own section #pb-hang, whose request never answers
+              (outside #pb-s1: a page-wide warning; with anchor pb-hang: an anchor image error) -->
   <div id="shim"></div>
   <section id="pb-s1">
     <span id="stuck" data-pb-motion="fade-in" data-proto-animate="manual"></span>
@@ -35,8 +36,9 @@
       if (fault === 'error') setTimeout(function () { throw new Error('motion-fault-boom'); }, 0);
       if (fault === 'hang') {
         var pad = document.createElement('div'); pad.style.height = '8000px'; document.body.appendChild(pad);
+        var sec = document.createElement('section'); sec.id = 'pb-hang'; document.body.appendChild(sec);
         var img = document.createElement('img'); img.loading = 'lazy'; img.width = 10; img.height = 10; img.alt = 'stalled'; img.src = '/__hang';
-        document.body.appendChild(img);
+        sec.appendChild(img);
       }
       if ((fault === 'cls' || fault === 'cls-outside') && motion) {
         document.addEventListener('proto-blocks:reveal', function (e) {

@@ -82,11 +82,29 @@ qtest('motionCheck fails and names reveal elements that never settle', () => wit
 }));
 
 // imageWaitMs must reach both page loads: at the default 10s per load this cannot finish inside the timeout.
-qtest('motionCheck fails and reports images that never load', { timeout: 16000 }, () => withChecker(async (check) => {
-  const r = await check('motion-faults.html?fault=hang', { imageWaitMs: 1000 });
+qtest('motionCheck fails and reports images inside the anchor that never load', { timeout: 16000 }, () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=hang', { anchor: 'pb-hang', imageWaitMs: 1000 });
   assert.ok(r.imageErrors.length > 0 && r.imageErrors.every((src) => src.endsWith('/__hang')), JSON.stringify(r.imageErrors));
+  assert.deepEqual(r.pageImageWarnings, [], JSON.stringify(r.pageImageWarnings));
   clean(r, 'imageErrors');
   assert.equal(r.pass, false);
+}));
+
+// Same stalled image, but the anchor is #pb-s1: like shoot, only the anchor's images can fail the check.
+qtest('motionCheck reports a stalled image outside the anchor as a pageImageWarning and still passes', { timeout: 16000 }, () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=hang', { imageWaitMs: 1000 });
+  assert.ok(r.pageImageWarnings.length > 0 && r.pageImageWarnings.every((src) => src.endsWith('/__hang')), JSON.stringify(r.pageImageWarnings));
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+// The reduced shot comes from shoot, which hides fixed/sticky chrome outside the anchor. The settled shot must hide
+// it too, or a fixed header stitched into a taller-than-viewport anchor shot reads as settle residue.
+qtest('motionCheck: a fixed header and sticky nav over a tall anchor are not settled mismatch', () => withChecker(async (check) => {
+  const r = await check('motion-fixed-header.html');
+  assert.ok(r.settledMismatch <= 0.02, `settledMismatch ${r.settledMismatch}`);
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
 }));
 
 qtest('motionCheck fails when Taxi navigation leaks ScrollTriggers', () => withChecker(async (check) => {
