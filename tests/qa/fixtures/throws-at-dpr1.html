@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>throws only at device pixel ratio 1</title></head>
+<body><main><section id="pb-s1" style="height:100px;background:#1e3a8a"><h1 style="color:#fff">x</h1></section></main>
+<script>if (window.devicePixelRatio === 1) setTimeout(function () { throw new Error('dpr1-boom'); }, 0);</script>
+</body></html>
