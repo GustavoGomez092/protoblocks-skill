@@ -52,13 +52,28 @@ itest('importMedia imports once, reuses on re-import, round-trips hostile alt, a
     assert.equal(a.alt, alt);
     assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), alt);
     assert.equal(meta(wp, a.id, '_pb_source_hash'), sha1(file));
+    // reuse keeps an existing non-empty alt (it may be the developer's) and says so
     const b = imp(wp, ids, file, { alt: 'Acme logo (updated)' });
     assert.equal(b.reused, true);
     assert.equal(a.id, b.id);
-    assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), 'Acme logo (updated)');
+    assert.equal(b.altKept, true);
+    assert.equal(b.alt, alt);
+    assert.equal(b.requestedAlt, 'Acme logo (updated)');
+    assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), alt);
     const c = imp(wp, ids, file, { alt: '' });
     assert.equal(c.id, a.id);
-    assert.equal(c.alt, '');
+    assert.equal(c.altKept, true);
+    assert.equal(c.alt, alt);
+    // --force-alt replaces it
+    const d = imp(wp, ids, file, { alt: 'Acme logo (updated)', forceAlt: true });
+    assert.equal(d.altKept, false);
+    assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), 'Acme logo (updated)');
+    // an empty existing alt is filled without --force-alt
+    wp.check(['post', 'meta', 'update', String(a.id), '_wp_attachment_image_alt', '']);
+    const e = imp(wp, ids, file, { alt: 'Filled' });
+    assert.equal(e.altKept, false);
+    assert.equal(e.alt, 'Filled');
+    assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), 'Filled');
     assert.deepEqual(Object.keys(imageAttr(b)), ['id', 'url', 'alt', 'caption', 'size']);
     assert.throws(() => importMedia(wp, file, {}), (e) => e.code === 'EALT');
   } finally {

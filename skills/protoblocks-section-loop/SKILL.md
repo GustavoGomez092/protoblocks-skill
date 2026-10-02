@@ -41,7 +41,7 @@ Details and checklist: `references/build.md`.
    - `new`: scaffold with `"$WP" proto-blocks create <block> --title="<Title>" --dir=theme`, then write `block.json`, `template.php` and CSS. Never `--dir=plugin` (not a discovery path); never `--force` over an existing block.
    - `extend`: add a control whose default reproduces the current output. Never change what existing instances render.
    - `reuse`: no block changes; set attrs only.
-3. Assets cropped from the design: `node "$PB/lib/media.mjs" import "$THEME" <file> --alt "<text>"`. Alt is required. Put the printed `attr` object into `section.attrs`.
+3. Assets cropped from the design: `node "$PB/lib/media.mjs" import "$THEME" <file> --alt "<text>"`. Alt is required. Put the printed `attr` object into `section.attrs`. A re-import reuses the attachment and keeps its existing alt (`altKept: true`, `attr.alt` is the kept text); add `--force-alt` only when the developer wants it replaced.
 4. Write `block`, `attrs` and `inner` with `state.mjs set` (recipe in `references/build.md`).
 5. Gates until `ok: true`; a failing step names the cause. They read `block` and `attrs` from state (never hand-copy JSON into the shell):
    `node "$PB/lib/gates.mjs" "$THEME" --from-state <page> <n>`

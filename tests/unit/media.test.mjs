@@ -39,7 +39,7 @@ test('an alt starting with -- never appears raw in argv; payload round-trips', (
   for (const a of argv.slice(2)) assert.ok(!a.startsWith('--') && !a.includes('quotes') && !a.includes('evil'), a);
   assert.match(argv[3], /^[A-Za-z0-9_-]+$/);
   const payload = JSON.parse(Buffer.from(argv[3], 'base64url').toString('utf8'));
-  assert.deepEqual(payload, { file: fs.realpathSync(png), alt, title: '--require=/evil.php' });
+  assert.deepEqual(payload, { file: fs.realpathSync(png), alt, title: '--require=/evil.php', forceAlt: false });
 });
 
 test('file must exist and be a regular file (EFILE) of an image type (ETYPE)', () => {
@@ -98,4 +98,21 @@ test('createWp extraArgs are global WP-CLI flags placed before the command; abse
   createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec, extraArgs: ['--exec=1;'] }).run(['option', 'get', 'x']);
   assert.deepEqual(calls[0], ['--path=/s', '--exec=1;', 'option', 'get', 'x']);
   assert.deepEqual(calls[1], ['--exec=1;', 'option', 'get', 'x']);
+});
+
+test('--force-alt is a boolean flag carried in the payload (only it may replace an existing alt on reuse)', () => {
+  assert.deepEqual(parseFlags(['--alt', 'Logo', '--force-alt']), { alt: 'Logo', forceAlt: true });
+  assert.deepEqual(parseFlags(['--force-alt', '--alt', 'Logo']), { forceAlt: true, alt: 'Logo' });
+  assert.equal(parseFlags(['--force-alt=yes']), null);
+  const { wp, calls } = fakeWp();
+  importMedia(wp, png, { alt: 'new', forceAlt: true });
+  assert.equal(JSON.parse(Buffer.from(calls[0][3], 'base64url')).forceAlt, true);
+  assert.throws(() => importMedia(wp, png, { alt: 'x', forceAlt: 'yes' }), code('EUSAGE'));
+});
+
+test('a reused attachment that kept its alt passes altKept and the kept alt through to the attr', () => {
+  const { wp } = fakeWp('{"id":5,"url":"u","alt":"Original alt","altKept":true,"requestedAlt":"new","mime":"image/png","reused":true}\n');
+  const m = importMedia(wp, png, { alt: 'new' });
+  assert.equal(m.altKept, true);
+  assert.equal(imageAttr(m).alt, 'Original alt');
 });

@@ -81,7 +81,7 @@ Import every image that ends up in the page; alt text is required (use `--alt ""
 node "$PB/lib/media.mjs" import "$THEME" "$THEME/.protoblocks/artifacts/<page>/assets/hero-photo.png" --alt "Team reviewing a roadmap" [--title "Hero photo"]
 ```
 
-The result has the attachment id, URL and an `attr` object to put into the block's image attribute. List every asset cropped from the design in the plan under "replace with originals". Icons are recreated as inline SVG in the block template, not cropped.
+The result has the attachment id, URL and an `attr` object to put into the block's image attribute. A reused attachment keeps its existing non-empty alt (`altKept: true`, with the kept `alt` and your `requestedAlt`); `--force-alt` replaces it, only with the developer's OK. List every asset cropped from the design in the plan under "replace with originals". Icons are recreated as inline SVG in the block template, not cropped.
 
 Masks: regions of the design that cannot match the render (cropped stock photos, video posters, maps, placeholders, cookie banners) are recorded per section in crop pixel coordinates so visual QA ignores them:
 

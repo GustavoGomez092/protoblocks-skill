@@ -36,9 +36,11 @@ function validate(file, alt, title) {
  * The only argv passed to WP-CLI is `import <base64url JSON>`: WP-CLI parses positional args starting with `--`
  * as its own flags, so alt/title text must never travel as raw argv.
  */
-export function importMedia(wp, file, { alt, title = '' } = {}) {
+export function importMedia(wp, file, { alt, title = '', forceAlt = false } = {}) {
   const real = validate(file, alt, title);
-  const payload = Buffer.from(JSON.stringify({ file: real, alt, title }), 'utf8').toString('base64url');
+  if (typeof forceAlt !== 'boolean') throw fail('EUSAGE', 'forceAlt must be a boolean.');
+  // On a reused attachment an existing non-empty alt is kept (altKept: true, alt = the kept value) unless forceAlt.
+  const payload = Buffer.from(JSON.stringify({ file: real, alt, title, forceAlt }), 'utf8').toString('base64url');
   const out = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'media.php'), ['import', payload]);
   if (out?.error) {
     const { code = 'EMEDIA', message, id } = out.error;
@@ -50,10 +52,11 @@ export function importMedia(wp, file, { alt, title = '' } = {}) {
 
 export const imageAttr = (m) => ({ id: m.id, url: m.url, alt: m.alt, caption: '', size: 'full' });
 
-/** Returns { alt?, title? } (null = flag given without a value) or null for unknown/stray arguments. */
+/** Returns { alt?, title?, forceAlt? } (null = flag given without a value) or null for unknown/stray arguments. */
 export function parseFlags(args) {
   const flags = {};
   for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--force-alt') { flags.forceAlt = true; continue; }
     const m = /^--(alt|title)(?:=([\s\S]*))?$/.exec(args[i]);
     if (!m) return null;
     if (m[2] !== undefined) { flags[m[1]] = m[2]; continue; }
@@ -64,13 +67,13 @@ export function parseFlags(args) {
   return flags;
 }
 
-const USAGE = 'Usage: node media.mjs import <themeDir> <file> --alt "<text>" [--title T]\n';
+const USAGE = 'Usage: node media.mjs import <themeDir> <file> --alt "<text>" [--title T] [--force-alt]\n';
 
 function main(argv) {
   const [cmd, themeDir, file, ...rest] = argv;
   const flags = parseFlags(rest);
   if (cmd !== 'import' || !themeDir || !file || !flags || flags.title === null) { process.stderr.write(USAGE); process.exit(64); }
-  const m = importMedia(createWp(loadRuntime(themeDir)), file, { alt: flags.alt ?? undefined, title: flags.title });
+  const m = importMedia(createWp(loadRuntime(themeDir)), file, { alt: flags.alt ?? undefined, title: flags.title, forceAlt: flags.forceAlt === true });
   process.stdout.write(`${JSON.stringify({ ...m, attr: imageAttr(m) }, null, 2)}\n`);
 }
 

@@ -1,7 +1,9 @@
 <?php
 /**
  * Import a local file into the Media Library once (dedupe by SHA-1).
- * Usage: wp eval-file media.php import <base64url JSON {file, alt, title}>
+ * Usage: wp eval-file media.php import <base64url JSON {file, alt, title, forceAlt}>
+ * Reusing an attachment keeps its existing non-empty alt (it may be the developer's) and reports altKept: true with
+ * that alt and the requestedAlt; forceAlt replaces it. An empty existing alt is always filled.
  * The payload is a single argument so alt/title text can never be parsed as WP-CLI flags.
  * Prints one JSON line: the result, or {"error":{"code","message"[, "id"]}}.
  */
@@ -26,13 +28,16 @@ if (!is_array($p) || !is_string($p['file'] ?? null) || !is_string($p['alt'] ?? n
 $file = $p['file'];
 $alt = $p['alt'];
 $title = (string) ($p['title'] ?? '');
+$force_alt = ($p['forceAlt'] ?? false) === true;
 if (strlen($alt) > 4000 || mb_strlen($alt) > 1000) { $fail('EALT', 'Alt text is longer than 1000 characters'); }
 if (!path_is_absolute($file)) { $fail('EUSAGE', 'The file path must be absolute'); }
 if (mb_strlen($title) > 200) { $fail('ETITLE', 'Title is longer than 200 characters'); }
 if (!is_file($file) || !is_readable($file)) { $fail('EFILE', "Cannot read {$file}"); }
 
-$result = function (int $id, string $alt, bool $reused) {
-    return ['id' => $id, 'url' => wp_get_attachment_url($id), 'alt' => $alt, 'mime' => get_post_mime_type($id), 'reused' => $reused];
+$result = function (int $id, string $alt, bool $reused, bool $kept = false, ?string $requested = null) {
+    $r = ['id' => $id, 'url' => wp_get_attachment_url($id), 'alt' => $alt, 'altKept' => $kept, 'mime' => get_post_mime_type($id), 'reused' => $reused];
+    if ($kept) { $r['requestedAlt'] = $requested; }
+    return $r;
 };
 $set_meta = function (int $id, string $key, string $value): bool {
     // update_post_meta returns false both on failure and when the value is unchanged; verify by reading back.
@@ -45,6 +50,11 @@ $found = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit', 'nu
 foreach ($found as $cand) {
     $path = get_attached_file((int) $cand);
     if ($path && is_readable($path)) {
+        $old = (string) get_post_meta((int) $cand, '_wp_attachment_image_alt', true);
+        if ($old !== '' && $old !== $alt && !$force_alt) {
+            echo wp_json_encode($result((int) $cand, $old, true, true, $alt)) . "\n";
+            return;
+        }
         if (!$set_meta((int) $cand, '_wp_attachment_image_alt', $alt)) { $fail('EMETA', 'Could not update alt text on the reused attachment', (int) $cand); }
         echo wp_json_encode($result((int) $cand, $alt, true)) . "\n";
         return;
