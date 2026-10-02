@@ -16,6 +16,8 @@ Every leaf is `{ "value": ..., "inferred": true|false, "why": "..." }`. `why` is
 | `ogImage` | `{ "file": "<path to png>" }` (imported) or `{ "id": <attachment id> }` |
 | `organization` | `{ "name": "...", "logo": { "file": "..." } or { "id": N }, "socials": ["https://..."] }` |
 
+Pitfall: a flat leaf such as `"ogImage": { "file": "og.png", "inferred": false }` has no `value` and is rejected with `[ESEO]`; nest it as `{ "value": { "file": ... }, "inferred": false }`.
+
 Open Graph and Twitter titles are the SEO title with the vars removed and any dangling separator trimmed; their descriptions equal the meta description. You do not set them.
 
 A complete example (the title leaves room for the site name and separator, so it passes without site context; `apply` re-checks it with the real name):

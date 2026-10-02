@@ -78,8 +78,8 @@ node "$PB/qa/seo-audit.mjs" --url <url> --keyword "<keyword>" --out "$THEME/.pro
 
 `pass` means no `fail` check; `warn` checks are reported, not blocking. Each failing check has a `fix`.
 
-- Meta checks (title, description, og, canonical, jsonld): edit `seo.json` and re-apply.
-- Content checks (`h1-count`, `kw-h1`, `kw-first-paragraph`, `img-alt`, `heading-order`): change the section's attrs or template through the `protoblocks-section-loop` skill's Build and Verify steps, rebuild with `node "$PB/lib/page.mjs" build "$THEME" <page>`, and re-run visual QA for every section whose markup changed (`qa-input.mjs prepare`, the visual-qa agent, `qa-input.mjs record`). Do not duplicate those steps here.
+- Meta checks (`kw-title`, `kw-description`, `title-length`, `description-length`, `og-tags`, `og-image`, `canonical`, `jsonld-parse`, `jsonld-required`): edit `seo.json` and re-apply.
+- Content checks (`h1-count`, `heading-order`, `kw-h1`, `kw-first-paragraph`, `img-alt`; warn-only `kw-slug`, `internal-link`): change the section's attrs or template through the `protoblocks-section-loop` skill's Build and Verify steps, rebuild with `node "$PB/lib/page.mjs" build "$THEME" <page>`, and re-run visual QA for every section whose markup changed (`qa-input.mjs prepare`, the visual-qa agent, `qa-input.mjs record`). Do not duplicate those steps here.
 - Slug changes (`kw-slug`) only with the developer's OK.
 
 Repeat up to 3 rounds, then report what remains.

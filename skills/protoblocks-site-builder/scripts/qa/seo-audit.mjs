@@ -55,7 +55,7 @@ export function auditExtract(e, { focusKeyword, ogImageInfo }) {
   for (const raw of e.jsonld) {
     try { nodes.push(...nodesOf(JSON.parse(raw))); } catch (err) { parseErrors.push(err.message); }
   }
-  add('jsonld-parse', e.jsonld.length > 0 && parseErrors.length === 0, parseErrors.length ? parseErrors.join('; ') : `${e.jsonld.length} block(s)`, 'Fix the JSON-LD (check _pb_schema post meta and any block that prints ld+json).');
+  add('jsonld-parse', e.jsonld.length > 0 && parseErrors.length === 0, parseErrors.length ? parseErrors.join('; ') : `${e.jsonld.length} block(s)`, 'Fix the JSON-LD (check _proto_jsonld post meta and any block that prints ld+json).');
   const missing = [];
   for (const n of nodes) {
     for (const t of [].concat(n['@type'])) {

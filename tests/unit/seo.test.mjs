@@ -356,3 +356,15 @@ test('applySeo: stale schema is cleared only when the theme supports JSON-LD', (
   assert.equal(applySeo(on.wp, prior(), 'home', noSchema, { index: false }).jsonld, 'cleared');
   assert.deepEqual(on.specs[0].jsonld, []);
 });
+
+test('validateSeo rejects flat leaves without a value key', () => {
+  const base = {
+    focusKeyword: { value: 'emergency plumber', inferred: false },
+    title: { value: 'Emergency Plumber %%sep%% %%sitename%%', inferred: false },
+    description: { value: 'Burst pipe or no hot water? Our plumbers arrive fast, fix it right the first time and quote before work starts. Call or book online today.', inferred: false },
+  };
+  assert.deepEqual(validateSeo(base), []);
+  assert.ok(validateSeo({ ...base, ogImage: { file: 'og.png', inferred: false } }).includes('ogImage: needs {value, inferred}'));
+  assert.ok(validateSeo({ ...base, organization: { name: 'Acme', inferred: false } }).includes('organization: needs {value, inferred}'));
+  assert.deepEqual(validateSeo({ ...base, ogImage: { value: { file: 'og.png' }, inferred: false } }), []);
+});

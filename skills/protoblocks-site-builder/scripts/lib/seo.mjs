@@ -27,7 +27,7 @@ export function validateSeo(seo, ctx) {
   if (!seo || typeof seo !== 'object' || Array.isArray(seo)) return ['seo: must be an object of {value, inferred} leaves'];
   const errors = [];
   for (const [k, leaf] of Object.entries(seo)) {
-    if (!leaf || typeof leaf !== 'object' || typeof leaf.inferred !== 'boolean') errors.push(`${k}: needs {value, inferred}`);
+    if (!leaf || typeof leaf !== 'object' || !('value' in leaf) || typeof leaf.inferred !== 'boolean') errors.push(`${k}: needs {value, inferred}`);
     else if (leaf.inferred && !leaf.why) errors.push(`${k}: inferred values need a "why"`);
   }
   const kw = val(seo.focusKeyword);
