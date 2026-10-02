@@ -4,11 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { nextAction, summarize, ACTIONS } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
+import { nextAction, summarize, ACTIONS, assertAction, setupGaps } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 const SCRIPT = new URL('../../skills/protoblocks-site-builder/scripts/lib/status.mjs', import.meta.url).pathname;
-const base = (pages) => ({ schemaVersion: 1, site: { url: 'http://a.local', path: '/x', theme: { slug: 'acme' } }, library: {}, pages });
+// A finished setup: tokens, menus and the header part are recorded.
+const SETUP = { tokens: {}, navigation: { menus: { primary: { id: 1 } } }, parts: { header: { writtenAt: 'x' } } };
+const base = (pages) => ({ schemaVersion: 1, site: { url: 'http://a.local', path: '/x', theme: { slug: 'acme' }, ...SETUP }, library: {}, pages });
 const sec = (n, status, extra = {}) => ({ n, anchor: `pb-s${n}`, status, ...extra });
 
 test('no state → setup', () => assert.equal(nextAction(null).action, 'setup'));
@@ -63,10 +65,22 @@ test('sections out of order by n: lowest open n is chosen', () => {
   assert.deepEqual(summarize(base([pg])).pages[0].sections.map((s) => s.n), [1, 2, 3]);
 });
 
-test('seo page with open sections still goes to seo', () => {
-  const pg = { slug: 'home', status: 'seo', sections: [sec(1, 'done'), sec(2, 'building')] };
-  const r = nextAction(base([pg]));
-  assert.deepEqual([r.action, r.page, r.section], ['seo', 'home', undefined]);
+test('seo page with a reopened section goes back to that section before seo; planned does not count', () => {
+  const pg = (s2) => ({ slug: 'home', status: 'seo', sections: [sec(1, 'done'), sec(2, s2)] });
+  for (const [st, action] of [['building', 'section-build'], ['verifying', 'section-verify'], ['animating', 'section-animate']]) {
+    const r = nextAction(base([pg(st)]));
+    assert.deepEqual([r.action, r.page, r.section], [action, 'home', 2]);
+    assert.match(r.why, /reopened/);
+  }
+  assert.equal(nextAction(base([pg('planned')])).action, 'seo');
+  assert.equal(nextAction(base([pg('skipped')])).action, 'seo');
+});
+
+test('a done page with a reopened section is resumed before the next page', () => {
+  const home = { slug: 'home', status: 'done', sections: [sec(1, 'done'), sec(2, 'verifying')] };
+  const about = { slug: 'about', status: 'planning', sections: [] };
+  assert.deepEqual([nextAction(base([home, about])).action, nextAction(base([home, about])).page], ['section-verify', 'home']);
+  assert.equal(nextAction(base([{ ...home, sections: [sec(1, 'done')] }])).action, 'ask-more-pages');
 });
 
 test('page QA not passed with all sections closed stays page-qa; pass flag false does not skip', () => {
@@ -98,7 +112,7 @@ test('CLI: missing state file prints setup', () => {
 
 test('CLI: existing state prints summary; no arg exits 64', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'status-'));
-  initState(dir, { url: 'http://a.local', path: '/x', theme: { slug: 'acme' } });
+  initState(dir, { url: 'http://a.local', path: '/x', theme: { slug: 'acme' }, ...SETUP });
   const r = spawnSync('node', [SCRIPT, dir], { encoding: 'utf8' });
   const out = JSON.parse(r.stdout);
   assert.deepEqual([out.site.theme, out.next.action], ['acme', 'ask-more-pages']);
@@ -155,6 +169,7 @@ test('ACTIONS lists exactly the actions nextAction returns', () => {
     ...['planned', 'building', 'verifying', 'animating'].map((st) => base([pg('building', [sec(1, st)], { plan: { approvedAt: 'x' } })])),
     base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' } })]),
     base([pg('seo', [sec(1, 'done')], { pageQa: { pass: true } })]),
+    base([pg('building', [sec(1, 'done', { anchor: 'pb-header' })], { plan: { approvedAt: 'x' } })]),
   ];
   assert.deepEqual([...new Set(states.map((s) => nextAction(s).action))].sort(), [...ACTIONS].sort());
   assert.ok(Object.isFrozen(ACTIONS));
@@ -170,4 +185,75 @@ test('every action has a row in the orchestrator SKILL.md action table and a pip
   for (const a of rowActions) assert.ok(ACTIONS.includes(a), `SKILL.md action table row \`${a}\` is not an action nextAction returns`);
   const pipeline = fs.readFileSync(path.join(dir, 'references', 'pipeline.md'), 'utf8');
   for (const a of ACTIONS) assert.match(pipeline, new RegExp(`^### \`${a}\``, 'm'), `pipeline.md has no "### \`${a}\`" section`);
+});
+
+test('setup is incomplete until tokens, menus and the header part are recorded', () => {
+  const pages = [{ slug: 'home', status: 'planning', sections: [] }];
+  const without = (key) => { const st = base(pages); delete st.site[key]; return st; };
+  for (const [key, re] of [['tokens', /site\.tokens/], ['navigation', /site\.navigation\.menus/], ['parts', /site\.parts\.header/]]) {
+    const r = nextAction(without(key));
+    assert.equal(r.action, 'setup', key);
+    assert.match(r.why, re);
+  }
+  const noMenus = base(pages); noMenus.site.navigation = {};
+  assert.equal(nextAction(noMenus).action, 'setup');
+  const footerOnly = base(pages); footerOnly.site.parts = { footer: { writtenAt: 'x' } };
+  assert.equal(nextAction(footerOnly).action, 'setup');
+  assert.deepEqual(setupGaps(base(pages)), []);
+  assert.equal(nextAction(base(pages)).action, 'breakdown');
+});
+
+test('move-parts: the first page header/footer passed as sections and are not in the parts yet', () => {
+  const home = (extra = {}) => ({ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(1, 'done', { anchor: 'pb-header', ...extra }), sec(2, 'done'), sec(3, 'done', { anchor: 'pb-footer', ...extra })] });
+  const r = nextAction(base([home()]));
+  assert.deepEqual([r.action, r.page, r.sections], ['move-parts', 'home', [1, 3]]);
+  assert.match(r.why, /#pb-header, #pb-footer/);
+  assert.equal(nextAction(base([home({ inPart: true })])).action, 'page-qa', 'already in the parts');
+  // An open section comes first.
+  const open = home(); open.sections[1].status = 'verifying';
+  assert.equal(nextAction(base([open])).action, 'section-verify');
+  // A later page whose header another page already moved into the part is not asked to move it again.
+  const other = { slug: 'about', status: 'done', sections: [sec(1, 'done', { anchor: 'pb-header', inPart: true })] };
+  const later = { slug: 'later', status: 'building', sections: [sec(1, 'done', { anchor: 'pb-header' }), sec(2, 'done')] };
+  assert.equal(nextAction(base([other, later])).action, 'page-qa');
+  // Skipped header: nothing to move.
+  assert.equal(nextAction(base([{ ...home(), sections: [sec(1, 'skipped', { anchor: 'pb-header' }), sec(2, 'done')] }])).action, 'page-qa');
+});
+
+test('page QA accepted by the developer counts as passed; a fail without acceptance does not', () => {
+  const pg = (pageQa) => base([{ slug: 'home', status: 'building', sections: [sec(1, 'done')], pageQa }]);
+  const r = nextAction(pg({ pass: false, accepted: true, note: 'n' }));
+  assert.deepEqual([r.action, r.why], ['seo', 'page QA differences accepted by the developer']);
+  assert.equal(nextAction(pg({ pass: false })).action, 'page-qa');
+});
+
+test('assertAction rejects an action that is not in ACTIONS (EACTION)', () => {
+  assert.throws(() => assertAction({ action: 'deploy' }), (e) => e.code === 'EACTION');
+  assert.throws(() => assertAction(undefined), (e) => e.code === 'EACTION');
+  assert.deepEqual(assertAction({ action: 'seo' }), { action: 'seo' });
+});
+
+test('CLI --root finds the theme with a build state: none, one, several; bad usage exits 64', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'status-root-'));
+  const themes = path.join(root, 'wp-content', 'themes');
+  fs.mkdirSync(path.join(themes, 'twentytwentyfive'), { recursive: true });
+  const run = (...a) => spawnSync('node', [SCRIPT, ...a], { encoding: 'utf8' });
+  let r = run('--root', root);
+  assert.equal(r.status, 0);
+  assert.deepEqual(JSON.parse(r.stdout), { themeDir: null, next: { action: 'setup', why: 'no build state yet' } });
+  initState(path.join(themes, 'acme'), { url: 'http://a.local', path: root, theme: { slug: 'acme' }, ...SETUP });
+  r = run('--root', root);
+  const one = JSON.parse(r.stdout);
+  assert.deepEqual([one.themeDir, one.site.theme, one.next.action], [path.join(themes, 'acme'), 'acme', 'ask-more-pages']);
+  initState(path.join(themes, 'beta'), { url: 'http://a.local', path: root });
+  const many = JSON.parse(run('--root', root).stdout);
+  assert.equal(many.next, null);
+  assert.deepEqual(many.themes.map((t) => path.basename(t.themeDir)), ['acme', 'beta']);
+  assert.match(many.why, /ask the developer which one/);
+  assert.equal(run('--root').status, 64);
+  assert.equal(run('--rooot', root).status, 64);
+  assert.equal(run(root, 'extra').status, 64);
+  r = run('--root', path.join(root, 'nope'));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^\[ENOTHEME\]/);
 });

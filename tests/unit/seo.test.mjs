@@ -243,6 +243,17 @@ test('recordAudit: a failing audit keeps the status and stores pass:false; relat
   assert.equal(p.seo.audit.file, f);
 });
 
+test('recordAudit: a page with an open (reopened) section is ESTATUS and changes nothing; planned/done/skipped do not block', () => {
+  for (const st of ['building', 'verifying', 'animating']) {
+    const theme = project(seoPage({ sections: [{ n: 1, anchor: 'pb-s1', status: 'done' }, { n: 2, anchor: 'pb-s2', status: st }] }));
+    assert.throws(() => recordAudit(theme, 'home', auditFile(audit())), (e) => e.code === 'ESTATUS' && new RegExp(`2: ${st}`).test(e.message), st);
+    const p = loadState(theme).pages[0];
+    assert.deepEqual([p.status, p.seo.audit], ['seo', undefined]);
+  }
+  const theme = project(seoPage({ sections: [{ n: 1, anchor: 'pb-s1', status: 'done' }, { n: 2, anchor: 'pb-s2', status: 'skipped' }] }));
+  assert.deepEqual(recordAudit(theme, 'home', auditFile(audit())), { pass: true, status: 'done' });
+});
+
 test('recordAudit: keeps existing seo fields', () => {
   const theme = project(seoPage());
   recordAudit(theme, 'home', auditFile(audit()));
