@@ -8,6 +8,7 @@ import { refreshMenus } from './navigation.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'page.php');
 const fail = (code, message) => Object.assign(new Error(message), { code });
+const FORCE_NOTE = 'Note: --force also publishes the page if it is a draft, pending or private.';
 const USAGE = 'Usage: node page.mjs build <themeDir> <slug> [--force]\n';
 
 export const backupsDir = (themeDir) => path.join(themeDir, '.protoblocks', 'artifacts', 'backups');
@@ -62,7 +63,7 @@ export function buildPage(wp, themeDir, slug, { force = false } = {}) {
   const planned = callPayload(wp, 'plan', spec);
   if (planned.guard) {
     throw fail(planned.guard.code,
-      `${planned.guard.message} Ask the developer before overwriting; then re-run with --force. `
+      `${planned.guard.message} Ask the developer before overwriting; then re-run with --force. ${FORCE_NOTE} `
       + `Overwriting first saves the current content to ${path.join(dir, `${slug}-<postId>-<timestamp>.html`)} (and as a WordPress revision when revisions are on).`);
   }
   const backup = planned.needsBackup && planned.target ? backUp(themeDir, wp, slug, planned.target.postId) : null;
@@ -72,13 +73,17 @@ export function buildPage(wp, themeDir, slug, { force = false } = {}) {
   const r = callPayload(wp, 'write', { ...spec, backedUpHash });
   if (!r.ok) {
     if (r.code === 'ESTALE') throw fail('ESTALE', `${r.message} Nothing was overwritten; re-run the build to take a fresh backup and plan.`);
-    throw fail(r.code, `${r.message} Ask the developer before overwriting; then re-run with --force. Overwriting first saves the current content to ${path.join(dir, `${slug}-<postId>-<timestamp>.html`)}.`);
+    throw fail(r.code, `${r.message} Ask the developer before overwriting; then re-run with --force. ${FORCE_NOTE} Overwriting first saves the current content to ${path.join(dir, `${slug}-<postId>-<timestamp>.html`)}.`);
   }
   const warnings = [...(r.warnings ?? [])];
   if (backupFile && planned.target?.built && spec.expectedHash == null) {
     warnings.push(`Page ${planned.target.postId} was built by the builder but state had no stored content hash (an untracked built page), so its current content was overwritten. Backup: ${backupFile}`);
   }
-  if (r.slug && r.slug !== slug) warnings.push(`WordPress gave the page the slug "${r.slug}" instead of the requested "${slug}" (the requested one was unavailable).`);
+  const idx = loadState(themeDir).pages.findIndex((p) => p.slug === slug);
+  const recipe = (field) => `To get the builder's ${field} back, either rename the page in wp-admin to match, or clear it in state: node state.mjs set "${themeDir}" pages.${idx}.written.${field} null (then rebuild).`;
+  if (r.kept?.title) warnings.push(`Kept the developer's page title "${r.kept.title.developer}" (the builder last wrote "${r.kept.title.builder}"; state asks for "${r.kept.title.wanted}"). ${recipe('title')}`);
+  if (r.kept?.slug) warnings.push(`Kept the developer's page slug "${r.kept.slug.developer}" (the builder last wrote "${r.kept.slug.builder}"). ${recipe('slug')}`);
+  if (r.slug && r.slug !== slug && !r.kept?.slug) warnings.push(`WordPress gave the page the slug "${r.slug}" instead of the requested "${slug}" (the requested one was unavailable).`);
 
   let pendingHere = false;
   updateState(themeDir, (s) => {

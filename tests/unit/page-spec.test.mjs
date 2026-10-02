@@ -89,7 +89,8 @@ for (const code of ['EEDITED', 'ESLUGTAKEN', 'EFOREIGN']) {
     const theme = setup();
     const { wp, calls } = fake({ 'page.php:plan': plan({ guard: { code, message: `guard says ${code}`, currentHash: 'h-x' } }) });
     assert.throws(() => buildPage(wp, theme, 'home'), (e) => e.code === code && /guard says/.test(e.message) && /--force/.test(e.message)
-      && e.message.includes(path.join(theme, '.protoblocks', 'artifacts', 'backups')));
+      && e.message.includes(path.join(theme, '.protoblocks', 'artifacts', 'backups'))
+      && /--force also publishes the page if it is a draft, pending or private/.test(e.message));
     assert.deepEqual(calls.map((c) => c.sub), ['plan']);
     assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts', 'backups')), false);
     assert.equal(loadState(theme).pages[0].contentHash, 'h-old');
@@ -163,6 +164,39 @@ test('written title/slug/status are recorded in state and sent back as lastWritt
   buildPage(f2.wp, theme, 'home');
   assert.deepEqual(f2.calls[0].spec.lastWritten, written);
   assert.deepEqual(f2.calls[1].spec.lastWritten, written);
+});
+
+test('write-time ESLUGTAKEN/EEDITED messages also carry the publish note', () => {
+  for (const code of ['ESLUGTAKEN', 'EEDITED']) {
+    const theme = setup();
+    const { wp } = fake({ 'page.php:plan': plan(), 'page.php:write': { ok: false, code, message: `late ${code}` } });
+    assert.throws(() => buildPage(wp, theme, 'home'), (e) => e.code === code && /--force also publishes the page if it is a draft, pending or private/.test(e.message));
+  }
+});
+
+test('kept title/slug warnings say how to get the builder value back, and the command works', () => {
+  const theme = setup({ pageOverrides: { written: { title: 'Home', slug: 'home', postStatus: 'publish' } } });
+  const kept = { title: { developer: 'Dev T', builder: 'Home', wanted: 'New' }, slug: { developer: 'dev-s', builder: 'home' } };
+  const { wp } = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite({ slug: 'dev-s', kept, written: { title: 'Home', slug: 'home', postStatus: 'publish' } }) });
+  const r = buildPage(wp, theme, 'home');
+  const t = r.warnings.find((w) => /Kept the developer's page title "Dev T"/.test(w));
+  const sl = r.warnings.find((w) => /Kept the developer's page slug "dev-s"/.test(w));
+  assert.ok(t && /rename the page in wp-admin/.test(t) && /pages\.0\.written\.title null/.test(t), t);
+  assert.ok(sl && /rename the page in wp-admin/.test(sl) && /pages\.0\.written\.slug null/.test(sl), sl);
+  assert.equal(r.warnings.length, 2, 'the slug-differs warning must not be added when the slug was deliberately kept');
+  assert.ok(!r.warnings.some((w) => /unavailable/.test(w)));
+  // run the exact command from the warning
+  const cmd = t.match(/node state\.mjs set "([^"]+)" (\S+) null/);
+  const run = spawnSync(process.execPath, [path.resolve('skills/protoblocks-site-builder/scripts/lib/state.mjs'), 'set', cmd[1], cmd[2], 'null'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(loadState(theme).pages[0].written.title, null);
+  assert.equal(loadState(theme).pages[0].written.slug, 'home');
+});
+
+test('a slug that WordPress changed on its own (not kept) still warns', () => {
+  const theme = setup();
+  const { wp } = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite({ slug: 'home-2' }) });
+  assert.ok(buildPage(wp, theme, 'home').warnings.some((w) => /unavailable/.test(w)));
 });
 
 test('page status never regresses from seo or done', () => {

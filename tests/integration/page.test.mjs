@@ -82,7 +82,7 @@ itest('buildPage creates, rebuilds idempotently, guards hand edits, and force sa
     const backupsBefore = fs.readdirSync(bdir).length;
     const hand = '<!-- wp:paragraph --><p>hand edit</p><!-- /wp:paragraph -->';
     wp.check(['post', 'update', String(a.postId), `--post_content=${hand}`]);
-    assert.throws(() => buildPage(wp, theme, slug), (e) => e.code === 'EEDITED' && /--force/.test(e.message) && e.message.includes('backups'));
+    assert.throws(() => buildPage(wp, theme, slug), (e) => e.code === 'EEDITED' && /--force/.test(e.message) && e.message.includes('backups') && /--force also publishes/.test(e.message));
     assert.equal(content(wp, a.postId), hand, 'guard must not touch the post');
     assert.equal(fs.readdirSync(bdir).length, backupsBefore, 'a refused build writes no backup');
 
@@ -114,7 +114,8 @@ itest('foreign and non-page posts: ESLUGTAKEN, EFOREIGN, ENOTPAGE; force overwri
       const slug = foreignSlug(`s${i}`);
       const id = mkForeign(wp, created, slug, { status });
       const theme = newTheme([statePage(slug, [])]);
-      assert.throws(() => buildPage(wp, theme, slug), (e) => e.code === 'ESLUGTAKEN' && /--force/.test(e.message), status);
+      assert.throws(() => buildPage(wp, theme, slug), (e) => e.code === 'ESLUGTAKEN' && /--force/.test(e.message)
+        && (status === 'publish' || (new RegExp(`It is ${status}; --force would also publish it`).test(e.message))) && /--force also publishes/.test(e.message), status);
       assert.equal(content(wp, id), '<p>client original</p>');
     }
 
@@ -132,7 +133,7 @@ itest('foreign and non-page posts: ESLUGTAKEN, EFOREIGN, ENOTPAGE; force overwri
     const slugE = foreignSlug('byid');
     const idE = mkForeign(wp, created, slugE);
     const themeE = newTheme([statePage(slugE, undefined, { postId: idE, contentHash: 'stale' })]);
-    assert.throws(() => buildPage(wp, themeE, slugE), (e) => e.code === 'EFOREIGN' && /--force/.test(e.message));
+    assert.throws(() => buildPage(wp, themeE, slugE), (e) => e.code === 'EFOREIGN' && /--force/.test(e.message) && /--force also publishes/.test(e.message));
     assert.equal(content(wp, idE), '<p>client original</p>');
 
     // a post that is not a page: ENOTPAGE even with force
@@ -167,13 +168,19 @@ itest('the builder never reverts the developer\'s title, slug or status', async 
       assert.equal(r.postId, a.postId);
       assert.deepEqual(snap(), { post_title: 'Dev Title', post_name: devSlug, post_status: 'draft' });
       assert.ok(r.warnings.some((w) => /title/i.test(w) && /Dev Title/.test(w)), JSON.stringify(r.warnings));
-      assert.ok(r.warnings.some((w) => /slug/i.test(w) && w.includes(devSlug)));
+      assert.ok(r.warnings.some((w) => /slug/i.test(w) && w.includes(devSlug) && /state\.mjs set .*written\.slug null/.test(w)));
+      assert.ok(r.warnings.some((w) => /title/i.test(w) && /state\.mjs set .*written\.title null/.test(w)));
+      assert.ok(!r.warnings.some((w) => /unavailable/.test(w)), JSON.stringify(r.warnings));
       assert.ok(r.warnings.some((w) => /draft/.test(w) && /--force/.test(w)));
     }
 
     const f = buildPage(wp, theme, slug, { force: true });
     assert.deepEqual(snap(), { post_title: 'Dev Title', post_name: devSlug, post_status: 'publish' });
     assert.ok(f.warnings.some((w) => /republished/.test(w)));
+    // clearing written.title (the recipe in the warning) hands the title back to the builder
+    updateState(theme, (st) => { st.pages[0].written.title = null; });
+    buildPage(wp, theme, slug, { force: true });
+    assert.equal(snap().post_title, 'Builder Title 2');
     // private is treated like draft
     wp.check(['post', 'update', String(a.postId), '--post_status=private']);
     buildPage(wp, theme, slug);

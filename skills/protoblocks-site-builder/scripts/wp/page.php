@@ -59,14 +59,16 @@ if (!$target) {
 }
 
 $guard = null;
+$publishes = $target && in_array($target->post_status, ['draft', 'pending', 'private', 'future'], true)
+    ? " It is {$target->post_status}; --force would also publish it." : '';
 $current = $target ? $hash((int) $target->ID) : null;
 if ($target && !$force) {
     if (!get_post_meta($target->ID, '_pb_built', true)) {
         $guard = $via_state
-            ? ['code' => 'EFOREIGN', 'message' => "Page {$target->ID} (slug \"{$target->post_name}\", {$target->post_status}) was not created by the builder, but the build state points at it."]
-            : ['code' => 'ESLUGTAKEN', 'message' => "A page with slug \"{$slug}\" already exists ({$target->post_status}) and was not created by the builder (ID {$target->ID})."];
+            ? ['code' => 'EFOREIGN', 'message' => "Page {$target->ID} (slug \"{$target->post_name}\", {$target->post_status}) was not created by the builder, but the build state points at it.{$publishes}"]
+            : ['code' => 'ESLUGTAKEN', 'message' => "A page with slug \"{$slug}\" already exists ({$target->post_status}) and was not created by the builder (ID {$target->ID}).{$publishes}"];
     } elseif ($expected !== null && $current !== $expected) {
-        $guard = ['code' => 'EEDITED', 'message' => "Page {$target->ID} was edited outside the builder since the last write.", 'currentHash' => $current];
+        $guard = ['code' => 'EEDITED', 'message' => "Page {$target->ID} was edited outside the builder since the last write.{$publishes}", 'currentHash' => $current];
     }
 }
 
@@ -104,18 +106,16 @@ $title = (string) ($spec['title'] ?? $slug);
 $name = $slug;
 $status = 'publish';
 $last = is_array($spec['lastWritten'] ?? null) ? $spec['lastWritten'] : null;
-$kept = ['title' => false, 'slug' => false];
+$kept = ['title' => null, 'slug' => null];
 if ($target) {
     // Never silently revert the developer's choices. title/slug: if the post differs from what the builder last
     // wrote, keep the developer's value (force does not change this; force is about content). status: a builder page
     // is always published, so draft/pending/private/future means the developer unpublished it; stay that way unless forced.
     if ($last && isset($last['title']) && $target->post_title !== $last['title']) {
-        $kept['title'] = true; $title = $target->post_title;
-        $warnings[] = "Kept the developer's page title \"{$target->post_title}\" (the builder last wrote \"{$last['title']}\", state asks for \"" . ($spec['title'] ?? $slug) . "\").";
+        $kept['title'] = ['developer' => $target->post_title, 'builder' => $last['title'], 'wanted' => (string) ($spec['title'] ?? $slug)]; $title = $target->post_title;
     }
     if ($last && isset($last['slug']) && $target->post_name !== $last['slug']) {
-        $kept['slug'] = true; $name = $target->post_name;
-        $warnings[] = "Kept the developer's page slug \"{$target->post_name}\" (the builder last wrote \"{$last['slug']}\").";
+        $kept['slug'] = ['developer' => $target->post_name, 'builder' => $last['slug']]; $name = $target->post_name;
     }
     if (in_array($target->post_status, ['draft', 'pending', 'private', 'future'], true)) {
         if ($force) { $warnings[] = "Page {$target->ID} was {$target->post_status}; --force republished it."; }
@@ -143,7 +143,7 @@ if (is_wp_error($id) || !$id) { $fail('EWRITE', is_wp_error($id) ? $id->get_erro
 update_post_meta($id, '_pb_built', 1);
 clean_post_cache($id);
 $out(['ok' => true, 'postId' => (int) $id, 'slug' => get_post_field('post_name', $id), 'url' => get_permalink($id), 'contentHash' => $hash((int) $id),
-      'created' => $target === null, 'backupRevisionId' => $backup_rev, 'warnings' => $warnings,
+      'created' => $target === null, 'backupRevisionId' => $backup_rev, 'warnings' => $warnings, 'kept' => $kept,
       // What the builder itself wrote (a kept developer value stays at the builder's previous value, so it keeps being detected).
       'written' => ['title' => $kept['title'] ? $last['title'] : get_post_field('post_title', $id, 'raw'),
                     'slug' => $kept['slug'] ? $last['slug'] : get_post_field('post_name', $id), 'postStatus' => get_post_status($id)]]);
