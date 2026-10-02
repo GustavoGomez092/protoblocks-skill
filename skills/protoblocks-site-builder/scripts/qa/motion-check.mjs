@@ -35,18 +35,35 @@ async function waitSettled(page, sel) {
 }
 
 const taxiError = (msg) => { const e = new Error(msg); e.code = 'ETAXI'; return e; };
+// Taxi's only navigateTo rejection (allowInterruption:false while a transition runs); anything else is a real failure.
+const TAXI_LOCKED = 'transition is currently in progress';
+// When its fetch fails or returns non-2xx, Taxi falls back to window.location.href = url: the page reloads, and any
+// in-flight evaluate/wait dies with one of these.
+const HARD_NAV = /Execution context was destroyed|Target (page, context or browser has been )?closed|navigat|frame was detached/i;
+
+// Run one page call of a Taxi navigation, turning a hard-navigation death into ETAXI.
+async function viaTaxi(target, call) {
+  try {
+    return await call();
+  } catch (e) {
+    if (e.code !== 'ETAXI' && HARD_NAV.test(String(e && e.message))) {
+      throw taxiError(`navigateTo(${target}) fell back to a hard navigation (Taxi sets location.href when its fetch fails or is non-2xx): ${String(e.message).split('\n')[0]}`);
+    }
+    throw e;
+  }
+}
 
 // One Taxi navigation. Waits for core.isTransitioning to clear (the theme runs ~0.9s transitions with
 // allowInterruption:false), awaits navigateTo's own promise in the page so a rejection never becomes an unhandled
-// page error, retries rejections for up to taxiBusyMs (for a Taxi that exposes no flag), then waits for page-ready.
-async function navigate(page, target) {
+// page error, retries only the transition-lock rejection for up to taxiBusyMs (for a Taxi that exposes no flag),
+// then waits for page-ready. Every other failure is an immediate ETAXI.
+async function navigate(page, target, taxi) {
   const T = MOTION_THRESHOLDS;
   const deadline = Date.now() + T.taxiBusyMs;
-  let retries = 0;
   for (;;) {
-    await page.waitForFunction(() => window.protoTaxi.core.isTransitioning !== true, null, { timeout: T.taxiBusyMs, polling: 50 })
-      .catch((e) => { if (e.name !== 'TimeoutError') throw e; }); // still busy: try anyway, the rejection is handled below
-    const r = await page.evaluate(async ({ t, ms }) => {
+    await viaTaxi(target, () => page.waitForFunction(() => window.protoTaxi.core.isTransitioning !== true, null, { timeout: T.taxiBusyMs, polling: 50 })
+      .catch((e) => { if (e.name !== 'TimeoutError') throw e; })); // still busy: try anyway, the rejection is handled below
+    const r = await viaTaxi(target, () => page.evaluate(async ({ t, ms }) => {
       const n = window.__pbReady;
       let timer;
       try {
@@ -58,20 +75,21 @@ async function navigate(page, target) {
       } catch (e) {
         return { ok: false, n, error: String((e && e.message) || e) };
       } finally { clearTimeout(timer); }
-    }, { t: target, ms: T.taxiReadyTimeoutMs });
+    }, { t: target, ms: T.taxiReadyTimeoutMs }));
     if (r.ok) {
-      await page.waitForFunction((k) => window.__pbReady > k, r.n, { timeout: T.taxiReadyTimeoutMs }).catch((e) => {
+      await viaTaxi(target, () => page.waitForFunction((k) => window.__pbReady > k, r.n, { timeout: T.taxiReadyTimeoutMs }).catch((e) => {
         if (e.name !== 'TimeoutError') throw e;
         throw taxiError(`proto:page-ready was not dispatched within ${T.taxiReadyTimeoutMs}ms of navigateTo(${target})`);
-      });
+      }));
       // New triggers already past their start fire on ScrollTrigger's next internal update (~0.3s after init here),
       // then kill themselves (once). Count only after none is pending, or the count depends on timing.
-      await page.waitForFunction(() => window.ScrollTrigger.getAll().every((t) => !t.vars.once || t.start >= t.scroll()), null, { timeout: T.taxiSettleTimeoutMs, polling: 50 })
-        .catch((e) => { if (e.name !== 'TimeoutError') throw e; });
-      return retries;
+      await viaTaxi(target, () => page.waitForFunction(() => window.ScrollTrigger.getAll().every((t) => !t.vars.once || t.start >= t.scroll()), null, { timeout: T.taxiSettleTimeoutMs, polling: 50 })
+        .catch((e) => { if (e.name !== 'TimeoutError') throw e; }));
+      return;
     }
+    if (!r.error.includes(TAXI_LOCKED)) throw taxiError(`navigateTo(${target}) rejected: ${r.error}`);
     if (Date.now() >= deadline) throw taxiError(`navigateTo(${target}) kept rejecting for ${T.taxiBusyMs}ms: ${r.error}`);
-    retries += 1;
+    taxi.retries += 1; // counted as it happens, so a navigation that finally fails still reports its retries
     await page.waitForTimeout(T.taxiRetryDelayMs);
   }
 }
@@ -82,16 +100,19 @@ async function navigate(page, target) {
 // anchor must reveal again afterwards. "Away" is the page itself with a marker query, so it works for home-page
 // anchors and subdirectory installs. A navigation failure is recorded as taxi.error, never thrown.
 async function taxiCheck(page, url, sel) {
-  const away = `${url}${url.includes('?') ? '&' : '?'}pb-motion-away=1`;
+  const awayUrl = new URL(url);
+  awayUrl.searchParams.set('pb-motion-away', '1');
+  awayUrl.hash = '';
+  const away = awayUrl.href;
   await page.evaluate(() => {
     window.__pbReady = 0;
     document.addEventListener('proto:page-ready', () => { window.__pbReady += 1; });
     window.scrollTo(0, 0);
   });
-  const taxi = { checked: true, retries: 0 };
+  const taxi = { checked: true, away, retries: 0 };
   try {
     const roundTrip = async () => {
-      for (const target of [away, url]) taxi.retries += await navigate(page, target);
+      for (const target of [away, url]) await navigate(page, target, taxi);
       return page.evaluate(() => window.ScrollTrigger.getAll().length);
     };
     taxi.before = await roundTrip();

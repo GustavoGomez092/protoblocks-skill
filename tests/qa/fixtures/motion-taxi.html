@@ -30,15 +30,18 @@
   <script src="/runtime/pb-motion.js"></script>
   <script>
     // Fake Taxi, same event order as the theme: leave, kill triggers in the leaving container, swap, refresh, ready.
-    // The "away" page is any URL carrying pb-motion-away=1; any other URL must be this page, else navigateTo rejects
-    // (a real Taxi would leave the site or 404).
+    // The "away" page is any URL whose query has pb-motion-away=1; any other URL must be this page, else navigateTo
+    // rejects (a real Taxi would leave the site or 404). Like Taxi, the #fragment of the target is ignored.
     // ?leak=1    a theme script adds a global ScrollTrigger on every page-ready and never kills it.
     // ?noinit=1  page-ready names the wrong container, so the new view is never initialised.
     // ?dup=1     a second init path binds its own ScrollTrigger to every motion element on each ready; leave kills
     //            both, so counts stay stable but every element has two triggers.
     // ?noready=1 page-ready is never dispatched.
-    // ?lock=1    like allowInterruption:false, navigateTo rejects for 900ms after each ready (no flag exposed).
+    // ?lock=1    like allowInterruption:false, navigateTo rejects for 900ms after each ready (no flag exposed), with
+    //            Taxi's exact message.
     // ?lock=flag same lock, and core.isTransitioning is true while it lasts.
+    // ?reject=1  navigateTo always rejects with an unrelated error.
+    // ?hardnav=1 Taxi's fetch-failure fallback: sets location.href and never resolves.
     (function () {
       var q = new URLSearchParams(location.search);
       var view = document.querySelector('[data-taxi-view]');
@@ -54,16 +57,20 @@
         document.addEventListener('proto:page-leave', function () { extras.forEach(function (t) { t.kill(); }); extras = []; });
       }
       var core = { navigateTo: function (u) {
+        var target = new URL(u, location.href);
+        target.hash = '';
         if (Date.now() < lockedUntil) return Promise.reject(new Error('A transition is currently in progress'));
-        var away = /[?&]pb-motion-away=1(&|#|$)/.test(u);
-        if (!away && new URL(u, location.href).pathname !== location.pathname) return Promise.reject(new Error('fake taxi: unknown page ' + u));
+        if (q.has('reject')) return Promise.reject(new Error('fake taxi: network down'));
+        if (q.has('hardnav')) { location.href = target.href; return new Promise(function () {}); }
+        var away = target.searchParams.get('pb-motion-away') === '1';
+        if (!away && target.pathname !== location.pathname) return Promise.reject(new Error('fake taxi: unknown page ' + u));
         fire('proto:page-leave', { container: view });
         window.ScrollTrigger.getAll().forEach(function (t) { if (view.contains(t.trigger)) t.kill(); });
         view.innerHTML = away ? '<p>away</p>' : original;
         window.ScrollTrigger.refresh();
         return new Promise(function (resolve) {
           setTimeout(function () {
-            if (!q.has('noready')) fire('proto:page-ready', { container: q.has('noinit') ? document.createElement('div') : view, url: u });
+            if (!q.has('noready')) fire('proto:page-ready', { container: q.has('noinit') ? document.createElement('div') : view, url: target.href });
             if (q.has('lock')) {
               lockedUntil = Date.now() + 900;
               if (q.get('lock') === 'flag') { core.isTransitioning = true; setTimeout(function () { core.isTransitioning = false; }, 900); }

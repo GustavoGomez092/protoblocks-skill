@@ -152,6 +152,32 @@ qtest('motionCheck records ETAXI when page-ready never fires, and still reports 
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, 'motion-check.json'), 'utf8')), r);
 }));
 
+qtest('motionCheck: page URL with a #fragment gets a well-formed away URL and passes', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html#pb-s1');
+  const away = new URL(r.taxi.away);
+  assert.equal(away.searchParams.get('pb-motion-away'), '1', r.taxi.away);
+  assert.equal(away.hash, '', r.taxi.away);
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+qtest('motionCheck records ETAXI when Taxi falls back to a hard navigation, and still writes the report', () => withChecker(async (check) => {
+  const outDir = tmpDir();
+  const r = await check('motion-taxi.html?hardnav=1', { outDir });
+  assert.match(r.taxi.error ?? '', /^ETAXI: .*hard navigation/, JSON.stringify(r.taxi));
+  clean(r, 'taxi');
+  assert.equal(r.pass, false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, 'motion-check.json'), 'utf8')), r);
+}));
+
+qtest('motionCheck does not retry rejections other than the transition lock', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?reject=1');
+  assert.equal(r.taxi.retries, 0, JSON.stringify(r.taxi));
+  assert.match(r.taxi.error ?? '', /^ETAXI: .*fake taxi: network down/, JSON.stringify(r.taxi));
+  clean(r, 'taxi');
+  assert.equal(r.pass, false);
+}));
+
 qtest('motionCheck writes reduced.png, settled.png and motion-check.json', () => withChecker(async (check) => {
   const outDir = tmpDir();
   const r = await check('motion.html', { outDir });
