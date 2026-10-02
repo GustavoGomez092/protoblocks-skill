@@ -106,6 +106,12 @@ test('cropSections validates ranges with ERANGES before cropping anything', asyn
     { desktop: [{ n: 1, y0: 0.5, y1: 5 }] },
     { watch: [{ n: 1, y0: 0, y1: 5 }] },
     { desktop: [{ n: 1, y0: 0, y1: 5 }, { n: 2, y0: 9, y1: 3 }] },
+    // n handling: one crop per n per breakpoint; part is header|footer, on one n, the same n across breakpoints
+    { desktop: [{ n: 1, y0: 0, y1: 5 }, { n: 1, y0: 5, y1: 9 }] },
+    { desktop: [{ n: 1, y0: 0, y1: 5, part: 'sidebar' }] },
+    { desktop: [{ n: 1, y0: 0, y1: 5, part: 'header' }, { n: 2, y0: 5, y1: 9, part: 'header' }] },
+    { desktop: [{ n: 1, y0: 0, y1: 5, part: 'header' }], mobile: [{ n: 2, y0: 0, y1: 5, part: 'header' }] },
+    { desktop: [{ n: 1, y0: 0, y1: 5, part: 'header' }], mobile: [{ n: 1, y0: 0, y1: 5, part: 'footer' }] },
   ];
   for (const r of bad) await assert.rejects(() => cropSections(theme, 'home', r), (e) => e.code === 'ERANGES', JSON.stringify(r));
   assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts', 'home', 'crops')), false);

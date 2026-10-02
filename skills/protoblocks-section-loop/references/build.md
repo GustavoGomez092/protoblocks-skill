@@ -12,7 +12,7 @@ Real flags (checked against the plugin's `create` command): `--title`, `--descri
 
 ## Block checklist
 
-- `block.json` declares `"supports": { "anchor": true }`. The gate enforces it; QA targets `#pb-s<n>`.
+- `block.json` declares `"supports": { "anchor": true }`. The gate enforces it; QA targets the section anchor (`#pb-s<n>`, or `#pb-header` / `#pb-footer`).
 - The root element of `template.php` carries `<?php echo get_block_wrapper_attributes([...]); ?>` so the anchor and classes reach the DOM.
 - The root is the full-bleed band (`alignfull`, no outer max-width or margins). Put the container inside it: `max-w-[1200px] mx-auto px-6` (use the design's width). If the same container repeats on every section, record it once in `state.site.tokens.spacing` and reuse the class.
 - Style with Tailwind and the theme tokens (`text-h1`, `bg-accent`, `font-display`, `rounded-card`), never raw hex when a token exists. Add responsive prefixes (`md:`, `lg:`) that match the design's breakpoints (mobile first). Use vanilla CSS in `style.css`, scoped under the block's class, when Tailwind is awkward (pseudo-elements, complex grids, the mobile nav overlay).

@@ -28,20 +28,23 @@ The desktop frame is required; tablet and mobile are optional. `[ESCALE]` means 
 
 ## Step 2 - Segment
 
+Analyze the frame file recorded in state (JPEG frames keep `.jpg`; never assume `desktop.png`):
+
 ```bash
-node "$PB/qa/segment.mjs" analyze "$THEME/.protoblocks/artifacts/<page>/design/desktop.png"
+FRAME=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));const p=a.find((x)=>x.slug===process.argv[1]);console.log(p.design.frames.find((f)=>f.breakpoint===process.argv[2]).image)' <page> desktop)
+node "$PB/qa/segment.mjs" analyze "$FRAME"
 ```
 
-Output: `{width,height,cuts,bands}`. `background` cuts (colour change) are strong boundaries; `gap` cuts (empty rows inside one band) are candidates only. A band with `bg: null` (cut `to: null`) is a photo or gradient band: no gap candidates inside it, so read it by eye. Open the frame image and confirm every band visually. Header and footer are the first and last bands (logo + nav; legal + links). Map mobile bands to desktop sections by order and content. Write `ranges.json` in image pixels (frame pixels, not CSS px), one entry per section with the same `n` across breakpoints, then crop:
+Output: `{width,height,cuts,bands}`. `background` cuts (colour change) are strong boundaries; `gap` cuts are candidates only. A band with `bg: null` is a photo or gradient band: read it by eye. Open the frame and confirm every band. Header and footer are the first and last bands; mark them `"part":"header"` / `"part":"footer"` (they get the fixed anchors `pb-header` / `pb-footer`). Map mobile bands to desktop sections by order and content. Write `ranges.json` in frame pixels, the same `n` across breakpoints, then crop:
 
 ```json
-{"desktop":[{"n":1,"y0":0,"y1":96},{"n":2,"y0":96,"y1":820}],"mobile":[{"n":1,"y0":0,"y1":72},{"n":2,"y0":72,"y1":1500}]}
+{"desktop":[{"n":1,"y0":0,"y1":96,"part":"header"},{"n":2,"y0":96,"y1":820}],"mobile":[{"n":1,"y0":0,"y1":72,"part":"header"},{"n":2,"y0":72,"y1":1500}]}
 ```
 ```bash
 node "$PB/lib/intake.mjs" crop "$THEME" <page> ranges.json
 ```
 
-Crops land in `artifacts/<page>/crops/<bp>/pb-s<n>.png` and each section is created in state (`status: planned`, `anchor: pb-s<n>`, `crops.<bp>`).
+Crops land in `artifacts/<page>/crops/<bp>/<anchor>.png`; each section is created in state (`status: planned`, `anchor` `pb-s<n>`, or `pb-header`/`pb-footer`, `crops.<bp>`).
 
 ## Step 3 - Model each section
 
@@ -53,7 +56,7 @@ Follow `references/breakdown.md`: pattern label, content model (fewest richest r
 node "$PB/lib/library.mjs" list "$THEME"
 ```
 
-Prints one entry per block: `slug, title, description, fields, controls, innerBlocks, purpose, variants, usedOn`. An entry with an `error` is a broken block that still exists: never recreate it; tell the developer. Decide per section: `reuse` (fits as is), `extend` (additive controls only), `new`. Header and footer map to the shared `site-header`/`site-footer` blocks and template parts, built through the section loop; the parts flow is in `protoblocks-site-setup` Step 4. On later pages they are `reuse` and only verified.
+Prints one entry per block: `slug, title, description, fields, controls, innerBlocks, purpose, variants, usedOn`. An entry with an `error` is a broken block that still exists: never recreate it; tell the developer. Decide per section: `reuse` (fits as is), `extend` (additive controls only), `new`. Header and footer map to the shared `site-header`/`site-footer` blocks: built as sections on the first page, then moved into the template parts (`protoblocks-section-loop` `references/header-footer.md`). On later pages they are `reuse`, rendered by the parts, and only verified.
 
 ## Step 5 - Plan gate (mandatory)
 
@@ -63,7 +66,7 @@ Present this table, with crop paths, then STOP and wait for approval:
 
 Also list assets that will be cropped from the design ("replace with originals"). Look pages up by `slug` and sections by `n`; never assume a position (`n` need not be contiguous, and other pages may exist).
 
-After approval, record the whole plan in one atomic, validated write (`updateState`, the same lock `state.mjs set` uses). Missing sections throw before anything is saved:
+After approval, record the whole plan in one atomic, validated write (`plan.mjs record` looks the page up by slug and sections by `n`; a missing section throws before anything is saved). Header/footer rows carry `part`:
 
 <!-- test:run -->
 ```bash
@@ -71,29 +74,16 @@ cat > "$THEME/.protoblocks/plan.json" <<'JSON'
 {
   "page": "home",
   "sections": [
-    {"n": 1, "label": "Header", "decision": "new", "block": "site-header", "notes": "shared part; sticky"},
+    {"n": 1, "label": "Header", "decision": "new", "block": "site-header", "part": "header", "notes": "shared part; sticky"},
     {"n": 3, "label": "Hero", "decision": "new", "block": "hero-split", "notes": "Image right; \"Book a demo\" button"}
   ]
 }
 JSON
-PLAN="$THEME/.protoblocks/plan.json" THEME="$THEME" PB="$PB" node --input-type=module -e '
-const { updateState } = await import(process.env.PB + "/lib/state.mjs");
-const fs = await import("node:fs");
-const plan = JSON.parse(fs.readFileSync(process.env.PLAN, "utf8"));
-updateState(process.env.THEME, (s) => {
-  const page = s.pages.find((p) => p.slug === plan.page);
-  if (!page) throw new Error("No page " + plan.page + " in state");
-  for (const p of plan.sections) {
-    const sec = page.sections.find((x) => x.n === p.n);
-    if (!sec) throw new Error("No section n=" + p.n + " (run intake.mjs crop first)");
-    Object.assign(sec, { label: p.label, decision: p.decision, block: p.block, notes: p.notes });
-  }
-  page.plan = { approvedAt: new Date().toISOString(), by: "developer" };
-  page.status = "building";
-});
-'
+node "$PB/lib/plan.mjs" record "$THEME" "$THEME/.protoblocks/plan.json"
 node "$PB/lib/state.mjs" validate "$THEME"
 ```
+
+It sets `plan.approvedAt`, page status `building`, and the fixed anchors. On a later page, header/footer already live in the template parts: plan them `reuse` (anything else is `[EPLAN]`); they are recorded `inPart: true` (see `references/breakdown.md`).
 
 Secondary, for a single field: find the indexes first, then `set` (JSON values, strings quoted). Never `set` page status `building` without `pages.<i>.plan`:
 

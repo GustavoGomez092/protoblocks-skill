@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadState, updateState, stateDir } from './state.mjs';
 import { assertSlug } from './slugs.mjs';
+import { PART_ANCHORS } from './plan.mjs';
 
 export const BREAKPOINT_RANGES = { desktop: [1200, 1920], tablet: [700, 1100], mobile: [320, 480] };
 
@@ -103,34 +104,65 @@ function validateRanges(ranges) {
   for (const [bp, list] of Object.entries(ranges)) {
     if (!BREAKPOINT_RANGES[bp]) throw bad(`unknown breakpoint "${bp}"`);
     if (!Array.isArray(list)) throw bad(`${bp} must be an array`);
+    const seen = new Set();
     for (const r of list) {
       if (!r || !Number.isInteger(r.n) || r.n <= 0) throw bad(`${bp}: n must be a positive integer (${JSON.stringify(r)})`);
       if (!Number.isInteger(r.y0) || !Number.isInteger(r.y1) || r.y0 < 0 || r.y0 >= r.y1) throw bad(`${bp}: need integers 0 <= y0 < y1 (${JSON.stringify(r)})`);
+      if (seen.has(r.n)) throw bad(`${bp}: n ${r.n} appears twice (one crop per section per breakpoint)`);
+      seen.add(r.n);
+      if (r.part !== undefined && !Object.hasOwn(PART_ANCHORS, r.part)) throw bad(`${bp}: part must be "header" or "footer" (${JSON.stringify(r)})`);
     }
   }
+  // A part names one section: the same n on every breakpoint, and that n is never another part.
+  const partOfN = new Map();
+  const nOfPart = new Map();
+  for (const [bp, list] of Object.entries(ranges)) {
+    for (const r of list) {
+      if (r.part === undefined) continue;
+      if (partOfN.has(r.n) && partOfN.get(r.n) !== r.part) throw bad(`${bp}: section ${r.n} is both ${partOfN.get(r.n)} and ${r.part}`);
+      if (nOfPart.has(r.part) && nOfPart.get(r.part) !== r.n) throw bad(`${bp}: the ${r.part} is section ${nOfPart.get(r.part)} elsewhere, not ${r.n}`);
+      partOfN.set(r.n, r.part);
+      nOfPart.set(r.part, r.n);
+    }
+  }
+  return partOfN;
+}
+
+// Anchor of section n: header/footer get the fixed part anchors, an existing section keeps its anchor, else pb-s<n>.
+function anchorFor(page, n, part) {
+  if (part) {
+    const anchor = PART_ANCHORS[part];
+    const clash = page.sections.find((x) => x.n !== n && x.anchor === anchor);
+    if (clash) throw Object.assign(new Error(`Invalid crop ranges: section ${clash.n} already has the anchor ${anchor}; only one ${part} per page`), { code: 'ERANGES' });
+    return anchor;
+  }
+  return page.sections.find((x) => x.n === n)?.anchor ?? `pb-s${n}`;
 }
 
 export async function cropSections(themeDir, slug, ranges) {
   assertSlug(slug, 'page slug');
-  validateRanges(ranges);
+  const partOfN = validateRanges(ranges);
   const state = loadState(themeDir);
   const page = state.pages.find((p) => p.slug === slug);
   if (!page) throw new Error(`No page "${slug}" in state; add a frame first.`);
+  const anchors = new Map();
+  for (const list of Object.values(ranges)) for (const r of list) anchors.set(r.n, anchorFor(page, r.n, partOfN.get(r.n)));
   const { cropRanges } = await import('../qa/segment.mjs');
   const out = [];
   for (const [bp, list] of Object.entries(ranges)) {
     const frame = page.design.frames.find((f) => f.breakpoint === bp);
     if (!frame) throw new Error(`No ${bp} frame for page "${slug}".`);
     const dir = path.join(artifactsDir(themeDir), slug, 'crops', bp);
-    const crops = await cropRanges(frame.image, list.map((r) => ({ name: `pb-s${r.n}`, y0: r.y0, y1: r.y1 })), dir);
-    crops.forEach((c, i) => out.push({ n: list[i].n, breakpoint: bp, file: c.file }));
+    const crops = await cropRanges(frame.image, list.map((r) => ({ name: anchors.get(r.n), y0: r.y0, y1: r.y1 })), dir);
+    crops.forEach((c, i) => out.push({ n: list[i].n, anchor: anchors.get(list[i].n), breakpoint: bp, file: c.file }));
   }
   updateState(themeDir, (s) => {
     const page = s.pages.find((p) => p.slug === slug);
     if (!page) throw new Error(`No page "${slug}" in state; add a frame first.`);
     for (const c of out) {
       let sec = page.sections.find((x) => x.n === c.n);
-      if (!sec) { sec = { n: c.n, anchor: `pb-s${c.n}`, status: 'planned', crops: {} }; page.sections.push(sec); }
+      if (!sec) { sec = { n: c.n, anchor: c.anchor, status: 'planned', crops: {} }; page.sections.push(sec); }
+      if (partOfN.has(c.n)) sec.anchor = c.anchor;
       sec.crops ??= {};
       sec.crops[c.breakpoint] = c.file;
     }

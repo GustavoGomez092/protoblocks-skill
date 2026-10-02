@@ -122,19 +122,30 @@ for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join
   });
 }
 
-// Executable doc blocks: <!-- test:run --> immediately followed by a ```bash fence.
+// Executable doc blocks: <!-- test:run --> (or <!-- test:run fixture=<name> -->) immediately followed by a ```bash fence.
 function runnableBlocks(text) {
-  return [...text.matchAll(/<!-- test:run -->\n```bash\n([\s\S]*?)\n```/g)].map((m) => m[1]);
+  return [...text.matchAll(/<!-- test:run(?: fixture=([a-z]+))? -->\n```bash\n([\s\S]*?)\n```/g)].map((m) => ({ fixture: m[1] ?? 'default', block: m[2] }));
 }
 
-function fixture() {
+// default: a first page ("home") being planned. later: "home" is built and its header/footer live in the template
+// parts (inPart), and a later page ("about") is being planned.
+function fixture(kind) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-docs-'));
   initState(theme, { url: 'https://x.local', path: theme });
   const sections = (ns) => ns.map((n) => ({ n, anchor: `pb-s${n}`, status: 'planned', crops: {} }));
   updateState(theme, (s) => {
     // A decoy page first and non-contiguous section numbers: docs must look both up, not index them.
-    for (const [slug, ns] of [['other', [1, 2]], ['home', [1, 3, 5]]]) {
+    const pages = kind === 'later' ? [['other', [1, 2]], ['home', [1, 3, 5]], ['about', [1, 2, 4]]] : [['other', [1, 2]], ['home', [1, 3, 5]]];
+    for (const [slug, ns] of pages) {
       s.pages.push({ slug, title: slug, status: 'planning', postId: null, contentHash: null, design: { frames: [] }, sections: sections(ns) });
+    }
+    if (kind === 'later') {
+      const home = s.pages[1];
+      home.status = 'building';
+      home.plan = { approvedAt: '2026-10-01T00:00:00.000Z', by: 'developer' };
+      Object.assign(home.sections[0], { anchor: 'pb-header', block: 'site-header', decision: 'new', inPart: true, status: 'done' });
+      Object.assign(home.sections[1], { block: 'hero-split', decision: 'new', status: 'done' });
+      Object.assign(home.sections[2], { anchor: 'pb-footer', block: 'site-footer', decision: 'new', inPart: true, status: 'done' });
     }
   });
   return theme;
@@ -142,9 +153,9 @@ function fixture() {
 
 for (const { file } of DOCS) {
   const rel = path.relative(ROOT, file);
-  runnableBlocks(fs.readFileSync(file, 'utf8')).forEach((block, i) => {
-    test(`runnable block ${i + 1} in ${rel} works against a temp state`, () => {
-      const theme = fixture();
+  runnableBlocks(fs.readFileSync(file, 'utf8')).forEach(({ fixture: kind, block }, i) => {
+    test(`runnable block ${i + 1} in ${rel} works against a temp state (${kind})`, () => {
+      const theme = fixture(kind);
       try {
         const r = spawnSync('bash', ['-c', `set -e\n${block}`], { encoding: 'utf8', env: { ...process.env, PB: SCRIPTS, THEME: theme }, timeout: 60000 });
         assert.equal(r.status, 0, `exit ${r.status}\n${r.stdout}\n${r.stderr}\n--- block ---\n${block}`);
@@ -152,7 +163,13 @@ for (const { file } of DOCS) {
         assert.deepEqual(validate(s), []);
         const page = s.pages.find((p) => p.slug === 'home');
         assert.equal(s.pages[0].status, 'planning', 'decoy page untouched');
-        if (/page\.status/.test(block)) {
+        if (kind === 'later' && /plan\.mjs" record/.test(block)) {
+          const about = s.pages.find((p) => p.slug === 'about');
+          assert.equal(about.status, 'building');
+          assert.match(about.plan.approvedAt, /^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
+          const pick = (n) => { const x = about.sections.find((y) => y.n === n); return [x.anchor, x.decision, x.inPart ?? false]; };
+          assert.deepEqual([pick(1), pick(2), pick(4)], [['pb-header', 'reuse', true], ['pb-s2', 'new', false], ['pb-footer', 'reuse', true]]);
+        } else if (/plan\.mjs" record/.test(block)) {
           assert.equal(page.status, 'building');
           assert.match(page.plan.approvedAt, /^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
           assert.equal(page.plan.by, 'developer');
@@ -160,6 +177,8 @@ for (const { file } of DOCS) {
           assert.equal(hero.decision, 'new');
           assert.ok(hero.label && hero.block);
           assert.equal(page.sections.find((x) => x.n === 1).block, 'site-header');
+          assert.equal(page.sections.find((x) => x.n === 1).anchor, 'pb-header', 'header gets the fixed part anchor');
+          assert.equal(page.sections.find((x) => x.n === 1).inPart, undefined, 'first page: built as a section first');
           assert.equal(page.sections.find((x) => x.n === 5).label, undefined);
         }
         if (/\$SI\.notes/.test(block)) assert.equal(page.sections.find((x) => x.n === 3).notes, 'Image right, CTA pair');
@@ -173,6 +192,9 @@ for (const { file } of DOCS) {
 }
 
 test('at least the design-breakdown plan-gate blocks are executable', () => {
-  const n = DOCS.filter((d) => d.skill === 'protoblocks-design-breakdown').flatMap((d) => runnableBlocks(fs.readFileSync(d.file, 'utf8'))).length;
+  const blocks = DOCS.filter((d) => d.skill === 'protoblocks-design-breakdown').flatMap((d) => runnableBlocks(fs.readFileSync(d.file, 'utf8')));
+  const n = blocks.length;
+  assert.ok(blocks.some((b) => b.fixture === 'default' && /plan\.mjs" record/.test(b.block)), 'first-page plan gate block');
+  assert.ok(blocks.some((b) => b.fixture === 'later' && /plan\.mjs" record/.test(b.block)), 'later-page plan gate block');
   assert.ok(n >= 4, `expected >= 4 runnable blocks in protoblocks-design-breakdown, found ${n}`);
 });
