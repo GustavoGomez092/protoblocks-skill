@@ -26,7 +26,7 @@ First read what Yoast already holds for the page (the developer may have filled 
 node "$PB/lib/seo.mjs" get "$THEME" <page>
 ```
 
-Non-empty `values` (focus keyword, title, description, social fields, page type, `jsonld`) that the skill did not apply (`edited`) are the developer's: treat them as provided (`inferred: false`) in `seo.json`. Then ask once for what the developer wants to provide: focus keyword, title, description, audience or location, an OG image file, business name, logo file, social links. Never block on it: infer the rest. Read the page's real headings and copy once (the audit prints them under `extract`):
+Non-empty `values` the skill did not apply (`edited`) are the developer's: treat them as provided (`inferred: false`) in `seo.json` (social texts as `ogTitle`/`ogDescription`/`twitterTitle`/`twitterDescription`; see `references/apply.md`). Then ask once for what the developer wants to provide: focus keyword, title, description, audience or location, an OG image file, business name, logo file, social links. Never block on it: infer the rest. Read the page's real headings and copy once (the audit prints them under `extract`):
 
 ```bash
 node "$PB/qa/seo-audit.mjs" --url <url> --keyword "<draft keyword>" --out "$THEME/.protoblocks/artifacts/<page>/seo-audit.json"

@@ -22,6 +22,9 @@ export const renderTitle = (t, { siteName = '', sep = '-' } = {}) => String(t).r
 // Social titles carry no site name: drop the vars, then any separator left dangling at either end.
 export const socialTitle = (t) => String(t).replace(/%%(sep|sitename)%%/g, '').replace(/^[\s\-–—|·•:]+|[\s\-–—|·•:]+$/g, '');
 const val = (leaf) => leaf?.value;
+// Optional seo.json leaves for the social fields, by Yoast meta key; without a leaf the field is derived.
+export const SOCIAL_FIELDS = { 'opengraph-title': 'ogTitle', 'opengraph-description': 'ogDescription', 'twitter-title': 'twitterTitle', 'twitter-description': 'twitterDescription' };
+const SOCIAL_LEAVES = Object.values(SOCIAL_FIELDS);
 
 /** ctx = { siteName, sep } (from `yoast.php site`) makes the title check use the real rendered title. */
 export function validateSeo(seo, ctx) {
@@ -43,6 +46,12 @@ export function validateSeo(seo, ctx) {
   const d = val(seo.description);
   if (typeof d !== 'string' || d.length < 120 || d.length > 156) errors.push(`description: ${typeof d === 'string' ? d.length : 0} chars (need 120–156)`);
   else if (/[\r\n]/.test(d)) errors.push('description: must not contain newlines');
+  for (const k of SOCIAL_LEAVES) {
+    if (!seo[k]) continue;
+    const v = val(seo[k]);
+    if (typeof v !== 'string' || !v.trim()) errors.push(`${k}: must be a non-empty string`);
+    else if (/[\r\n]/.test(v)) errors.push(`${k}: must not contain newlines`);
+  }
   if (seo.schemaPageType && !SCHEMA_PAGE_TYPES.includes(val(seo.schemaPageType))) errors.push(`schemaPageType: must be one of ${SCHEMA_PAGE_TYPES.join(', ')}`);
   if (seo.schema) {
     try { normalizeJsonld(val(seo.schema)); } catch (e) { errors.push(`schema: ${e.message}`); }
@@ -67,11 +76,11 @@ export function buildYoastSpec({ postId, seo, ogImageId = null, organizationLogo
       focuskw: val(seo.focusKeyword),
       title,
       metadesc: desc,
-      'opengraph-title': socialTitle(title),
-      'opengraph-description': desc,
+      'opengraph-title': val(seo.ogTitle) ?? socialTitle(title),
+      'opengraph-description': val(seo.ogDescription) ?? desc,
       'opengraph-image-id': ogImageId,
-      'twitter-title': socialTitle(title),
-      'twitter-description': desc,
+      'twitter-title': val(seo.twitterTitle) ?? socialTitle(title),
+      'twitter-description': val(seo.twitterDescription) ?? desc,
       'twitter-image-id': ogImageId,
       // Absent leaf: leave the page type alone (Yoast falls back to its post-type default).
       ...(seo.schemaPageType ? { schema_page_type: val(seo.schemaPageType) } : {}),
@@ -134,9 +143,11 @@ function findPage(themeDir, slug) {
 }
 
 // Live values that differ from what the skill last applied (or, on a first apply, any non-empty live value).
+// A value cleared in wp-admin after the skill applied one counts too.
 function editedFields(live, applied, fields = LIVE_KEYS, next = {}) {
+  const filled = (v) => String(v ?? '').trim() !== '';
   return fields
-    .filter((f) => String(live[f] ?? '').trim() !== '' && !sameValue(f, live[f], applied[f] ?? '') && !(f in next && next[f] !== undefined && sameValue(f, live[f], next[f])))
+    .filter((f) => (filled(live[f]) || filled(applied[f])) && !sameValue(f, live[f] ?? '', applied[f] ?? '') && !(f in next && next[f] !== undefined && sameValue(f, live[f], next[f])))
     .map((f) => ({ field: f, live: live[f], applied: applied[f] ?? null }));
 }
 
@@ -219,7 +230,14 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, f
   for (const [k, v] of Object.entries(spec.meta)) if (v !== null && v !== undefined && v !== '') next[k] = v === -1 ? undefined : String(v);
   if ('jsonld' in spec) next.jsonld = spec.jsonld.length ? JSON.stringify(spec.jsonld) : '';
   const live = pickLive(yoastError(wp, ['get', String(page.postId)]));
-  const edited = editedFields(live, appliedOf(page), Object.keys(next), next);
+  let edited = editedFields(live, appliedOf(page), Object.keys(next), next);
+  // A derived social field (no leaf in seo.json) that the developer customised is kept rather than refused: there is
+  // nothing to put in seo.json for it except the matching leaf. --force overwrites it like any other field.
+  const kept = force ? [] : edited.filter((e) => SOCIAL_FIELDS[e.field] && !seo[SOCIAL_FIELDS[e.field]]).map((e) => e.field);
+  if (kept.length) {
+    edited = edited.filter((e) => !kept.includes(e.field));
+    for (const f of kept) { delete spec.meta[f]; delete next[f]; }
+  }
   if (edited.length && !force) {
     const list = edited.map((e) => `- ${e.field}: live ${JSON.stringify(e.live)}; ${e.applied === null ? 'never applied by the skill' : `last applied ${JSON.stringify(e.applied)}`}`).join('\n');
     throw Object.assign(fail('EEDITED', `Yoast values for page "${slug}" were set outside the skill (wp-admin?) and would be overwritten:\n${list}\nRead them with seo.mjs get and treat them as provided (put them in seo.json), or re-run with --force to overwrite them.`), { fields: edited });
@@ -243,7 +261,9 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, f
     media.push({ role: 'organizationLogo', id: m.id, reused: m.reused });
   }
   if (orgKept) organizationLogoId = null;
-  if (org && !orgKept && !org.logo?.file && !org.logo?.id) {
+  // Without a logo in seo.json, an unconfigured Company keeps any logo Yoast already has; forcing clears it.
+  const keepsSiteLogo = !forceOrganization && Number(siteOrg?.logoId) > 0;
+  if (org && !orgKept && !org.logo?.file && !org.logo?.id && !keepsSiteLogo) {
     warnings.push('organization has no logo: Yoast prints no Organization schema piece without one (it needs a company name and a logo). Add organization.logo or ask the developer for the logo file.');
   }
   for (const k of ['opengraph-image-id', 'twitter-image-id']) if (k in spec.meta) spec.meta[k] = ogImageId;
@@ -260,6 +280,7 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, f
   result.media = media;
   if (ogImage) result.ogImage = ogImage;
   if (edited.length) result.overwritten = edited;
+  if (kept.length) result.kept = kept;
   if (warnings.length) result.warnings = warnings;
   const stored = pickLive(result.stored);
   delete result.stored;
@@ -300,7 +321,8 @@ export function recordAudit(themeDir, slug, auditFile) {
     const kw = p.seo?.focusKeyword?.value;
     if (!applied || !kw) throw fail('EAUDITSTALE', `Page "${slug}" has no applied SEO; run seo.mjs apply first, then audit.`);
     const rerun = 'Re-run seo-audit.mjs for this page after the last apply, then record that file.';
-    if (audit.focusKeyword !== kw) throw fail('EAUDITSTALE', `${file} audited keyword "${audit.focusKeyword ?? ''}", but the applied focus keyword is "${kw}". ${rerun}`);
+    const normKw = (k) => (typeof k === 'string' ? k.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ') : null);
+    if (normKw(audit.focusKeyword) === null || normKw(audit.focusKeyword) !== normKw(kw)) throw fail('EAUDITSTALE', `${file} audited keyword "${audit.focusKeyword ?? ''}", but the applied focus keyword is "${kw}". ${rerun}`);
     if (!p.url) throw fail('EAUDITSTALE', `Page "${slug}" has no url in state; build it first (page.mjs build).`);
     if (!sameUrl(audit.url, p.url)) throw fail('EAUDITSTALE', `${file} audited url ${audit.url ?? '(none)'}, but the page is ${p.url}. ${rerun}`);
     const at = Date.parse(audit.at);

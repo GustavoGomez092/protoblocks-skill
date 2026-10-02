@@ -287,7 +287,7 @@ const statusOf = (e, id, focusKeyword) => byId(auditExtract(e, { focusKeyword, o
 test('the worked example in inference.md passes kw-h1, kw-first-paragraph and kw-description (word-based matching)', () => {
   const doc = fs.readFileSync(INFERENCE, 'utf8');
   const example = JSON.parse(doc.match(/<!-- seo\.json example -->\n```json\n([\s\S]*?)\n```/)[1]);
-  const h1 = 'Emergency plumbing in Austin';
+  const h1 = 'Emergency plumbers in Austin';
   const firstParagraph = 'Burst pipe at 2 a.m.? Our licensed Austin plumbers handle emergency repairs around the clock, with upfront quotes.';
   assert.ok(doc.includes(`"${h1}"`), 'the worked example names this h1');
   assert.ok(doc.includes(firstParagraph), 'the worked example shows this hero paragraph');
@@ -301,16 +301,16 @@ test('the worked example in inference.md passes kw-h1, kw-first-paragraph and kw
   for (const id of ['kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description']) assert.equal(s[id], 'pass', id);
 });
 
-test('kw-* checks match keyword words in any order, with plural and -ing/-er forms', () => {
+test('kw-* checks match keyword words in any order, with plural and possessive forms', () => {
   const e = good();
   e.h[0].text = "Austin's emergency plumbers";
-  e.firstParagraph = 'Plumbing emergencies in Austin are handled by our licensed team around the clock.';
+  e.firstParagraph = 'Emergencies in Austin are handled by our licensed plumbers around the clock.';
   for (const id of ['kw-h1', 'kw-first-paragraph']) assert.equal(statusOf(e, id, 'emergency plumber austin'), 'pass', id);
 });
 
 test('kw-* checks fail when any keyword word of 3+ characters is missing, and name the missing word', () => {
   const e = good();
-  e.h[0].text = 'Emergency plumbing';
+  e.h[0].text = 'Emergency plumbers';
   const r = auditExtract(e, { focusKeyword: 'emergency plumber austin', ogImageInfo: og });
   const c = r.checks.find((x) => x.id === 'kw-h1');
   assert.equal(c.status, 'fail');
@@ -380,4 +380,19 @@ test('robots-noindex passes for an indexable page; a missing canonical there sti
   assert.equal(status(e, 'canonical'), 'fail');
   delete e.robots;
   assert.equal(status(e, 'robots-noindex'), 'pass');
+});
+
+// ---- residuals: strict keyword forms ----
+const kwStatus = (keyword, h1) => { const e = good(); e.h[0].text = h1; return statusOf(e, 'kw-h1', keyword); };
+
+test('keyword words match only their own explicit forms: no prefix or loose-stem false positives', () => {
+  for (const [k, t] of [['fire', 'firm'], ['fire', 'first'], ['car', 'care'], ['bus', 'business'], ['pain', 'paint'], ['art', 'article'], ['law', 'lawn'], ['web', 'webinar'], ['news', 'new']]) {
+    assert.equal(kwStatus(k, `Our ${t} today`), 'fail', `${k} must not match ${t}`);
+  }
+});
+
+test('keyword words match their plural, -ing, -ed, -er(s) and possessive forms', () => {
+  for (const [k, t] of [['plumber', 'plumbers'], ['repair', 'repairs'], ['repair', 'repairing'], ['repair', 'repaired'], ['service', 'services'], ['service', 'servicing'], ['service', 'serviced'], ['emergency', 'emergencies'], ['box', 'boxes'], ['clean', 'cleaner'], ['clean', 'cleaners'], ['austin', "austin's"], ['plumber', 'plumber']]) {
+    assert.equal(kwStatus(k, `Our ${t} today`), 'pass', `${k} must match ${t}`);
+  }
 });

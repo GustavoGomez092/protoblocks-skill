@@ -15,17 +15,18 @@ Every leaf is `{ "value": ..., "inferred": true|false, "why": "..." }`. `why` is
 | `schema` | JSON-LD: an array of nodes (preferred), one node, or an `@graph` object. See `schema.md` |
 | `ogImage` | `{ "file": "<path to png>" }` (imported) or `{ "id": <attachment id> }` |
 | `organization` | `{ "name": "...", "logo": { "file": "..." } or { "id": N }, "socials": ["https://..."] }` |
+| `ogTitle`, `ogDescription`, `twitterTitle`, `twitterDescription` | optional string, one line; only when the developer provides one (for example a social text already set in wp-admin) |
 
 Pitfall: a flat leaf such as `"ogImage": { "file": "og.png", "inferred": false }` has no `value` and is rejected with `[ESEO]`; nest it as `{ "value": { "file": ... }, "inferred": false }`.
 
-Open Graph and Twitter titles are the SEO title with the vars removed and any dangling separator trimmed; their descriptions equal the meta description. You do not set them.
+Open Graph and Twitter titles are the SEO title with the vars removed and any dangling separator trimmed; their descriptions equal the meta description. Do not infer them. Set a social leaf only for a value the developer provides; a social text customised in wp-admin without a leaf is kept (`kept` in the apply result).
 
 A complete example (the title leaves room for the site name and separator, so it passes without site context; `apply` re-checks it with the real name):
 
 <!-- seo.json example -->
 ```json
 {
-  "focusKeyword": { "value": "emergency plumber austin", "inferred": true, "why": "h1 is 'Emergency plumbing in Austin' and the page is a local service" },
+  "focusKeyword": { "value": "emergency plumber austin", "inferred": true, "why": "h1 is 'Emergency plumbers in Austin' and the page is a local service" },
   "title": { "value": "Emergency Plumber Austin, 24/7 Repairs %%sep%% %%sitename%%", "inferred": true, "why": "keyword first, qualifier second, site name last" },
   "description": { "value": "Emergency plumbing in Austin, day or night: our plumbers arrive fast, fix it right the first time and quote before work starts. Call or book online today.", "inferred": true, "why": "benefit, proof, call to action; every keyword word in the first half" },
   "schemaPageType": { "value": "WebPage", "inferred": true, "why": "services landing page" },
@@ -68,7 +69,7 @@ The page's primary topic phrase.
 3. Lowercase, 1-4 words. Leave the brand name out unless this is the brand's own page.
 4. `why`: name the h1 or headings it came from.
 
-The audit expects the keyword in the SEO title, h1, first paragraph and meta description (fail) and the slug (warn). It matches like Yoast: every keyword word of 3+ characters must appear, in any order, and simple word forms count (`plumber` matches `plumbers` and `plumbing`; `emergency` matches `emergencies`). So `emergency plumber austin` passes the h1 "Emergency plumbing in Austin". Text is compared after Unicode (NFC), quote and dash normalisation. If the page copy lacks a keyword word, change the keyword to words the copy already uses; edit copy only when the developer agrees. Never repeat the keyword to satisfy a check.
+The audit expects the keyword in the SEO title, h1, first paragraph and meta description (fail) and the slug (warn). It matches like Yoast: every keyword word of 3+ characters must appear, in any order, as the word itself or one of its regular forms: `-s`, `-es`, `-y` to `-ies`, `-ing`, `-ed`, `-er`, `-ers` and the possessive `'s` (`plumber` matches `plumbers`, `emergency` matches `emergencies`). Other words never match, even with the same start: `plumber` does not match `plumbing`, `car` does not match `care`. So `emergency plumber austin` passes the h1 "Emergency plumbers in Austin" but not "Emergency plumbing in Austin"; pick the keyword from the words the h1 really uses. Text is compared after Unicode (NFC), quote and dash normalisation. If the page copy lacks a keyword word, change the keyword to words the copy already uses; edit copy only when the developer agrees. Never repeat the keyword to satisfy a check.
 
 ## SEO title
 
@@ -104,9 +105,9 @@ Only when Yoast has no company yet; otherwise `apply` returns `organization: kep
 
 ## Worked example: 6-section landing page
 
-Sections: 1 header, 2 hero (h1 "Emergency plumbing in Austin", paragraph "Burst pipe at 2 a.m.? Our licensed Austin plumbers handle emergency repairs around the clock, with upfront quotes.", CTA "Book now"), 3 three-service grid, 4 how it works (3 steps), 5 FAQ (4 questions), 6 footer.
+Sections: 1 header, 2 hero (h1 "Emergency plumbers in Austin", paragraph "Burst pipe at 2 a.m.? Our licensed Austin plumbers handle emergency repairs around the clock, with upfront quotes.", CTA "Book now"), 3 three-service grid, 4 how it works (3 steps), 5 FAQ (4 questions), 6 footer.
 
-- Keyword: h1 and headings repeat "plumber/plumbing" and "Austin" -> `emergency plumber austin`, inferred. Every word is in the h1, the hero paragraph and the description, so `kw-h1`, `kw-first-paragraph` and `kw-description` pass.
+- Keyword: h1 and headings repeat "plumbers" and "Austin" -> `emergency plumber austin`, inferred. Every word is in the h1, the hero paragraph and the description, so `kw-h1`, `kw-first-paragraph` and `kw-description` pass.
 - Title and description: as in the example above.
 - Page type: the FAQ is one of several sections, so `WebPage`, not `FAQPage`.
 - OG image: first content section is `#pb-s2` (section 1 is the header): `og-image.mjs ... --selector '#pb-s2'`; open the PNG and check the headline is whole.

@@ -379,7 +379,7 @@ test('applySeo: schema previously applied by the skill is cleared when the new S
   const b = harness();
   assert.equal(applySeo(b.wp, project(), 'home', noSchema, { index: false }).jsonld, 'none');
   assert.equal('jsonld' in b.specs[0], false, 'no prior skill schema: leave the page JSON-LD alone');
-  const c = harness();
+  const c = harness({ live: { jsonld: JSON.stringify(seo.schema.value) } }); // the page still holds the earlier schema
   applySeo(c.wp, project(prior), 'home', seo, { index: false });
   assert.equal(c.specs[0].jsonld.length, 1, 'a new schema replaces the old one');
 });
@@ -576,10 +576,10 @@ test('applySeo: hand-edited JSON-LD is EEDITED; formatting differences are not',
 
 test('applySeo: a page applied before appliedValues existed compares against its stored seo', () => {
   const legacy = [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [], seo: { ...seo, applied: APPLIED, ogImageId: null } }];
-  const same = harness({ live: { metadesc: desc, focuskw: 'emergency plumber', title: seo.title.value, schema_page_type: 'WebPage' } });
+  const same = harness({ live: { metadesc: desc, focuskw: 'emergency plumber', title: seo.title.value, schema_page_type: 'WebPage', 'opengraph-title': 'Emergency Plumber Austin', 'opengraph-description': desc, 'twitter-title': 'Emergency Plumber Austin', 'twitter-description': desc, jsonld: JSON.stringify(seo.schema.value) } });
   assert.doesNotThrow(() => applySeo(same.wp, project(legacy), 'home', seo, { index: false }));
-  const edited = harness({ live: { metadesc: 'Hand edited' } });
-  assert.throws(() => applySeo(edited.wp, project(legacy), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields[0].applied === desc);
+  const edited = harness({ live: { ...same.store, metadesc: 'Hand edited' } });
+  assert.throws(() => applySeo(edited.wp, project(legacy), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields.length === 1 && e.fields[0].applied === desc);
 });
 
 test('CLI: unknown flags print usage and exit 64', () => {
@@ -589,4 +589,73 @@ test('CLI: unknown flags print usage and exit 64', () => {
     assert.match(r.stderr, /Usage/);
   }
   assert.equal(cli('get', '/t').status, 64);
+});
+
+// ---- residuals: optional social leaves, kept social fields, edit detection ----
+const derivedOgTitle = 'Emergency Plumber Austin';
+
+test('validateSeo accepts optional ogTitle, ogDescription, twitterTitle and twitterDescription leaves', () => {
+  const social = { ...seo, ogTitle: { value: 'Custom OG', inferred: false }, ogDescription: { value: 'Custom OG description', inferred: true, why: 'shorter for sharing' }, twitterTitle: { value: 'Custom X', inferred: false }, twitterDescription: { value: 'Custom X description', inferred: false } };
+  assert.deepEqual(validateSeo(social), []);
+  for (const bad of ['', '   ', 42, 'two\nlines']) {
+    assert.match(validateSeo({ ...seo, ogTitle: { value: bad, inferred: false } }).join('\n'), /ogTitle/, JSON.stringify(bad));
+  }
+  assert.match(validateSeo({ ...seo, twitterDescription: { value: 'x', inferred: true } }).join('\n'), /why/);
+});
+
+test('buildYoastSpec uses the social leaves when given and derives the rest', () => {
+  const spec = buildYoastSpec({ postId: 9, seo: { ...seo, ogTitle: { value: 'Custom OG', inferred: false }, twitterDescription: { value: 'Custom X description', inferred: false } } });
+  assert.equal(spec.meta['opengraph-title'], 'Custom OG');
+  assert.equal(spec.meta['opengraph-description'], desc);
+  assert.equal(spec.meta['twitter-title'], derivedOgTitle);
+  assert.equal(spec.meta['twitter-description'], 'Custom X description');
+});
+
+test('applySeo keeps a derived social field the developer customised in wp-admin (kept, not EEDITED)', () => {
+  const h = harness({ live: { 'opengraph-title': 'Hand-made OG title', 'twitter-description': 'Hand-made X text', metadesc: desc } });
+  const theme = project(appliedPage({ 'opengraph-title': derivedOgTitle, 'twitter-description': desc, metadesc: desc }));
+  const r = applySeo(h.wp, theme, 'home', seo, { index: false });
+  assert.deepEqual(r.kept.sort(), ['opengraph-title', 'twitter-description']);
+  assert.equal('opengraph-title' in meta(h), false, 'not written');
+  assert.equal('twitter-description' in meta(h), false);
+  assert.equal(meta(h)['twitter-title'], derivedOgTitle, 'unedited social fields are still written');
+  assert.equal(h.store['opengraph-title'], 'Hand-made OG title');
+  assert.equal(loadState(theme).pages[0].seo.appliedValues['opengraph-title'], derivedOgTitle, 'the last applied value stays the baseline');
+  const first = harness({ live: { 'opengraph-description': 'Typed before the first apply' } });
+  assert.deepEqual(applySeo(first.wp, project(), 'home', seo, { index: false }).kept, ['opengraph-description'], 'first apply: kept too');
+});
+
+test('applySeo: a social leaf or force overrides a customised social field; a leaf equal to the live value is no conflict', () => {
+  const live = { 'opengraph-title': 'Hand-made OG title' };
+  const applied = () => project(appliedPage({ 'opengraph-title': derivedOgTitle }));
+  const leaf = harness({ live });
+  assert.throws(() => applySeo(leaf.wp, applied(), 'home', { ...seo, ogTitle: { value: 'Another OG title', inferred: false } }, { index: false }), (e) => e.code === 'EEDITED' && e.fields[0].field === 'opengraph-title');
+  const same = harness({ live });
+  const r = applySeo(same.wp, applied(), 'home', { ...seo, ogTitle: { value: 'Hand-made OG title', inferred: false } }, { index: false });
+  assert.equal(meta(same)['opengraph-title'], 'Hand-made OG title');
+  assert.equal('kept' in r, false);
+  const forced = harness({ live });
+  const f = applySeo(forced.wp, applied(), 'home', seo, { index: false, force: true });
+  assert.equal(meta(forced)['opengraph-title'], derivedOgTitle);
+  assert.equal('kept' in f, false);
+  assert.deepEqual(f.overwritten.map((x) => x.field), ['opengraph-title']);
+});
+
+test('applySeo: a value cleared in wp-admin after the skill applied it is EEDITED', () => {
+  const h = harness({ live: { metadesc: '' } });
+  assert.throws(() => applySeo(h.wp, project(appliedPage({ metadesc: desc })), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields[0].field === 'metadesc' && e.fields[0].live === '' && e.fields[0].applied === desc);
+  assert.deepEqual(seoGet(harness({ live: { metadesc: '' } }).wp, project(appliedPage({ metadesc: desc })), 'home').edited.map((e) => e.field), ['metadesc']);
+});
+
+test('applySeo: no no-logo warning when the site keeps its existing logo', () => {
+  const noLogo = { ...seo, organization: { value: { name: 'New Co' }, inferred: false } };
+  const withLogo = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'company', name: '', logoId: 5 } } });
+  assert.equal('warnings' in applySeo(withLogo.wp, project(), 'home', noLogo, { index: false }), false, 'Yoast keeps logo 5');
+  const forced = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'company', name: 'Old Co', logoId: 5 } } });
+  assert.ok(applySeo(forced.wp, project(), 'home', noLogo, { index: false, forceOrganization: true }).warnings.some((w) => /no logo/.test(w)), 'forced without a logo clears it');
+});
+
+test('recordAudit compares the focus keyword trimmed, lowercased and NFC-normalised', () => {
+  const theme = project([{ slug: 'home', title: 'Home', status: 'seo', postId: 9, url: PAGE_URL, sections: [], seo: { focusKeyword: { value: 'café austin', inferred: false }, applied: APPLIED } }]);
+  assert.equal(recordAudit(theme, 'home', auditFile(audit({ focusKeyword: '  Café Austin ' }))).status, 'done');
 });

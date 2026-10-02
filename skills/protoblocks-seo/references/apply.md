@@ -8,11 +8,12 @@
 - `index`: `ok`, `skipped` or `failed: ...`.
 - `ogImage`: `{file, resized, source}` for a supplied file; `resized: true` means it was not 1200x630 and the cover-fitted copy `artifacts/<page>/og-supplied.png` was imported instead (`seo.json` keeps the original path). Tell the developer; never swap a supplied image for a generated one without asking.
 - `overwritten`: with `--force`, the edited values that were replaced.
+- `kept`: derived social fields (`opengraph-title`, `opengraph-description`, `twitter-title`, `twitter-description`) that the developer customised in wp-admin and that `seo.json` has no leaf for; they were left as they are. Report them; to change one, add its leaf (`ogTitle`, `ogDescription`, `twitterTitle`, `twitterDescription`).
 - `warnings`: for example site context unavailable, or an organization without a logo (Yoast prints no Organization schema piece without one).
 
 ## Edits made in wp-admin
 
-`apply` stores what it wrote in the page's `seo.appliedValues`. Before writing, it reads the live values (`seo.mjs get`) and refuses with `[EEDITED]` when a value it would overwrite is non-empty and differs from both what it last applied and what it is about to write. On a first apply every non-empty Yoast value counts, because the developer may have filled Yoast by hand. Nothing is imported or written on `[EEDITED]`. Resolve it by treating the live value as provided in `seo.json` (then it is not a conflict), or with `--force` when the developer agrees to the overwrite.
+`apply` stores what it wrote in the page's `seo.appliedValues`. Before writing, it reads the live values (`seo.mjs get`) and refuses with `[EEDITED]` when a value it would overwrite differs from both what it last applied and what it is about to write: a different non-empty value, or a value the developer cleared. On a first apply every non-empty Yoast value counts, because the developer may have filled Yoast by hand. Nothing is imported or written on `[EEDITED]`. Resolve it by treating the live value as provided in `seo.json` (then it is not a conflict), or with `--force` when the developer agrees to the overwrite. A derived social field without a leaf never raises `[EEDITED]`: a customised one is kept and listed in `kept`.
 
 `seo.mjs get` prints `{slug, postId, values, appliedValues, edited}`: `values` are the raw per-page Yoast values (`''` when unset, so Yoast's post-type defaults are not shown) and `jsonld` is the stored JSON string.
 

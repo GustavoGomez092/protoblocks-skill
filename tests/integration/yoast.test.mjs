@@ -385,6 +385,11 @@ itest('apply refuses to overwrite Yoast values edited in wp-admin (EEDITED) unle
     assert.equal(theirs.description.value, theirDesc);
     assert.doesNotThrow(() => applySeo(wp, theme, slug, theirs, { index: false }));
     assert.equal(yoast(wp, 'get', String(id)).metadesc, theirDesc);
+    // A derived social field customised in wp-admin (no leaf in seo.json) is kept, not refused.
+    handSet('opengraph-title', 'Hand-made OG title');
+    const keptRun = applySeo(wp, theme, slug, theirs, { index: false });
+    assert.deepEqual(keptRun.kept, ['opengraph-title']);
+    assert.equal(yoast(wp, 'get', String(id))['opengraph-title'], 'Hand-made OG title');
   } finally {
     if (id) deleteById(wp, id);
     fs.rmSync(work, { recursive: true, force: true });

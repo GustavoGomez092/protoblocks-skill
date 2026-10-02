@@ -17,19 +17,17 @@ export const norm = (s) => String(s ?? '').normalize('NFC').toLowerCase()
 const WORD = /[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu;
 const wordsOf = (s) => norm(s).match(WORD) ?? [];
 const textWords = (s) => [...new Set(wordsOf(s).flatMap((w) => (w.includes('-') ? [w, ...w.split('-')] : [w])))];
-// A light English stemmer: enough for plural / -ing / -er / -ed forms (plumber, plumbers, plumbing -> plumb).
-export function stem(w) {
-  let s = w;
-  if (/ies$/.test(s) && s.length > 5) s = `${s.slice(0, -3)}y`;
-  else if (/(s|x|z|ch|sh)es$/.test(s) && s.length > 5) s = s.slice(0, -2);
-  else {
-    const m = /(ing|ers|er|ed|s)$/.exec(s);
-    if (m && !s.endsWith('ss') && s.length - m[1].length >= 3) s = s.slice(0, -m[1].length);
-  }
-  if (s.endsWith('e') && s.length > 3) s = s.slice(0, -1);
-  return s;
+// The explicit forms a keyword word may take in the copy: k, k+s, k+es, k-y+ies, k(-e)+ing, k(-e)+ed, k+er, k+ers.
+// Exact token equality only: no prefix matching (fire/firm, car/care, web/webinar and news/new stay distinct).
+export function wordForms(k) {
+  const forms = new Set([k, `${k}s`, `${k}es`, `${k}ing`, `${k}ed`, `${k}er`, `${k}ers`]);
+  if (/[^aeiou]y$/.test(k)) forms.add(`${k.slice(0, -1)}ies`);
+  if (k.endsWith('e')) { forms.add(`${k.slice(0, -1)}ing`); forms.add(`${k}d`); forms.add(`${k}r`); forms.add(`${k}rs`); }
+  return forms;
 }
-const wordMatches = (k, t) => t.startsWith(k) || stem(t).startsWith(stem(k));
+// A possessive ("austin's") counts as the word itself.
+const bare = (t) => t.replace(/'s$/, '');
+const wordMatches = (k, t) => wordForms(k).has(bare(t));
 /** Yoast-style keyphrase match: every keyword word of 3+ characters (all words when none are) appears, in any order. */
 export function keywordMissing(keyword, text) {
   const all = wordsOf(keyword);
