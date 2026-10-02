@@ -6,15 +6,18 @@ import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 
 const EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.svg']);
 const MAX_ALT = 1000;
+const MAX_TITLE = 200;
 const SVG_MESSAGE = 'SVG uploads are disabled on this site; convert to PNG or inline the SVG in the template';
 
 const fail = (code, message, extra = {}) => Object.assign(new Error(message), { code }, extra);
 
-function validate(file, alt) {
+function validate(file, alt, title) {
   if (typeof alt !== 'string') {
     throw fail('EALT', `Alt text is required for ${file} (pass '' only for purely decorative images).`);
   }
   if (alt.length > MAX_ALT) throw fail('EALT', `Alt text for ${file} is ${alt.length} characters; the limit is ${MAX_ALT}.`);
+  if (typeof title !== 'string') throw fail('EUSAGE', `Title for ${file} must be a string.`);
+  if (title.length > MAX_TITLE) throw fail('ETITLE', `Title for ${file} is ${title.length} characters; the limit is ${MAX_TITLE}.`);
   let real;
   try {
     real = fs.realpathSync(path.resolve(file));
@@ -34,8 +37,8 @@ function validate(file, alt) {
  * as its own flags, so alt/title text must never travel as raw argv.
  */
 export function importMedia(wp, file, { alt, title = '' } = {}) {
-  const real = validate(file, alt);
-  const payload = Buffer.from(JSON.stringify({ file: real, alt, title: typeof title === 'string' ? title : '' }), 'utf8').toString('base64url');
+  const real = validate(file, alt, title);
+  const payload = Buffer.from(JSON.stringify({ file: real, alt, title }), 'utf8').toString('base64url');
   const out = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'media.php'), ['import', payload]);
   if (out?.error) {
     const { code = 'EMEDIA', message, id } = out.error;

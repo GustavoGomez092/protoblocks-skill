@@ -79,3 +79,23 @@ test('parseFlags handles missing values: --alt without value is kept as missing,
   assert.equal(parseFlags(['--bogus', 'x']), null);
   assert.equal(parseFlags(['stray']), null);
 });
+
+test('title must be a string of at most 200 characters', () => {
+  const { wp, calls } = fakeWp();
+  assert.throws(() => importMedia(wp, png, { alt: 'a', title: 5 }), code('EUSAGE'));
+  assert.throws(() => importMedia(wp, png, { alt: 'a', title: null }), code('EUSAGE'));
+  assert.throws(() => importMedia(wp, png, { alt: 'a', title: 't'.repeat(201) }), code('ETITLE'));
+  assert.equal(calls.length, 0);
+  importMedia(wp, png, { alt: 'a', title: 't'.repeat(200) });
+  importMedia(wp, png, { alt: 'a' });
+  assert.equal(calls.length, 2);
+});
+
+test('createWp extraArgs are global WP-CLI flags placed before the command; absent by default', () => {
+  const calls = [];
+  const exec = (cmd, args) => { calls.push(args); return { code: 0, stdout: '', stderr: '' }; };
+  createWp({ wp: 'wp', mode: 'native', publicPath: '/s' }, { exec, extraArgs: ['--exec=1;'] }).run(['option', 'get', 'x']);
+  createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec, extraArgs: ['--exec=1;'] }).run(['option', 'get', 'x']);
+  assert.deepEqual(calls[0], ['--path=/s', '--exec=1;', 'option', 'get', 'x']);
+  assert.deepEqual(calls[1], ['--exec=1;', 'option', 'get', 'x']);
+});

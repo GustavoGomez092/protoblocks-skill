@@ -15,8 +15,9 @@ export class WpError extends Error {
   }
 }
 
-export function createWp({ wp, mode, publicPath }, { exec = realExec } = {}) {
-  const base = mode === 'native' ? [`--path=${publicPath}`] : [];
+export function createWp({ wp, mode, publicPath }, { exec = realExec, extraArgs = [] } = {}) {
+  // extraArgs: global WP-CLI flags (e.g. --exec=...) for tests only; normal callers pass none.
+  const base = [...(mode === 'native' ? [`--path=${publicPath}`] : []), ...extraArgs];
   const run = (args, opts = {}) => exec(wp, [...base, ...args], opts);
   const check = (args, opts) => {
     const r = run(args, opts);

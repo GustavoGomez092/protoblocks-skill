@@ -4,12 +4,28 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { itest, testWp } from './helpers.mjs';
+import { after } from 'node:test';
+import { itest, testWp, runtime } from './helpers.mjs';
+import { createWp, WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { importMedia, imageAttr } from '../../skills/protoblocks-site-builder/scripts/lib/media.mjs';
 
 // Safety: tests delete only attachment ids returned by their own import, in finally. Never by query/name/hash.
 const run = crypto.randomBytes(4).toString('hex');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-media-'));
+after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+// Import and remember the id (also from a typed error that carries e.id) so `finally` can delete exactly what we made.
+const imp = (wp, ids, file, opts) => {
+  try {
+    const m = importMedia(wp, file, opts);
+    ids.push(m.id);
+    return m;
+  } catch (e) {
+    if (e.id) ids.push(e.id);
+    throw e;
+  }
+};
+const cleanup = (wp, ids) => { for (const id of ids) wp.run(['post', 'delete', String(id), '--force']); };
 
 function randomPng(name) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
@@ -31,23 +47,22 @@ itest('importMedia imports once, reuses on re-import, round-trips hostile alt, a
   const ids = [];
   try {
     const alt = '--path=/tmp "quotes" & ünïcode';
-    const a = importMedia(wp, file, { alt });
-    ids.push(a.id);
+    const a = imp(wp, ids, file, { alt });
     assert.equal(a.reused, false);
     assert.equal(a.alt, alt);
     assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), alt);
     assert.equal(meta(wp, a.id, '_pb_source_hash'), sha1(file));
-    const b = importMedia(wp, file, { alt: 'Acme logo (updated)' });
+    const b = imp(wp, ids, file, { alt: 'Acme logo (updated)' });
     assert.equal(b.reused, true);
     assert.equal(a.id, b.id);
     assert.equal(meta(wp, a.id, '_wp_attachment_image_alt'), 'Acme logo (updated)');
-    const c = importMedia(wp, file, { alt: '' });
+    const c = imp(wp, ids, file, { alt: '' });
     assert.equal(c.id, a.id);
     assert.equal(c.alt, '');
     assert.deepEqual(Object.keys(imageAttr(b)), ['id', 'url', 'alt', 'caption', 'size']);
     assert.throws(() => importMedia(wp, file, {}), (e) => e.code === 'EALT');
   } finally {
-    for (const id of ids) wp.run(['post', 'delete', String(id), '--force']);
+    cleanup(wp, ids);
   }
 });
 
@@ -56,64 +71,77 @@ itest('a dedupe match whose file is missing on disk is not reused; the hash move
   const file = randomPng(`pb-itest-media-${run}-stale.png`);
   const ids = [];
   try {
-    const a = importMedia(wp, file, { alt: 'one' });
-    ids.push(a.id);
+    const a = imp(wp, ids, file, { alt: 'one' });
     const stored = wp.check(['eval', `echo get_attached_file(${a.id});`]).trim();
     assert.ok(fs.existsSync(stored), `attached file exists: ${stored}`);
     fs.unlinkSync(stored);
-    const b = importMedia(wp, file, { alt: 'two' });
-    ids.push(b.id);
+    const b = imp(wp, ids, file, { alt: 'two' });
     assert.equal(b.reused, false);
     assert.notEqual(b.id, a.id);
     assert.equal(meta(wp, b.id, '_pb_source_hash'), sha1(file));
     assert.equal(meta(wp, a.id, '_pb_source_hash'), '');
-    const c = importMedia(wp, file, { alt: 'three' });
+    const c = imp(wp, ids, file, { alt: 'three' });
     assert.equal(c.reused, true);
     assert.equal(c.id, b.id);
   } finally {
-    for (const id of ids) wp.run(['post', 'delete', String(id), '--force']);
+    cleanup(wp, ids);
   }
 });
 
-itest('a rejected sideload (PNG extension, non-image bytes) fails cleanly and leaves no hash or attachment id behind', () => {
+itest('a trashed attachment with the same hash is ignored: re-import creates a fresh attachment', () => {
+  const wp = testWp();
+  const file = randomPng(`pb-itest-media-${run}-trash.png`);
+  const ids = [];
+  try {
+    const a = imp(wp, ids, file, { alt: 'one' });
+    wp.check(['post', 'update', String(a.id), '--post_status=trash']);
+    const b = imp(wp, ids, file, { alt: 'two' });
+    assert.equal(b.reused, false);
+    assert.notEqual(b.id, a.id);
+  } finally {
+    cleanup(wp, ids);
+  }
+});
+
+itest('a rejected sideload (PNG extension, non-image bytes) fails with exactly ETYPE and leaves no hash', () => {
   const wp = testWp();
   const file = path.join(tmp, `pb-itest-media-${run}-fake.png`);
   fs.writeFileSync(file, `this is not a png ${run}`);
-  let created = null;
+  const ids = [];
   try {
-    try {
-      created = importMedia(wp, file, { alt: 'fake' });
-    } catch (e) {
-      assert.ok(['ETYPE', 'ESIDELOAD'].includes(e.code), `unexpected code ${e.code}: ${e.message}`);
-      assert.doesNotMatch(e.message, /SVG/);
-      const left = wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', '--meta_key=_pb_source_hash', `--meta_value=${sha1(file)}`, '--format=ids']).trim();
-      assert.equal(left, '', 'no attachment carries the hash of the rejected file');
-      return;
-    }
-    assert.fail('WordPress accepted non-image bytes as a PNG');
+    assert.throws(() => imp(wp, ids, file, { alt: 'fake' }), (e) => e.code === 'ETYPE' && /file type not allowed on this site: png/.test(e.message));
+    assert.equal(ids.length, 0);
+    const left = wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', '--meta_key=_pb_source_hash', `--meta_value=${sha1(file)}`, '--format=ids']).trim();
+    assert.equal(left, '', 'no attachment carries the hash of the rejected file');
   } finally {
-    if (created) wp.run(['post', 'delete', String(created.id), '--force']);
+    cleanup(wp, ids);
   }
 });
 
-itest('SVG: either imports (site allows it) or fails with the clear ETYPE message and leaves no hash', (t) => {
-  const wp = testWp();
+itest('SVG rejected by WordPress (upload_mimes without svg) gives exactly ETYPE with the clear message', () => {
+  const wp = createWp(runtime, { extraArgs: ['--exec=WP_CLI::add_hook("after_wp_load", function(){ add_filter("upload_mimes", function($m){ unset($m["svg"]); unset($m["svgz"]); return $m; }); });'] });
   const file = path.join(tmp, `pb-itest-media-${run}-b.svg`);
   fs.writeFileSync(file, `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><!-- ${run} --><rect width="4" height="4"/></svg>`);
-  let created = null;
+  const ids = [];
   try {
-    try {
-      created = importMedia(wp, file, { alt: 'svg' });
-    } catch (e) {
-      assert.equal(e.code, 'ETYPE');
-      assert.match(e.message, /SVG uploads are disabled on this site; convert to PNG or inline the SVG in the template/);
-      const left = wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', '--meta_key=_pb_source_hash', `--meta_value=${sha1(file)}`, '--format=ids']).trim();
-      assert.equal(left, '', 'no attachment carries the hash of the rejected file');
-      return;
-    }
-    t.diagnostic('this site accepts SVG uploads; the ETYPE branch is covered by the unit test');
-    assert.equal(created.mime, 'image/svg+xml');
+    assert.throws(() => imp(wp, ids, file, { alt: 'svg' }), (e) => e.code === 'ETYPE' && /SVG uploads are disabled on this site; convert to PNG or inline the SVG in the template/.test(e.message));
+    assert.equal(ids.length, 0);
+    const left = wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', '--meta_key=_pb_source_hash', `--meta_value=${sha1(file)}`, '--format=ids']).trim();
+    assert.equal(left, '');
   } finally {
-    if (created) wp.run(['post', 'delete', String(created.id), '--force']);
+    cleanup(wp, ids);
   }
+});
+
+itest('media.php rejects a relative file path in the payload (EUSAGE) and over-long titles (ETITLE)', () => {
+  const wp = testWp();
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const php = path.join(WP_SCRIPTS_DIR, 'media.php');
+  const rel = wp.evalFile(php, ['import', enc({ file: `pb-itest-media-${run}-rel.png`, alt: 'a', title: '' })]);
+  assert.equal(rel.error?.code, 'EUSAGE');
+  const real = randomPng(`pb-itest-media-${run}-title.png`);
+  const long = wp.evalFile(php, ['import', enc({ file: real, alt: 'a', title: 't'.repeat(201) })]);
+  assert.equal(long.error?.code, 'ETITLE');
+  const left = wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', '--meta_key=_pb_source_hash', `--meta_value=${sha1(real)}`, '--format=ids']).trim();
+  assert.equal(left, '');
 });

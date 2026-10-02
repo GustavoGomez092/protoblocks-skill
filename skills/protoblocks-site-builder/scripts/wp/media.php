@@ -27,6 +27,8 @@ $file = $p['file'];
 $alt = $p['alt'];
 $title = (string) ($p['title'] ?? '');
 if (strlen($alt) > 4000 || mb_strlen($alt) > 1000) { $fail('EALT', 'Alt text is longer than 1000 characters'); }
+if (!path_is_absolute($file)) { $fail('EUSAGE', 'The file path must be absolute'); }
+if (mb_strlen($title) > 200) { $fail('ETITLE', 'Title is longer than 200 characters'); }
 if (!is_file($file) || !is_readable($file)) { $fail('EFILE', "Cannot read {$file}"); }
 
 $result = function (int $id, string $alt, bool $reused) {
@@ -52,9 +54,19 @@ foreach ($found as $cand) {
 
 $tmp = wp_tempnam(basename($file));
 if (!$tmp || !copy($file, $tmp)) { if ($tmp) { @unlink($tmp); } $fail('ESIDELOAD', 'Could not stage the file for import'); }
+// Locale-independent type check: WP's own allow-list (incl. upload_mimes filters) and content sniffing.
+$ft = wp_check_filetype_and_ext($tmp, basename($file), null);
+if (empty($ft['type']) || empty($ft['ext'])) {
+    @unlink($tmp);
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    $fail('ETYPE', $ext === 'svg'
+        ? 'SVG uploads are disabled on this site; convert to PNG or inline the SVG in the template'
+        : 'file type not allowed on this site: ' . $ext);
+}
 $id = media_handle_sideload(['name' => basename($file), 'tmp_name' => $tmp], 0, $title !== '' ? $title : null);
 if (is_wp_error($id)) {
     @unlink($tmp);
+    // Fallback only; the check above is the locale-independent one.
     $code = preg_match('/file type|not allowed to upload/i', $id->get_error_message()) ? 'ETYPE' : 'ESIDELOAD';
     $fail($code, $id->get_error_message());
 }
