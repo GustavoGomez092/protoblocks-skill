@@ -69,3 +69,9 @@ The first child is the track. Its content is duplicated at runtime (copies are `
 ## Parallax
 
 The element moves, so give it an `overflow: hidden` wrapper and make it taller than the wrapper (for example `h-[120%]`) or edges will show. It does not use `data-proto-animate`.
+
+## Hero and the intro overlay
+
+On a visitor's first page of a session the theme's intro overlay (`proto-intro`, a Lottie preloader, up to 8 s) covers the page. Hero reveals start at load and usually finish underneath it, so the visitor sees the hero already settled when the overlay fades. The motion check never sees the overlay: it sets `sessionStorage.protoIntroShown` (as on every later page of a session) and hides `.proto-intro`.
+
+pb-motion does not wait for the theme's `proto:intro-complete` event. The plugin watchdog forces `done` 1.5 s after a `manual` element enters view (2 s after load for content already in view), which snaps a still-waiting hero tween to its end; delaying hero reveals past the intro would show no motion either way. Do not design a hero whose meaning depends on its entrance being seen. If the developer wants the hero entrance visible on first visit, shorten or remove the intro (theme setting), not the motion.

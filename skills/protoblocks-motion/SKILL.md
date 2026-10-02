@@ -32,7 +32,12 @@ A custom profile is JSON: `profile "$THEME" '{"duration":0.8,"ease":"power2.out"
 
 ## Per section
 
-1. Choose presets (`references/presets.md`): one hero-level effect for the heading, one supporting effect for the content group, counters for stats, at most 3 distinct presets per section. Nothing on body paragraphs over ~3 lines; never navigation links or form inputs. Design motion notes come first. Header and footer: no motion.
+Motion attributes live in the block's `template.php`, so they are a property of the block on every page that uses it.
+
+- `reuse` section: keep the block's existing motion (no template edit); only run the check (step 4) and record (step 6) with the presets the block already uses.
+- Changing presets on a block whose `library[block].usedOn` lists other pages changes their motion too: re-run the motion check for every usedOn page with a `done` section using the block (recipe: `references/shared-blocks.md`), or expose the motion as a block control whose default keeps the current presets.
+
+1. Choose presets (`references/presets.md`): one hero-level effect for the heading (e.g. `split-lines`), one supporting effect for the content group (e.g. `fade-up`, `stagger-children`), `counter` for stats, at most 3 distinct presets per section. Nothing on body paragraphs over ~3 lines; never navigation links or form inputs. Design motion notes come first. Header and footer: no motion.
 2. Edit `template.php`. Attributes only on the frontend. The plugin does NOT provide `$is_preview`; define it (`$block` is null in the editor preview) and add one helper (a closure, never a named function: several instances would redeclare it):
 
 ```php
@@ -41,7 +46,7 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
 	if ( $is_preview ) { return ''; }
 	$out = 'data-pb-motion="' . esc_attr( $preset ) . '"';
 	if ( ! in_array( $preset, array( 'parallax', 'marquee' ), true ) ) { $out .= ' data-proto-animate="manual"'; }
-	foreach ( $opts as $k => $v ) { $out .= ' data-pb-' . esc_attr( $k ) . '="' . esc_attr( $v ) . '"'; }
+	foreach ( $opts as $k => $v ) { $out .= ' data-pb-' . sanitize_key( $k ) . '="' . esc_attr( $v ) . '"'; }
 	return $out;
 };
 ```
@@ -51,17 +56,12 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
    `node "$PB/lib/gates.mjs" "$THEME" <block> --attrs '<attrs json>'`, then `node "$PB/lib/page.mjs" build "$THEME" <page>`.
 4. Verify (the page URL is `page.url` in `state.mjs get "$THEME" pages`; width is the desktop width used in Verify, default 1440):
    `node "$PB/qa/motion-check.mjs" --url <page url> --anchor pb-s<n> --width <w> --out "$THEME/.protoblocks/artifacts/<page>/pb-s<n>/motion"`
-   It prints the result and exits 1 unless `pass`. Continuous presets (`parallax`, `marquee`) never settle, so the check stops them at rest before the settled frame. Result: `settledMismatch` (max 0.02), `settledHeightDelta` (must be 0), `cls` (anchor shifts with motion, `clsMotion`, minus those without, `clsBaseline`; max 0.01) and `clsPage` (information), `unsettled` (reveal elements not `done` in 6 s), `imageErrors` (anchor images failed or stalled; `pageImageWarnings` elsewhere do not fail), `pageErrors`, and `taxi` (`checked` only when the page has Taxi and ScrollTrigger: `before`/`after` counts after two navigate-away-and-back round trips must match, `duplicates` and `unsettled` empty, no `error`; `retries` is information).
-5. Fix by symptom, then re-run:
-   - `settledMismatch` or `settledHeightDelta`: residue. A CSS transform or clip-path on the animated element (presets clear them: use a wrapper), a bespoke infinite loop (use `marquee`), a scrub or pin. See `references/presets.md`.
-   - `cls`: layout properties animated (height, margin) or a parent resized on reveal; use transform and opacity only.
-   - `unsettled`: a preset element never finished; check it is visible, not `display:none`, and has a sane `data-pb-delay`/`data-pb-start`.
-   - `taxi` mismatch, `duplicates`, `error`: bespoke JS not tearing down or initialising twice (`references/custom-motion.md`); `ETAXI` in `taxi.error` is a navigation failure of the page, not of the preset.
-   - `imageErrors`: not a motion problem; fix the image as in the section loop.
+   It prints the result and exits 1 unless `pass`; it deletes any earlier `motion-check.json` first. Result fields and limits: `references/check.md`.
+5. Fix by symptom (`references/check.md`), then re-run.
 6. Record:
    `node "$PB/lib/motion.mjs" record "$THEME" <page> <n> "<out>/motion-check.json" --presets a,b`
    It prints `{pass, attempts, capReached, status}` (also on a failure, which exits 1 with `[EMOTION]` on stderr). It refuses a check of another anchor or page URL, an unknown preset, and a section that is not `animating` (`ESTATUS`). A pass sets the section `done`; a failure sets `motion.check: "fail"` and counts `motion.attempts` (fields: `state-schema.md`). On `capReached: true` (`site.qa.maxIterations` failed checks) stop and ask the developer: simplify the motion, accept it (`record ... --accepted`, which notes "motion accepted by developer"), or remove it (revert the attributes, then record a passing check).
-7. Commit in the theme fork: `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(motion): <block>"`.
+7. Commit in the theme fork: `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(page): <page> section <n>"`.
 
 ## Bespoke motion
 
