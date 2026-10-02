@@ -283,3 +283,49 @@ test('values must have balanced parentheses that form a single call for colours 
   assert.deepEqual(validateTokens({ colors: { a: '#000' }, spacing: { s: 'calc(100% - 2rem)', t: 'clamp(1rem, 2vw, 3rem)', u: 'clamp(1rem, calc(1vw + 2px), min(3rem, 4rem))' },
     shadows: { s: '0 1px 2px rgba(0,0,0,0.1), 0 0 1px rgb(0 0 0 / 0.2)' } }), []);
 });
+
+test('shadows are whitelisted: stray punctuation, control and trailing-space values are rejected', () => {
+  const sh = (v) => validateTokens({ colors: { a: '#000' }, shadows: { s: v } });
+  for (const v of ['0 0 [', '0 0 ]', '0 0 $', '0 0 red;', '0 0 1px red ', ' 0 0 1px red', '0 0 1px \x7f', '0 0 1px =', '0 0 1px ^', '0 0 1px |', '0 0 1px ~', '0 0 1px `', '0 0 1px ?', '0 0 1px :', '0 0 1px &', '0 0 1px *', '0 0 1px é', '0 0 1px  x', '0 0 1px  x', '0 0 1px x', '0 0 1px\vx', '0 0 1px\fx', '0 0 1px​x']) {
+    assert.ok(sh(v).some((x) => x.startsWith('shadows.s:')), JSON.stringify(v));
+  }
+  for (const v of ['0 6px 16px rgba(0,0,0,0.08)', '0 1px 2px rgb(0 0 0 / 0.2), inset 0 0 0 1px #e5e7eb', 'none']) {
+    assert.deepEqual(sh(v), [], v);
+  }
+});
+
+test('non-ASCII, vertical whitespace and other whitespace are rejected in colours, lengths and fallbacks', () => {
+  const bad = ['é', ' ', ' ', '\v', '\f', ' ', '\x7f'];
+  for (const ch of bad) {
+    assert.ok(validateTokens({ colors: { a: `rgb(0${ch}0 0)` } }).some((x) => x.startsWith('colors.a:')), `color ${JSON.stringify(ch)}`);
+    assert.ok(validateTokens({ colors: { a: '#000' }, spacing: { s: `calc(1px${ch}+ 2px)` } }).some((x) => x.startsWith('spacing.s:')), `spacing ${JSON.stringify(ch)}`);
+    assert.ok(validateTokens({ colors: { a: '#000' }, type: { t: { size: '1px', lineHeight: `calc(1px${ch}+ 2px)` } } }).some((x) => x.startsWith('type.t:')), `lineHeight ${JSON.stringify(ch)}`);
+    assert.ok(validateTokens({ colors: { a: '#000' }, fonts: { f: { family: 'A', fallback: `serif,${ch}Arial` } } }).some((x) => x.startsWith('fonts.f:')), `fallback ${JSON.stringify(ch)}`);
+  }
+  assert.deepEqual(validateTokens({ colors: { a: 'rgb(0 0 0)' }, spacing: { s: 'calc(1px + 2px)' } }), []);
+});
+
+test('fuzz: any shadow value that validates renders only well-formed @theme lines', () => {
+  const LINE = /^( {2}\/\* [A-Za-z ]+ \*\/| {2}--[a-z0-9-]+: [A-Za-z0-9 .,%#()\-+/"]+;|)$/;
+  // calc() legitimately needs `*` in colours/lengths; shadows get the strict set.
+  const LINE_CALC = /^( {2}\/\* [A-Za-z ]+ \*\/| {2}--[a-z0-9-]+: [A-Za-z0-9 .,%#()\-+*/"]+;|)$/;
+  const probe = (build, re = LINE) => {
+    let accepted = 0;
+    for (let cp = 0; cp <= 0x2fff; cp += 1) {
+      const ch = String.fromCodePoint(cp);
+      for (const suffix of ['', ' red', ')']) {
+        const t = build(`0 0 1px ${ch}${suffix}`);
+        if (validateTokens(t).length) continue;
+        accepted += 1;
+        const css = renderTailwindTheme(t);
+        const body = css.slice(css.indexOf('@theme {') + '@theme {'.length, css.lastIndexOf('}'));
+        assert.equal(css.indexOf('}'), css.lastIndexOf('}'), `stray brace for U+${cp.toString(16)}`);
+        for (const line of body.split('\n').slice(1)) assert.match(line, re, `U+${cp.toString(16)} suffix ${JSON.stringify(suffix)}: ${JSON.stringify(line)}`);
+      }
+    }
+    return accepted;
+  };
+  assert.ok(probe((v) => ({ colors: { a: '#000' }, shadows: { s: v } })) > 0, 'some characters should still be accepted');
+  probe((v) => ({ colors: { a: v.replace(/^0 0 1px /, 'rgb(0 0 0 / ') + ')' } }), LINE_CALC);
+  probe((v) => ({ colors: { a: '#000' }, spacing: { s: v.replace(/^0 0 1px /, 'calc(1px + ') + ')' } }), LINE_CALC);
+});

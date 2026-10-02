@@ -6,10 +6,13 @@ import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { statePath, updateState, setPath } from './state.mjs';
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([\w\s.,%+\-*\/()#]+\)|transparent|currentColor)$/;
-const LENGTH = /^(0|-?\d*\.?\d+(px|rem|em|%|vw|vh|ch)|(clamp|calc|min|max)\([\w\s.,%+\-*\/()#]+\))$/;
+const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([A-Za-z0-9 .,%+\-*\/()#]+\)|transparent|currentColor)$/;
+const LENGTH = /^(0|-?\d*\.?\d+(px|rem|em|%|vw|vh|ch)|(clamp|calc|min|max)\([A-Za-z0-9 .,%+\-*\/()#]+\))$/;
 const UNITLESS = /^-?\d*\.?\d+$/;
-const UNSAFE = /[;{}\\"'!<>\t\0]|\/\*|\*\/|[\r\n]|@|url\(/i;
+// Printable ASCII only (rejects tab, NUL, DEL, newlines, U+2028/9, \v, \f, non-ASCII), plus CSS-structure characters.
+const UNSAFE = /[^\x20-\x7e]|[;{}\\"'!<>]|\/\*|\*\/|@|url\(/i;
+// Shadows are free text, so only a closed set of characters is accepted.
+const SHADOW = /^[A-Za-z0-9 .,%#()\-+/]+$/;
 // Parentheses must never close more than they open, and must end balanced.
 const balanced = (v) => {
   let depth = 0;
@@ -29,7 +32,7 @@ const singleCall = (v) => {
   }
   return true;
 };
-const SAFE = (v) => typeof v === 'string' && v.trim() !== '' && !UNSAFE.test(v) && balanced(v);
+const SAFE = (v) => typeof v === 'string' && v.trim() === v && v !== '' && !UNSAFE.test(v) && balanced(v);
 const SINGLE = (v) => SAFE(v) && singleCall(v);
 const FAMILY = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,60}$/;
 const FALLBACK_ITEM = /^[A-Za-z0-9 \-]+$/;
@@ -69,7 +72,7 @@ export function validateTokens(t) {
   });
   group('radii', (v) => (SINGLE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
   group('spacing', (v) => (SINGLE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
-  group('shadows', (v) => (SAFE(v) ? null : `invalid shadow ${JSON.stringify(v)}`));
+  group('shadows', (v) => (SAFE(v) && SHADOW.test(v) ? null : `invalid shadow ${JSON.stringify(v)}`));
   return errors;
 }
 
