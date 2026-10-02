@@ -9,6 +9,7 @@ export function serializeAttrs(attrs) {
 }
 
 export function blockComment(name, attrs = {}, innerMarkup) {
+  if (typeof name !== 'string' || !/^[a-z0-9-]+(\/[a-z0-9-]+)?$/.test(name)) throw new Error(`Invalid block name "${name}"`);
   const a = serializeAttrs(attrs);
   const open = `<!-- wp:${name}${a ? ` ${a}` : ''}`;
   if (innerMarkup === undefined) return `${open} /-->`;

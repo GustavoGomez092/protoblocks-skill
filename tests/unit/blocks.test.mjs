@@ -24,3 +24,10 @@ test('blockComment without attrs self-closes and with attrs plus inner wraps', (
   assert.equal(blockComment('separator'), '<!-- wp:separator /-->');
   assert.equal(blockComment('group', { a: 1 }, 'Y'), '<!-- wp:group {"a":1} -->\nY\n<!-- /wp:group -->');
 });
+
+test('blockComment validates the block name', () => {
+  for (const bad of ['', 'Foo', 'a b', 'a/b/c', '--> <script>', 'a/', '/a', undefined]) {
+    assert.throws(() => blockComment(bad, {}), /block name/i, String(bad));
+  }
+  assert.equal(blockComment('core/group'), '<!-- wp:core/group /-->');
+});
