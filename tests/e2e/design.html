@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Solar (e2e design)</title>
+<style>
+/* page: no body margin; every section below sets its own fonts, colours, line-heights and margins. */
+html, body { margin: 0; padding: 0; background: #ffffff; }
+/* The block CSS below is copied verbatim from tests/e2e/blocks/<block>/style.css (run.test.mjs asserts it). */
+/* site-header: full-bleed dark band, 1200px container, logo left, navigation right. */
+/* Page reset WordPress core prints as global styles (:where(body) { margin: 0; }). Sites with Proto-Blocks'
+   "Disable WP Global Styles" on never get it, and the browser's 8px body margin makes every full-bleed band 16px
+   narrower than the viewport. The header is on every page, so it carries the same zero-specificity reset. */
+:where(body) { margin: 0; }
+header.pb-e2e-header { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
+.pb-e2e-header .pb-e2e-header__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; height: 80px; margin: 0 auto; padding: 0 24px; }
+.pb-e2e-header .pb-e2e-header__logo { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; line-height: 28px; letter-spacing: 0; color: #ffffff; }
+.pb-e2e-header .pb-e2e-header__nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav ul { display: flex; flex-wrap: nowrap; align-items: center; gap: 32px; margin: 0; padding: 0; list-style: none; }
+.pb-e2e-header .pb-e2e-header__nav li { display: flex; align-items: center; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav a.wp-block-navigation-item__content { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 400; line-height: 24px; letter-spacing: 0; color: #e2e8f0; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-header .pb-e2e-header__inner { flex-direction: column; justify-content: center; height: auto; padding: 16px 24px; gap: 4px; }
+  .pb-e2e-header .pb-e2e-header__nav ul { gap: 24px; }
+  .pb-e2e-header .pb-e2e-header__nav a.wp-block-navigation-item__content { padding: 10px 0; }
+}
+
+/* hero-split: full-bleed warm band, heading + intro + one primary call to action. */
+section.pb-e2e-hero { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #fef3c7; }
+.pb-e2e-hero .pb-e2e-hero__inner { box-sizing: border-box; max-width: 1200px; margin: 0 auto; padding: 96px 24px; }
+.pb-e2e-hero .pb-e2e-hero__title { box-sizing: border-box; max-width: 760px; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 56px; font-weight: 700; line-height: 64px; letter-spacing: 0; color: #111827; }
+.pb-e2e-hero .pb-e2e-hero__text { box-sizing: border-box; max-width: 640px; margin: 24px 0 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: 400; line-height: 30px; letter-spacing: 0; color: #374151; }
+.pb-e2e-hero .pb-e2e-hero__actions { display: block; margin: 40px 0 0; padding: 0; }
+.pb-e2e-hero .pb-e2e-hero__cta { box-sizing: border-box; display: inline-block; margin: 0; padding: 16px 28px; border: 0; border-radius: 8px; background: #1d4ed8; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; line-height: 24px; letter-spacing: 0; color: #ffffff; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-hero .pb-e2e-hero__inner { padding: 64px 24px; }
+  .pb-e2e-hero .pb-e2e-hero__title { font-size: 40px; line-height: 48px; }
+}
+
+/* feature-grid: full-bleed white band, centred heading, three equal cards. */
+section.pb-e2e-features { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #ffffff; }
+.pb-e2e-features .pb-e2e-features__inner { box-sizing: border-box; max-width: 1200px; margin: 0 auto; padding: 96px 24px; }
+.pb-e2e-features .pb-e2e-features__title { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 40px; font-weight: 700; line-height: 48px; letter-spacing: 0; text-align: center; color: #111827; }
+.pb-e2e-features .pb-e2e-features__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin: 56px 0 0; padding: 0; }
+.pb-e2e-features .pb-e2e-features__card { box-sizing: border-box; margin: 0; padding: 32px; border: 0; border-radius: 12px; background: #f1f5f9; }
+.pb-e2e-features .pb-e2e-features__card-title { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 24px; font-weight: 700; line-height: 32px; letter-spacing: 0; color: #111827; }
+.pb-e2e-features .pb-e2e-features__card-text { margin: 12px 0 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 400; line-height: 26px; letter-spacing: 0; color: #475569; }
+@media (max-width: 699px) {
+  .pb-e2e-features .pb-e2e-features__inner { padding: 64px 24px; }
+  .pb-e2e-features .pb-e2e-features__grid { grid-template-columns: minmax(0, 1fr); gap: 24px; margin-top: 40px; }
+}
+
+/* cta-band: full-bleed blue band, centred heading, copy and a light button. */
+section.pb-e2e-cta { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #1d4ed8; }
+.pb-e2e-cta .pb-e2e-cta__inner { box-sizing: border-box; max-width: 1200px; margin: 0 auto; padding: 80px 24px; text-align: center; }
+.pb-e2e-cta .pb-e2e-cta__title { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 36px; font-weight: 700; line-height: 44px; letter-spacing: 0; text-align: center; color: #ffffff; }
+.pb-e2e-cta .pb-e2e-cta__text { margin: 16px 0 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 400; line-height: 28px; letter-spacing: 0; text-align: center; color: #dbeafe; }
+.pb-e2e-cta .pb-e2e-cta__actions { display: block; margin: 32px 0 0; padding: 0; text-align: center; }
+.pb-e2e-cta .pb-e2e-cta__button { box-sizing: border-box; display: inline-block; margin: 0; padding: 16px 28px; border: 0; border-radius: 8px; background: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; line-height: 24px; letter-spacing: 0; color: #1d4ed8; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-cta .pb-e2e-cta__inner { padding: 64px 24px; }
+  .pb-e2e-cta .pb-e2e-cta__title { font-size: 30px; line-height: 38px; }
+}
+
+/* site-footer: full-bleed dark band, copyright left, navigation right. */
+footer.pb-e2e-footer { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
+.pb-e2e-footer .pb-e2e-footer__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+.pb-e2e-footer .pb-e2e-footer__copy { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: 0; color: #cbd5e1; }
+.pb-e2e-footer .pb-e2e-footer__nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav ul { display: flex; flex-wrap: nowrap; align-items: center; gap: 24px; margin: 0; padding: 0; list-style: none; }
+.pb-e2e-footer .pb-e2e-footer__nav li { display: flex; align-items: center; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav a.wp-block-navigation-item__content { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: 0; color: #e2e8f0; text-decoration: underline; }
+@media (max-width: 699px) {
+  .pb-e2e-footer .pb-e2e-footer__inner { flex-direction: column; gap: 8px; padding: 32px 24px; }
+  .pb-e2e-footer .pb-e2e-footer__nav a.wp-block-navigation-item__content { min-width: 44px; padding: 12px 0; text-align: center; }
+}
+</style>
+</head>
+<body>
+<header class="pb-e2e-header">
+	<div class="pb-e2e-header__inner">
+		<span class="pb-e2e-header__logo">Northwind Solar</span>
+		<div class="pb-e2e-header__nav"><nav class="wp-block-navigation"><ul class="wp-block-navigation__container"><li class="wp-block-navigation-item"><a class="wp-block-navigation-item__content" href="#features"><span class="wp-block-navigation-item__label">Features</span></a></li><li class="wp-block-navigation-item"><a class="wp-block-navigation-item__content" href="#pricing"><span class="wp-block-navigation-item__label">Pricing</span></a></li><li class="wp-block-navigation-item"><a class="wp-block-navigation-item__content" href="#contact"><span class="wp-block-navigation-item__label">Contact</span></a></li></ul></nav></div>
+	</div>
+</header>
+<section class="pb-e2e-hero">
+	<div class="pb-e2e-hero__inner">
+		<h1 class="pb-e2e-hero__title">Solar installation without the guesswork</h1>
+		<p class="pb-e2e-hero__text">Northwind designs, permits and finishes your solar installation in six weeks, for one fixed price agreed up front.</p>
+		<div class="pb-e2e-hero__actions">
+			<a class="pb-e2e-hero__cta" href="#contact">Get a free quote</a>
+		</div>
+	</div>
+</section>
+<section class="pb-e2e-features">
+	<div class="pb-e2e-features__inner">
+		<h2 class="pb-e2e-features__title">Why homeowners choose Northwind</h2>
+		<div class="pb-e2e-features__grid">
+			<div class="pb-e2e-features__card">
+				<h3 class="pb-e2e-features__card-title">One fixed price</h3>
+				<p class="pb-e2e-features__card-text">The quote you sign is the price you pay. Permits, panels and wiring are all included.</p>
+			</div>
+			<div class="pb-e2e-features__card">
+				<h3 class="pb-e2e-features__card-title">Six-week schedule</h3>
+				<p class="pb-e2e-features__card-text">Survey, design, permits and install are planned in one timeline you can follow online.</p>
+			</div>
+			<div class="pb-e2e-features__card">
+				<h3 class="pb-e2e-features__card-title">25-year warranty</h3>
+				<p class="pb-e2e-features__card-text">Panels, inverter and workmanship are covered for 25 years by one local team.</p>
+			</div>
+		</div>
+	</div>
+</section>
+<section class="pb-e2e-cta">
+	<div class="pb-e2e-cta__inner">
+		<h2 class="pb-e2e-cta__title">See what your roof can produce</h2>
+		<p class="pb-e2e-cta__text">Book a free site visit and get a written estimate within two days.</p>
+		<div class="pb-e2e-cta__actions">
+			<a class="pb-e2e-cta__button" href="/contact/">Book a site visit</a>
+		</div>
+	</div>
+</section>
+<footer class="pb-e2e-footer">
+	<div class="pb-e2e-footer__inner">
+		<p class="pb-e2e-footer__copy">Copyright 2026 Northwind Solar</p>
+		<div class="pb-e2e-footer__nav"><nav class="wp-block-navigation"><ul class="wp-block-navigation__container"><li class="wp-block-navigation-item"><a class="wp-block-navigation-item__content" href="/privacy/"><span class="wp-block-navigation-item__label">Privacy</span></a></li><li class="wp-block-navigation-item"><a class="wp-block-navigation-item__content" href="/terms/"><span class="wp-block-navigation-item__label">Terms</span></a></li></ul></nav></div>
+	</div>
+</footer>
+</body>
+</html>

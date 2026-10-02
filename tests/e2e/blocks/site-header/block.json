@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "proto-blocks/site-header",
+  "title": "Site Header",
+  "description": "E2E fixture: site header band with the logo text and a navigation slot.",
+  "category": "proto-blocks",
+  "supports": { "html": false, "anchor": true },
+  "protoBlocks": {
+    "version": "1.0",
+    "template": "template.php",
+    "useTailwind": false,
+    "fields": {
+      "logo": { "type": "text", "tagName": "span", "format": "plain" },
+      "navigation": {
+        "type": "inner-blocks",
+        "allowedBlocks": ["core/navigation"],
+        "template": [["core/navigation", { "overlayMenu": "never" }]],
+        "templateLock": false,
+        "orientation": "horizontal"
+      }
+    }
+  }
+}

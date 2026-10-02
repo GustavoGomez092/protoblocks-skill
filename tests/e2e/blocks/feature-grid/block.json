@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "proto-blocks/feature-grid",
+  "title": "Feature Grid",
+  "description": "E2E fixture: section heading over a three-card grid.",
+  "category": "proto-blocks",
+  "supports": { "html": false, "anchor": true },
+  "protoBlocks": {
+    "version": "1.0",
+    "template": "template.php",
+    "useTailwind": false,
+    "fields": {
+      "heading": { "type": "text", "tagName": "h2", "format": "plain" },
+      "cards": {
+        "type": "repeater",
+        "min": 1,
+        "max": 6,
+        "itemLabel": "title",
+        "collapsible": true,
+        "fields": {
+          "title": { "type": "text", "tagName": "h3", "format": "plain", "label": "Title" },
+          "text": { "type": "text", "tagName": "p", "format": "plain", "label": "Text" }
+        }
+      }
+    }
+  }
+}

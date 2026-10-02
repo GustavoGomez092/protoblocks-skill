@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "proto-blocks/cta-band",
+  "title": "CTA Band",
+  "description": "E2E fixture: full-bleed call-to-action band.",
+  "category": "proto-blocks",
+  "supports": { "html": false, "anchor": true },
+  "protoBlocks": {
+    "version": "1.0",
+    "template": "template.php",
+    "useTailwind": false,
+    "fields": {
+      "heading": { "type": "text", "tagName": "h2", "format": "plain" },
+      "text": { "type": "text", "tagName": "p", "format": "plain" },
+      "cta": { "type": "link", "tagName": "a" }
+    }
+  }
+}

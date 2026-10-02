@@ -1,0 +1,11 @@
+/* cta-band: full-bleed blue band, centred heading, copy and a light button. */
+section.pb-e2e-cta { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #1d4ed8; }
+.pb-e2e-cta .pb-e2e-cta__inner { box-sizing: border-box; max-width: 1200px; margin: 0 auto; padding: 80px 24px; text-align: center; }
+.pb-e2e-cta .pb-e2e-cta__title { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 36px; font-weight: 700; line-height: 44px; letter-spacing: 0; text-align: center; color: #ffffff; }
+.pb-e2e-cta .pb-e2e-cta__text { margin: 16px 0 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 400; line-height: 28px; letter-spacing: 0; text-align: center; color: #dbeafe; }
+.pb-e2e-cta .pb-e2e-cta__actions { display: block; margin: 32px 0 0; padding: 0; text-align: center; }
+.pb-e2e-cta .pb-e2e-cta__button { box-sizing: border-box; display: inline-block; margin: 0; padding: 16px 28px; border: 0; border-radius: 8px; background: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; line-height: 24px; letter-spacing: 0; color: #1d4ed8; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-cta .pb-e2e-cta__inner { padding: 64px 24px; }
+  .pb-e2e-cta .pb-e2e-cta__title { font-size: 30px; line-height: 38px; }
+}

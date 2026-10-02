@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "proto-blocks/hero-split",
+  "title": "Hero Split",
+  "description": "E2E fixture: hero band with the page heading, intro copy and one call to action.",
+  "category": "proto-blocks",
+  "supports": { "html": false, "anchor": true },
+  "protoBlocks": {
+    "version": "1.0",
+    "template": "template.php",
+    "useTailwind": false,
+    "fields": {
+      "heading": { "type": "text", "tagName": "h1", "format": "plain" },
+      "text": { "type": "text", "tagName": "p", "format": "plain" },
+      "cta": { "type": "link", "tagName": "a" }
+    }
+  }
+}

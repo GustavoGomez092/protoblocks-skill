@@ -1,0 +1,18 @@
+/* site-header: full-bleed dark band, 1200px container, logo left, navigation right. */
+/* Page reset WordPress core prints as global styles (:where(body) { margin: 0; }). Sites with Proto-Blocks'
+   "Disable WP Global Styles" on never get it, and the browser's 8px body margin makes every full-bleed band 16px
+   narrower than the viewport. The header is on every page, so it carries the same zero-specificity reset. */
+:where(body) { margin: 0; }
+header.pb-e2e-header { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
+.pb-e2e-header .pb-e2e-header__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; height: 80px; margin: 0 auto; padding: 0 24px; }
+.pb-e2e-header .pb-e2e-header__logo { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; line-height: 28px; letter-spacing: 0; color: #ffffff; }
+.pb-e2e-header .pb-e2e-header__nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav ul { display: flex; flex-wrap: nowrap; align-items: center; gap: 32px; margin: 0; padding: 0; list-style: none; }
+.pb-e2e-header .pb-e2e-header__nav li { display: flex; align-items: center; margin: 0; padding: 0; }
+.pb-e2e-header .pb-e2e-header__nav a.wp-block-navigation-item__content { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 400; line-height: 24px; letter-spacing: 0; color: #e2e8f0; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-header .pb-e2e-header__inner { flex-direction: column; justify-content: center; height: auto; padding: 16px 24px; gap: 4px; }
+  .pb-e2e-header .pb-e2e-header__nav ul { gap: 24px; }
+  .pb-e2e-header .pb-e2e-header__nav a.wp-block-navigation-item__content { padding: 10px 0; }
+}

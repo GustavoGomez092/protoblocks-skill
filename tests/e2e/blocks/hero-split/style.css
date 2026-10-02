@@ -1,0 +1,11 @@
+/* hero-split: full-bleed warm band, heading + intro + one primary call to action. */
+section.pb-e2e-hero { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #fef3c7; }
+.pb-e2e-hero .pb-e2e-hero__inner { box-sizing: border-box; max-width: 1200px; margin: 0 auto; padding: 96px 24px; }
+.pb-e2e-hero .pb-e2e-hero__title { box-sizing: border-box; max-width: 760px; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 56px; font-weight: 700; line-height: 64px; letter-spacing: 0; color: #111827; }
+.pb-e2e-hero .pb-e2e-hero__text { box-sizing: border-box; max-width: 640px; margin: 24px 0 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: 400; line-height: 30px; letter-spacing: 0; color: #374151; }
+.pb-e2e-hero .pb-e2e-hero__actions { display: block; margin: 40px 0 0; padding: 0; }
+.pb-e2e-hero .pb-e2e-hero__cta { box-sizing: border-box; display: inline-block; margin: 0; padding: 16px 28px; border: 0; border-radius: 8px; background: #1d4ed8; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; line-height: 24px; letter-spacing: 0; color: #ffffff; text-decoration: none; }
+@media (max-width: 699px) {
+  .pb-e2e-hero .pb-e2e-hero__inner { padding: 64px 24px; }
+  .pb-e2e-hero .pb-e2e-hero__title { font-size: 40px; line-height: 48px; }
+}

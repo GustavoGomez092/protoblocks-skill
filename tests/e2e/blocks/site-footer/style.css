@@ -1,0 +1,13 @@
+/* site-footer: full-bleed dark band, copyright left, navigation right. */
+footer.pb-e2e-footer { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
+.pb-e2e-footer .pb-e2e-footer__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+.pb-e2e-footer .pb-e2e-footer__copy { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: 0; color: #cbd5e1; }
+.pb-e2e-footer .pb-e2e-footer__nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav nav { display: block; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav ul { display: flex; flex-wrap: nowrap; align-items: center; gap: 24px; margin: 0; padding: 0; list-style: none; }
+.pb-e2e-footer .pb-e2e-footer__nav li { display: flex; align-items: center; margin: 0; padding: 0; }
+.pb-e2e-footer .pb-e2e-footer__nav a.wp-block-navigation-item__content { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: 0; color: #e2e8f0; text-decoration: underline; }
+@media (max-width: 699px) {
+  .pb-e2e-footer .pb-e2e-footer__inner { flex-direction: column; gap: 8px; padding: 32px 24px; }
+  .pb-e2e-footer .pb-e2e-footer__nav a.wp-block-navigation-item__content { min-width: 44px; padding: 12px 0; text-align: center; }
+}
