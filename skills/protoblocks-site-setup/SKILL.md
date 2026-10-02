@@ -57,7 +57,7 @@ Links to pages that do not exist yet are normal: they are reported in `pending` 
 ## Step 4 - Header/footer parts
 
 1. List saved Site Editor copies: `node "$PB/lib/parts.mjs" overrides "$THEME"`. An empty list `[]` means none.
-2. If a `header`/`footer` copy exists, show the developer what would be discarded and ask. Only after their explicit OK run `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`, where `<n>` is the id previewed by the `[ECONFIRM]` error (run it once without `--confirm` to get the preview). The copy goes to Trash; the printed recovery command restores it.
+2. If a `header`/`footer` copy exists, run the preview first (no `--confirm`), show the developer what would be discarded and ask. An approval counts only if the developer gives it AFTER you have shown them the preview; "remove it" said earlier is not the OK. Wait for it, then run `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`, where `<n>` is the id previewed by the `[ECONFIRM]` error (run it once without `--confirm` to get the preview). The copy goes to Trash; the printed recovery command restores it.
 3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html` and records `site.parts.header` in the build state; `status.mjs` treats setup as unfinished without it).
 
 The printed recovery command uses the same WP-CLI command preflight resolved (Local's wrapper at `wp-content/.protoblocks/wp`, or `wp --path=...`), never a bare `wp` that may target another install.
@@ -70,7 +70,7 @@ See `references/errors.md` (`ENOTFORK`, `EWRONGSITE`, `EARGV`, `ENAVKEY`, `ENORU
 
 ## Iron rules
 
-- Never pass `--force`, `--refork`, `--update-plugins` or `--confirm` without the developer's explicit OK for that exact action.
+- Never pass `--force`, `--refork`, `--update-plugins` or `--confirm` without the developer's explicit OK for that exact action. An approval counts only if the developer gives it AFTER you have shown them the refusal or preview for that exact action; instructions given before that are not the OK. Show it, ask, wait.
 - Never edit the vendored theme `scripts/`.
 - Managed files (`inc/pb-*.php`, `assets/js/pb-*.js`, the functions.php managed block) are overwritten by `theme-assets.mjs install` (also run by `setup-site.mjs`); keep custom code elsewhere.
 - Never use `register_nav_menus` or classic menus.

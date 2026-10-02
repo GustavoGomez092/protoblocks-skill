@@ -122,6 +122,13 @@ for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join
   });
 }
 
+for (const skill of ['protoblocks-site-builder', 'protoblocks-site-setup']) {
+  test(`${skill}/SKILL.md states that approvals only count after the preview/refusal was shown`, () => {
+    const text = fs.readFileSync(path.join(SKILLS, skill, 'SKILL.md'), 'utf8');
+    assert.match(text, /AFTER you have shown/);
+  });
+}
+
 // Executable doc blocks: <!-- test:run --> (or <!-- test:run fixture=<name> -->) immediately followed by a ```bash fence.
 function runnableBlocks(text) {
   return [...text.matchAll(/<!-- test:run(?: fixture=([a-z]+))? -->\n```bash\n([\s\S]*?)\n```/g)].map((m) => ({ fixture: m[1] ?? 'default', block: m[2] }));

@@ -64,9 +64,9 @@ Write `seo.json`, then:
 node "$PB/lib/seo.mjs" apply "$THEME" <page> seo.json [--force] [--force-organization]
 ```
 
-`apply` validates first. `[ESEO]` lists every problem: fix the values and re-run (nothing was written). Rules: the title rendered with the site's real name and Yoast separator is at most 60 chars; keyword is 1-4 lowercase words without `%`, `<`, `>`; description is 120-156 chars with no newline; schema page type is a supported one; organization socials are https. Missing files (`[EFILE]`) and a missing page or postId (`[ENOPAGE]`) also stop it before any import. `[EEDITED]`: a Yoast value it would overwrite was set outside the skill (listed with its live and last-applied value); put the developer's value in `seo.json`, or pass `--force` only when they agree to the overwrite.
+`apply` validates first. `[ESEO]` lists every problem: fix the values and re-run (nothing was written). Rules: the title rendered with the site's real name and Yoast separator is at most 60 chars; keyword is 1-4 lowercase words without `%`, `<`, `>`; description is 120-156 chars with no newline; schema page type is a supported one; organization socials are https. Missing files (`[EFILE]`) and a missing page or postId (`[ENOPAGE]`) also stop it before any import. `[EEDITED]`: a Yoast value it would overwrite was set outside the skill (listed with its live and last-applied value); put the developer's value in `seo.json`, or pass `--force` only when they agree after seeing it.
 
-Read and relay the result fields (`jsonld`, `organization`, `media`, `index`, `warnings`): meanings and the Organization policy are in `references/apply.md`. Never pass `--force-organization` unless the developer explicitly asks for the overwrite.
+Read and relay the result fields (`jsonld`, `organization`, `media`, `index`, `warnings`): meanings and the Organization policy are in `references/apply.md`. Never pass `--force-organization` unless the developer asks for the overwrite after seeing the refusal.
 
 ## Step 6 - Audit and fix
 
