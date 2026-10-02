@@ -1,12 +1,16 @@
 # Design tokens
 
-`tokens.mjs apply` turns one JSON file into `tailwind-theme.css` (Tailwind v4 `@theme`), the `theme.json` palette/fonts/sizes and the Google Fonts `@import` in `style.css`, then compiles Tailwind and saves the tokens to `site.tokens` in the build state.
+`tokens.mjs apply` turns one JSON file into `tailwind-theme.css` (Tailwind v4 `@theme`), the `theme.json` palette/fonts/sizes, the site's body font and the Google Fonts `@import` in `style.css`, then compiles Tailwind and saves the tokens to `site.tokens` in the build state.
 
 ```bash
 node "$PB/lib/tokens.mjs" apply "$THEME" "$THEME/.protoblocks/tokens.json" [--no-compile]
 ```
 
-Prints `{ "written": ["tailwind-theme.css","theme.json","style.css"], "compiled": {...} }`.
+Prints `{ "written": ["tailwind-theme.css","theme.json","style.css"], "compiled": {...} }`, plus `warnings` when something could not be applied (relay them).
+
+## Body font
+
+The body font is `fonts.body`, else `fonts.sans`, else `fonts.text`/`fonts.base`, else the first font. `apply` sets `theme.json` `styles.typography.fontFamily` to its preset variable (e.g. `var(--wp--preset--font-family--sans)`) and rewrites the fork's top-level `body { font-family: … }` rule in `style.css` (the upstream theme hardcodes Inter there) to the token font stack. That rule is wrapped in `/* >>> protoblocks: body font … */` markers on the first run; later runs only rewrite the declaration between them. If `style.css` has no such rule, a warning is reported and only `theme.json` applies the font.
 
 ## Shape
 
@@ -50,4 +54,4 @@ Fonts: give `google` only to fonts that exist on Google Fonts. For any other fon
 
 `--color-accent` -> `bg-accent`, `text-accent`; `--text-h1` (+ `--text-h1--line-height`, `--letter-spacing`, `--font-weight`) -> `text-h1`; `--font-display` -> `font-display`; `--radius-card` -> `rounded-card`; `--shadow-soft` -> `shadow-soft`; `--spacing-section` -> `p-section`, `py-section`, `gap-section`.
 
-Re-applying overwrites `tailwind-theme.css`, the `theme.json` palette/fontFamilies/fontSizes (only for groups you provide) and the managed Google Fonts `@import` line. Never hand-edit those; change the tokens JSON and re-apply.
+Re-applying overwrites `tailwind-theme.css`, the `theme.json` palette/fontFamilies/fontSizes and `styles.typography.fontFamily` (only for groups you provide), the managed body font rule and the managed Google Fonts `@import` line. Never hand-edit those; change the tokens JSON and re-apply.

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import {
   validateTokens, renderTailwindTheme, mergeThemeJson, googleFontsUrl, rewriteFontImport, applyTokens, runApply,
+  rewriteBodyFont, bodyFontSlug, presetVar,
 } from '../../skills/protoblocks-site-builder/scripts/lib/tokens.mjs';
 
 const tokens = {
@@ -328,4 +329,101 @@ test('fuzz: any shadow value that validates renders only well-formed @theme line
   assert.ok(probe((v) => ({ colors: { a: '#000' }, shadows: { s: v } })) > 0, 'some characters should still be accepted');
   probe((v) => ({ colors: { a: v.replace(/^0 0 1px /, 'rgb(0 0 0 / ') + ')' } }), LINE_CALC);
   probe((v) => ({ colors: { a: '#000' }, spacing: { s: v.replace(/^0 0 1px /, 'calc(1px + ') + ')' } }), LINE_CALC);
+});
+
+// ---- I3: the design's fonts reach theme.json styles and the fork's style.css ----
+const UPSTREAM_STYLE = `/*
+Theme Name: Acme
+Text Domain: acme
+Proto Fork: proto-blocks-theme@1.1.3
+*/
+
+/* Optional web font — swap or remove. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+/* Base typography */
+body {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+.wp-site-blocks {
+  display: flex;
+}
+.editor-styles-wrapper body {
+  font-family: serif;
+}
+`;
+
+test('bodyFontSlug prefers body, then sans, then text/base, then the first font', () => {
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, sans: { family: 'B' }, body: { family: 'C' } } }), 'body');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, sans: { family: 'B' } } }), 'sans');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, text: { family: 'B' } } }), 'text');
+  assert.equal(bodyFontSlug({ fonts: { display: { family: 'A' }, mono: { family: 'B' } } }), 'display');
+  assert.equal(bodyFontSlug({ colors: { a: '#000' } }), null);
+});
+
+test('presetVar names presets the way WordPress kebab-cases slugs', () => {
+  assert.equal(presetVar('sans'), 'var(--wp--preset--font-family--sans)');
+  assert.equal(presetVar('sans2'), 'var(--wp--preset--font-family--sans-2)');
+  assert.equal(presetVar('body-text'), 'var(--wp--preset--font-family--body-text)');
+});
+
+test('mergeThemeJson sets styles.typography.fontFamily to the body font preset and keeps other styles', () => {
+  const base = { version: 3, styles: { color: { text: '#000' }, typography: { lineHeight: '1.5' } } };
+  const out = mergeThemeJson(base, tokens);
+  assert.equal(out.styles.typography.fontFamily, 'var(--wp--preset--font-family--sans)');
+  assert.equal(out.styles.typography.lineHeight, '1.5');
+  assert.deepEqual(out.styles.color, { text: '#000' });
+  assert.equal(base.styles.typography.fontFamily, undefined, 'input not mutated');
+  assert.equal(mergeThemeJson({ version: 3 }, { colors: { a: '#000' } }).styles, undefined, 'no fonts: styles untouched');
+});
+
+test('rewriteBodyFont replaces only the top-level body font-family inside a managed region, idempotently', () => {
+  const stack = '"Fraunces", ui-serif, serif';
+  const once = rewriteBodyFont(UPSTREAM_STYLE, stack);
+  assert.equal(once.warning, undefined);
+  assert.match(once.css, /body \{\n  font-family: "Fraunces", ui-serif, serif;\n\}/);
+  assert.doesNotMatch(once.css, /Roboto, Helvetica/);
+  assert.match(once.css, /\.editor-styles-wrapper body \{\n  font-family: serif;/, 'other rules untouched');
+  assert.equal(once.css.split('protoblocks: body font').length - 1, 2, 'one start and one end marker');
+  assert.equal(rewriteBodyFont(once.css, stack).css, once.css, 'idempotent');
+  const changed = rewriteBodyFont(once.css, '"Inter", ui-sans-serif, sans-serif').css;
+  assert.match(changed, /font-family: "Inter", ui-sans-serif, sans-serif;/);
+  assert.doesNotMatch(changed, /Fraunces/);
+  assert.equal(changed.split('protoblocks: body font').length - 1, 2);
+  // Everything outside the body rule is byte-identical.
+  const strip = (c) => c.replace(/\/\* >>> protoblocks: body font[\s\S]*?<<< protoblocks: body font \*\//, '').replace(/^body \{[^}]*\}/m, '');
+  assert.equal(strip(once.css), strip(UPSTREAM_STYLE));
+});
+
+test('rewriteBodyFont keeps other declarations in the body rule', () => {
+  const r = rewriteBodyFont('body {\n  margin: 0;\n  font-family: Inter;\n  color: red;\n}\n', '"X", serif');
+  assert.match(r.css, /margin: 0;\n  font-family: "X", serif;\n  color: red;/);
+});
+
+test('rewriteBodyFont without a body font-family rule warns and changes nothing', () => {
+  for (const css of ['/*\nTheme Name: X\n*/\nbody{}', '/*\nTheme Name: X\n*/\n.x{font-family:a;}', 'body.home { font-family: a; }']) {
+    const r = rewriteBodyFont(css, '"X", serif');
+    assert.equal(r.css, css);
+    assert.match(r.warning, /body/);
+  }
+});
+
+test('applyTokens applies the body font to style.css and theme.json; warns when the rule is missing', () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), UPSTREAM_STYLE);
+  fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
+  const r = applyTokens(theme, { colors: { a: '#000' }, fonts: { display: { family: 'Fraunces' }, sans: { family: 'Work Sans', google: [400] } } });
+  const css = fs.readFileSync(path.join(theme, 'style.css'), 'utf8');
+  assert.match(css, /body \{\n  font-family: "Work Sans", ui-sans-serif, system-ui, sans-serif;\n\}/);
+  assert.match(css, /family=Work\+Sans/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(theme, 'theme.json'), 'utf8')).styles.typography.fontFamily, 'var(--wp--preset--font-family--sans)');
+  assert.equal(r.warnings, undefined);
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
+  fs.writeFileSync(path.join(bare, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\n.x{}');
+  fs.writeFileSync(path.join(bare, 'theme.json'), '{"version":3}');
+  const w = applyTokens(bare, { colors: { a: '#000' }, fonts: { sans: { family: 'Inter' } } });
+  assert.ok(w.warnings.some((x) => /body/.test(x)), JSON.stringify(w));
 });
