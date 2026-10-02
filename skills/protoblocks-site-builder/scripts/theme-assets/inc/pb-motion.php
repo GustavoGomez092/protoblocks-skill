@@ -37,6 +37,8 @@ add_action('wp_head', function () {
         'distance' => (float) $profile['distance'],
     ];
     echo '<style id="pb-motion-css">[data-pb-motion][data-proto-animate="manual"]{opacity:0}</style>' . "\n";
+    // Without JS (and without the Proto-Blocks plugin's own fallback) nothing would ever reveal the content.
+    echo '<noscript><style>[data-pb-motion][data-proto-animate]{opacity:1!important}</style></noscript>' . "\n";
     echo '<script id="pb-motion-profile">window.pbMotionProfile='
         . wp_json_encode($profile, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
         . ';</script>' . "\n";

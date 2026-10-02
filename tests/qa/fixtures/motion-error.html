@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <h1 id="e1" data-pb-motion="fade-up" data-proto-animate="manual">Preset that fails</h1>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script>
+    // Simulate a preset failing after its from-state rendered (the tween is created and paused, then ScrollTrigger throws).
+    (function () {
+      var real = window.ScrollTrigger.create, thrown = false;
+      window.ScrollTrigger.create = function (vars) {
+        if (!thrown && vars && vars.trigger && vars.trigger.id === 'e1') { thrown = true; throw new Error('forced preset failure'); }
+        return real.apply(this, arguments);
+      };
+    })();
+  </script>
+  <script src="/runtime/pb-motion.js"></script>
+</body></html>

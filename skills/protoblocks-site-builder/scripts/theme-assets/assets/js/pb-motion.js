@@ -28,7 +28,7 @@
       stagger: num(el, 'data-pb-stagger', profile.stagger),
       distance: num(el, 'data-pb-distance', profile.distance),
       speed: num(el, 'data-pb-speed', 1),
-      start: el.getAttribute('data-pb-start') || 'top 85%'
+      start: el.getAttribute('data-pb-start') || null
     };
   }
   function done(el) {
@@ -79,15 +79,32 @@
           Object.assign(lines ? { yPercent: 0 } : { opacity: 1, y: 0 }, { stagger: lines ? o.stagger : o.stagger / 4, onComplete: function () { split.revert(); } }, base));
       }
       case 'counter': {
-        var c = parseCounter(el.textContent);
+        // The authored text is stored once and always parsed from there, so teardown/re-init never re-reads "0".
+        if (!el.hasAttribute('data-pb-counter-text')) el.setAttribute('data-pb-counter-text', el.textContent);
+        var original = el.getAttribute('data-pb-counter-text');
+        var c = parseCounter(original);
         g.set(el, { opacity: 1 });
         if (!c) return g.fromTo(el, { opacity: 0 }, Object.assign({ opacity: 1 }, base));
         var state = { v: 0 };
+        var finish = function () { el.textContent = original; el.removeAttribute('aria-label'); };
+        own(el, finish);
+        el.setAttribute('aria-label', original); // screen readers get the real value while the visible text counts up
         el.textContent = formatCounter(c, 0);
-        return g.to(state, Object.assign({ v: c.value, duration: Math.max(1, o.duration * 2), onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: function () { el.textContent = formatCounter(c, c.value); } }, { ease: o.ease, delay: o.delay }));
+        return g.to(state, Object.assign({ v: c.value, duration: Math.max(1, o.duration * 2), onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish }, { ease: o.ease, delay: o.delay }));
       }
     }
     return null;
+  }
+
+  // Default start: 'top 85%', capped just below the last reachable scroll position. Elements in the last ~15% of
+  // a document can never reach 'top 85%'. GSAP's clamp() fixes that end but also clamps above-the-fold elements
+  // to 0, and a trigger never fires at scroll 0, so hero content would wait for the first scroll.
+  // Recomputed by ScrollTrigger on every refresh (resize, late images, fonts).
+  function defaultStart(el) {
+    return function () {
+      var natural = el.getBoundingClientRect().top + (window.pageYOffset || 0) - window.innerHeight * 0.85;
+      return Math.min(natural, window.ScrollTrigger.maxScroll(window) - 1);
+    };
   }
 
   function initReveal(el, name) {
@@ -96,10 +113,36 @@
     if (!tween) { done(el); return; }
     tween.pause();
     var st = window.ScrollTrigger.create({
-      trigger: el, start: o.start, once: true,
+      trigger: el, start: o.start || defaultStart(el), once: true,
       onEnter: function () { tween.eventCallback('onComplete', (function (prev) { return function () { if (prev) prev(); done(el); }; })(tween.eventCallback('onComplete'))); tween.play(); }
     });
-    own(el, function () { st.kill(); tween.kill(); });
+    // Self-backstop: if anything else (e.g. the Proto-Blocks reveal watchdog) marks this element done before the
+    // tween finished, jump the tween to its end so clearProps runs and GSAP's inline from-state never wins.
+    var mo = new MutationObserver(function () {
+      if (el.getAttribute('data-proto-animate') !== 'done') return;
+      mo.disconnect();
+      st.kill();
+      if (tween.progress() < 1) tween.progress(1);
+    });
+    mo.observe(el, { attributes: true, attributeFilter: ['data-proto-animate'] });
+    own(el, function () { mo.disconnect(); st.kill(); tween.kill(); });
+  }
+
+  // Duplicate the track's content for a seamless loop. The copy is hidden from assistive tech, made inert,
+  // and stripped of ids; bare text nodes are wrapped in a span so they can carry those attributes too.
+  function cloneForLoop(track) {
+    Array.prototype.slice.call(track.childNodes).forEach(function (node) {
+      var copy;
+      if (node.nodeType === 1) copy = node.cloneNode(true);
+      else if (node.nodeType === 3 && node.nodeValue.trim()) { copy = document.createElement('span'); copy.textContent = node.nodeValue; }
+      else return;
+      copy.removeAttribute('id');
+      Array.prototype.forEach.call(copy.querySelectorAll('[id]'), function (n) { n.removeAttribute('id'); });
+      copy.setAttribute('aria-hidden', 'true');
+      copy.setAttribute('inert', '');
+      copy.setAttribute('data-pb-clone', '');
+      track.appendChild(copy);
+    });
   }
 
   function initContinuous(el, name) {
@@ -111,7 +154,7 @@
     } else if (name === 'marquee') {
       var track = el.firstElementChild;
       if (!track) return;
-      if (!track.getAttribute('data-pb-cloned')) { track.innerHTML += track.innerHTML; track.setAttribute('data-pb-cloned', '1'); }
+      if (!track.getAttribute('data-pb-cloned')) { cloneForLoop(track); track.setAttribute('data-pb-cloned', '1'); }
       var m = g.to(track, { xPercent: -50, ease: 'none', duration: 20 / o.speed, repeat: -1 });
       own(el, function () { m.kill(); g.set(track, { clearProps: 'transform' }); });
     }
@@ -131,6 +174,7 @@
         else if (CONTINUOUS.indexOf(name) >= 0) initContinuous(el, name);
         else done(el);
       } catch (e) {
+        if (window.gsap) { try { window.gsap.set(el, { clearProps: 'opacity,transform,clipPath' }); } catch (e2) {} }
         done(el);
         if (window.console) console.warn('[pb-motion] ' + name + ' failed:', e);
       }
