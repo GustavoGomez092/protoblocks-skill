@@ -373,3 +373,84 @@ foreach ($hooks as [$h, $cb, $p]) { if ($h === 'wp_head' && $p === 2) $cb(); }
     assert.equal(await opacity(true), '0', 'JS on: anti-flash CSS still hides until the runtime reveals');
   } finally { await browser.close(); }
 });
+
+// The <head> pb-motion.php prints in WordPress, rendered by a stub harness.
+function phpHead() {
+  const dir = tmpDir('pb-motion-php-');
+  const harness = path.join(dir, 'harness.php');
+  fs.writeFileSync(harness, `<?php
+define('ABSPATH', '/');
+$hooks = [];
+function add_action($h, $cb, $p = 10) { global $hooks; $hooks[] = [$h, $cb, $p]; }
+function is_admin() { return false; }
+function get_stylesheet_directory() { return ${JSON.stringify(dir)}; }
+function wp_json_encode($d, $f = 0) { return json_encode($d, $f); }
+require ${JSON.stringify(PHP_FILE)};
+foreach ($hooks as [$h, $cb, $p]) { if ($h === 'wp_head' && $p === 2) $cb(); }
+`);
+  const r = spawnSync('php', [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+}
+
+// A page with the real head CSS: one hero reveal (#hero) and one far below the fold (#low).
+const failsafePage = (head) => `<!doctype html><html><head>${head}</head><body>
+  <h1 id="hero" data-pb-motion="fade-up" data-proto-animate="manual">Hero</h1>
+  <div style="height:3000px"></div>
+  <p id="low" data-pb-motion="fade-in" data-proto-animate="manual">Low</p>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/__runtime"></script>
+</body></html>`;
+
+async function withFailsafePage({ reducedMotion = false, runtime = 'now' } = {}, fn) {
+  const srv = await serveFixtures({ '/failsafe.html': { body: failsafePage(phpHead()), type: 'text/html' } });
+  const browser = await launchBrowser();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
+    const page = await ctx.newPage();
+    // The runtime script: served now, served late (a JS-delaying optimizer), or never (blocked).
+    await page.route(`${srv.url}/__runtime`, async (route) => {
+      if (runtime === 'blocked') return route.abort();
+      if (runtime === 'late') await new Promise((r) => setTimeout(r, 4600));
+      return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(RUNTIME_SRC, 'utf8') });
+    });
+    await page.goto(`${srv.url}/failsafe.html`, { waitUntil: 'domcontentloaded' });
+    await fn(page);
+    await ctx.close();
+  } finally { await browser.close(); await srv.close(); }
+}
+const RUNTIME_SRC = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/theme-assets/assets/js/pb-motion.js', import.meta.url));
+const opacityOf = (page, sel) => page.$eval(sel, (el) => getComputedStyle(el).opacity);
+const phpTest = havePhp ? qtest : (n, f) => qtest(`${n} (skipped: php not on PATH)`, () => {});
+
+phpTest('hide CSS failsafe: with the runtime blocked, hidden content shows after ~4s', () => withFailsafePage({ runtime: 'blocked' }, async (page) => {
+  await page.waitForTimeout(1000);
+  assert.equal(await opacityOf(page, '#hero'), '0', 'still hidden at 1s (anti-flash)');
+  await page.waitForTimeout(3600);
+  assert.equal(await opacityOf(page, '#hero'), '1', 'failsafe revealed the hero');
+  assert.equal(await opacityOf(page, '#low'), '1', 'failsafe revealed content below the fold');
+}));
+
+phpTest('hide CSS failsafe: a running runtime (html.pb-motion-on) keeps unrevealed content hidden past 4s', () => withFailsafePage({}, async (page) => {
+  await page.waitForTimeout(4600);
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains('pb-motion-on')), true);
+  assert.equal(await opacityOf(page, '#hero'), '1', 'hero revealed by its tween');
+  assert.equal(await opacityOf(page, '#low'), '0', 'below-the-fold content still waits for scroll');
+}));
+
+phpTest('hide CSS: nothing is hidden under reduced motion, even without the runtime', () => withFailsafePage({ reducedMotion: true, runtime: 'blocked' }, async (page) => {
+  assert.equal(await opacityOf(page, '#hero'), '1');
+  assert.equal(await opacityOf(page, '#low'), '1');
+}));
+
+// A JS-delaying optimizer starts the runtime after the failsafe showed the content: it must not hide it again.
+phpTest('hide CSS failsafe: a runtime starting after the failsafe leaves revealed content visible', () => withFailsafePage({ runtime: 'late' }, async (page) => {
+  await page.waitForTimeout(4300);
+  assert.equal(await opacityOf(page, '#low'), '1', 'failsafe showed it before the runtime');
+  await page.waitForFunction(() => document.documentElement.classList.contains('pb-motion-on'), null, { timeout: 3000 });
+  const seen = [];
+  for (let i = 0; i < 8; i++) { seen.push(await opacityOf(page, '#hero'), await opacityOf(page, '#low')); await page.waitForTimeout(50); }
+  assert.ok(seen.every((o) => o === '1'), `never hidden again: ${seen.join(',')}`);
+  assert.equal(await page.$eval('#low', (el) => el.getAttribute('data-proto-animate')), 'done');
+}));

@@ -23,6 +23,12 @@
   function noop() {}
 
   var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // pb-motion.php's failsafe shows hidden reveal elements 4 s in unless the runtime has started (this class). A
+  // runtime that starts later than that (held by a JS-delaying optimizer) finds the content already visible: its
+  // first pass marks the reveals done instead of hiding them again to animate.
+  var FAILSAFE_MS = 4000;
+  var lateStart = !!(window.performance && performance.now() > FAILSAFE_MS - 250);
+  document.documentElement.classList.add('pb-motion-on');
   var profile = Object.assign({}, DEFAULTS, window.pbMotionProfile || {});
 
   function gsapReady() { return !!(window.gsap && window.ScrollTrigger); }
@@ -259,7 +265,7 @@
       flushPending(el);
       var name = el.getAttribute('data-pb-motion');
       var isReveal = REVEAL.indexOf(name) >= 0;
-      if (reduced || !gsapReady()) { if (isReveal || el.hasAttribute('data-proto-animate')) done(el); return; }
+      if (reduced || !gsapReady() || (lateStart && isReveal)) { if (isReveal || el.hasAttribute('data-proto-animate')) done(el); return; }
       try {
         if (isReveal) initReveal(el, name);
         else if (CONTINUOUS.indexOf(name) >= 0) initContinuous(el, name);
@@ -322,6 +328,7 @@
   document.addEventListener('proto:page-ready', function (e) { init((e.detail && e.detail.container) || document); });
   document.addEventListener('proto:page-leave', function (e) { teardown((e.detail && e.detail.container) || document.body); });
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { init(document); });
-  else init(document);
+  function first() { init(document); lateStart = false; }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', first);
+  else first();
 })();

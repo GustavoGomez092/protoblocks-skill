@@ -36,7 +36,13 @@ add_action('wp_head', function () {
         'stagger'  => (float) $profile['stagger'],
         'distance' => (float) $profile['distance'],
     ];
-    echo '<style id="pb-motion-css">[data-pb-motion][data-proto-animate="manual"]{opacity:0}</style>' . "\n";
+    // Anti-flash: reveal elements start hidden, only when motion is wanted. Failsafe: if the runtime has not started
+    // (no html.pb-motion-on) 4 s after the element is styled, e.g. a JS-delaying optimizer holds it or it failed to
+    // load, a one-frame animation pins opacity 1. pb-motion.js adds the class first thing when it runs.
+    echo '<style id="pb-motion-css">@media (prefers-reduced-motion: no-preference){'
+        . '[data-pb-motion][data-proto-animate="manual"]{opacity:0}'
+        . 'html:not(.pb-motion-on) [data-pb-motion][data-proto-animate="manual"]{animation:pb-motion-failsafe 0s linear 4s forwards}'
+        . '}@keyframes pb-motion-failsafe{to{opacity:1}}</style>' . "\n";
     // Without JS (and without the Proto-Blocks plugin's own fallback) nothing would ever reveal the content.
     echo '<noscript><style>[data-pb-motion][data-proto-animate]{opacity:1!important}</style></noscript>' . "\n";
     echo '<script id="pb-motion-profile">window.pbMotionProfile='
