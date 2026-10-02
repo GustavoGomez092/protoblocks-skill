@@ -26,6 +26,7 @@ Resume by `status`:
 | status | go to |
 |---|---|
 | `building` with `capReached: true` on the last `qa` record | ask the developer first (`references/verify.md`, "Iteration cap") |
+| `building` with `inPart: true` (header/footer rendered by a part) | no Build: `library.mjs record`, `page.mjs build`, then Verify (`references/header-footer.md`) |
 | `planned`, `building` | Build |
 | `verifying` | Verify, re-run from `prepare` |
 | `animating` | Animate |

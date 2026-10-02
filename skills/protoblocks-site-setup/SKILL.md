@@ -60,7 +60,7 @@ Links to pages that do not exist yet are normal: they are reported in `pending` 
 
 1. List saved Site Editor copies: `node "$PB/lib/parts.mjs" overrides "$THEME"`. An empty list `[]` means none.
 2. If a `header`/`footer` copy exists, show the developer what would be discarded and ask. Only after their explicit OK run `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`, where `<n>` is the id previewed by the `[ECONFIRM]` error (run it once without `--confirm` to get the preview). The copy goes to Trash; the printed recovery command restores it.
-3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html`).
+3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html` and records `site.parts.header` in the build state; `status.mjs` treats setup as unfinished without it).
 
 The printed recovery command uses the same WP-CLI command preflight resolved (Local's wrapper at `wp-content/.protoblocks/wp`, or `wp --path=...`), never a bare `wp` that may target another install.
 

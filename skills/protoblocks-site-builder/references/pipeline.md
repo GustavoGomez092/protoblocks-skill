@@ -5,27 +5,29 @@ What `status.mjs` returns, what to run for each `next.action`, what each step wr
 ## Status
 
 ```bash
+node "$PB/lib/status.mjs" --root "<publicPath>"    # find THEME (once per session)
 node "$PB/lib/status.mjs" "$THEME"
 ```
 
-Prints `{site, pages: [{slug, status, sections: [{n, label, block, status, iterations, lastPass}]}], next: {action, page, section, why}}`. Without a `build.json` it prints only `{"next": {"action": "setup"}}`. `[ENOTHEME]`: `$THEME` is not a directory (wrong path, or setup never ran). `[EPARSE]` / `[EINVALID]`: see Recovery.
+`--root` scans `<publicPath>/wp-content/themes/*/.protoblocks/build.json`: one match prints `themeDir` (use it as `THEME`) plus the summary; none prints `{"themeDir": null, "next": {"action": "setup"}}`; several print `{"themes": [{themeDir, url, pages}], "next": null}`: ask the developer which one. With a theme folder it prints `{themeDir, site, pages: [{slug, status, sections: [{n, label, block, status, iterations, lastPass}]}], next: {action, page, section, sections, why}}`; without a `build.json` only `next` (`setup`). `[ENOTHEME]`: not a directory (wrong path, or setup never ran). `[EPARSE]` / `[EINVALID]`: see Recovery.
 
-`nextAction` takes the first page whose status is not `done`, in state order:
+`nextAction` takes the first page whose status is not `done`, or that has a reopened section, in state order. "Open" sections are `building`, `verifying` or `animating`; `skipped` never blocks page QA or SEO. Only actions in `ACTIONS` are ever returned.
 
-| Page state | `next.action` |
+| State | `next.action` |
 |---|---|
 | no state | `setup` |
-| no pages, or every page `done` | `ask-more-pages` |
+| `site.tokens`, `site.navigation.menus` or `site.parts.header` missing (`why` names them) | `setup` |
+| no pages, or every page `done` with no open section | `ask-more-pages` |
 | `planning`, no `plan.approvedAt` (or approved with no sections) | `breakdown` |
 | `planning` with `plan.approvedAt` | `build-page` |
 | `building`, no sections | `breakdown` |
 | `building`, lowest open `n` is `planned` or `building` | `section-build` |
 | `building`, lowest open `n` is `verifying` | `section-verify` |
 | `building`, lowest open `n` is `animating` | `section-animate` |
-| `building`, every section `done`/`skipped`, no passing `pageQa` | `page-qa` |
-| `seo` (or a passing `pageQa`) | `seo` |
-
-"Open" means not `done` and not `skipped`; skipped sections never block page QA or SEO.
+| `seo` or `done` page with an open section (reopened) | that section's action |
+| `building`, every section `done`/`skipped`, a header/footer section `done` and not `inPart` (no other page has it in a part) | `move-parts` (`next.sections`: their `n`s) |
+| `building`, every section `done`/`skipped`, no passed or accepted `pageQa` | `page-qa` |
+| `seo`, or `pageQa.pass` / `pageQa.accepted` | `seo` |
 
 ## Status transitions
 
@@ -35,8 +37,8 @@ Page (`planning` -> `building` -> `seo` -> `done`):
 |---|---|
 | (new) -> `planning` | `intake.mjs add-frame` / `from-url` (creates the page) |
 | `planning` -> `building` | `plan.mjs record` (with `plan.approvedAt`); `page.mjs build` refuses with `[ENOPLAN]` until `plan.approvedAt` exists |
-| `building` -> `seo` | `page-qa.mjs record` with a passing result (a failing one keeps `building` and stores `pageQa.pass: false`) |
-| `seo` -> `done` | `seo.mjs record-audit` with a passing audit (`[ESTATUS]` on any other page status) |
+| `building` -> `seo` | `page-qa.mjs record` with a passing result, or `--accepted "<note>"` on design-only differences (a plain failure keeps `building` and stores `pageQa.pass: false`, clearing any earlier acceptance) |
+| `seo` -> `done` | `seo.mjs record-audit` with a passing audit (`[ESTATUS]` on any other page status, or while a section is open) |
 | `done` -> `seo` | `seo.mjs apply` on a finished page (the old audit no longer applies) |
 
 Section (`planned` -> `building` -> `verifying` -> `animating` -> `done`):
@@ -50,7 +52,8 @@ Section (`planned` -> `building` -> `verifying` -> `animating` -> `done`):
 | `verifying` stays | `qa-input.mjs record` with an error verdict (script/environment): not an iteration; fix the environment and re-verify |
 | `animating` -> `done` | `motion.mjs record` with a passing check, or `--accepted`; a failure stays `animating`, `capReached: true` at `site.qa.motionMaxAttempts` (default 3) |
 | any -> `skipped` | only the developer's choice at the iteration cap |
-| `done` -> `verifying` -> `done` | re-verification (header/footer move, shared-block edit, page-QA fix) |
+| `done` -> `verifying` -> `done` | re-verification (`qa-input.mjs prepare` on a shared-block edit or page-QA fix; `parts.mjs adopt` for the first content section) |
+| `done` -> `building` (`inPart`) -> `verifying` -> `done` | `parts.mjs adopt` for the first page's header/footer; then page build and Verify |
 
 ## Actions
 
@@ -79,7 +82,9 @@ node "$PB/lib/parts.mjs" overrides "$THEME"
 
 Plan the header and footer as the first and last sections of the first page (ranges with `part`); the section loop builds them and moves them into the parts later.
 
-Resuming a half-done setup (status then says `ask-more-pages` with `why: "no pages yet"`, or `breakdown`): `setup-site.mjs` is safe to re-run (it reuses the fork). Check `site.motionProfile`, `pages`, `site.tokens` and `site.navigation.menus` with `node "$PB/lib/state.mjs" get "$THEME" site`, and run only the missing steps. Every setup step is idempotent.
+`tokens.mjs apply` writes `site.tokens`, `navigation.mjs upsert` writes `site.navigation.menus.<key>`, and `parts.mjs write` writes `site.parts.<slug>` (`{block, writtenAt}`).
+
+Resuming a half-done setup: status says `setup` with `why` naming the missing fields (or `ask-more-pages` with `why: "no pages yet"` when only the intake is missing). Run only those steps; also check `site.motionProfile` and `pages` (`node "$PB/lib/state.mjs" get "$THEME" site`). `setup-site.mjs` is safe to re-run (it reuses the fork) and every setup step is idempotent.
 
 ### `breakdown`
 
@@ -97,7 +102,7 @@ The plan is approved but the page is still `planning`. Set it `building` with th
 
 ### `section-build`
 
-Load `protoblocks-section-loop` for `next.page` / `next.section` and follow its resume table. First check the cap: if the section's last `qa` record has `capReached: true`, ask the developer before anything else (`verify.md`, "Iteration cap"). Build writes `block`, `attrs`, `inner`, status `building`; `page.mjs build` writes `postId`, `url`, `contentHash`; `library.mjs record` writes `library.<block>.usedOn`.
+Load `protoblocks-section-loop` for `next.page` / `next.section` and follow its resume table. A header/footer in `building` with `inPart: true` (after `move-parts`, or on a later page) is not built: its resume row is `library.mjs record`, `page.mjs build`, then Verify. First check the cap: if the section's last `qa` record has `capReached: true`, ask the developer before anything else (`verify.md`, "Iteration cap"). Build writes `block`, `attrs`, `inner`, status `building`; `page.mjs build` writes `postId`, `url`, `contentHash`; `library.mjs record` writes `library.<block>.usedOn`.
 
 Find a section's indexes by slug and `n` (for any `state.mjs set` the phase skills ask for):
 
@@ -119,43 +124,50 @@ node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>
 node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json
 ```
 
-Between them, the `protoblocks-skill:visual-qa` subagent checks the section. `record` appends `qa` records and prints `{pass, iteration, capReached, status}`. On `capReached: true` stop and ask (accept with notes -> `animating`; guidance -> continue; skip -> `skipped`).
+Between them, the `protoblocks-skill:visual-qa` subagent checks the section. `record` appends `qa` records and prints `{pass, iteration, capReached, status}`. On `capReached: true` stop and ask (accept with notes -> `animating`, or `done` when the section has `prevStatus: "done"` (a re-verification); guidance -> continue; skip -> `skipped`).
 
 ### `section-animate`
 
-Load `protoblocks-motion` for that section (profile once per site, presets, `motion-check.mjs`, then `motion.mjs record`). `record` prints `{pass, attempts, capReached, status}` and writes `motion`; a pass sets `done`. On `capReached: true` ask: simplify, accept (`--accepted`), or remove. Header and footer get no motion (`protoblocks-motion` step 1), but they still close through the check and `motion.mjs record` (no `--presets`).
+Load `protoblocks-motion` for that section (profile once per site, presets, `motion-check.mjs`, then `motion.mjs record`). `record` prints `{pass, attempts, capReached, status}` and writes `motion`; a pass sets `done`. On `capReached: true` ask: simplify, accept (`--accepted`), or remove. Header and footer get no motion (`protoblocks-motion` step 1), but they still close through the check (`motion-check.mjs --anchor pb-header`, or `pb-footer`, never `pb-s<n>`) and `motion.mjs record` (no `--presets`).
+
+### `move-parts`
+
+First page only: every section is closed and the header/footer (`next.sections`) passed as page sections. Follow `protoblocks-section-loop` `references/header-footer.md` "Moving them into the parts": overrides, `parts.mjs markup "$THEME" --from-state <page> <n>`, `parts.mjs write`, then in one atomic write:
+
+```bash
+node "$PB/lib/parts.mjs" adopt "$THEME" <page>
+```
+
+Prints `{page, moved: [{n, anchor, status}], reverify}`. It sets the header/footer `inPart: true`, status `building`, `prevStatus: "done"`, and the first content section `verifying` (`prevStatus: "done"`). Status then routes through them: `section-build` for the header (inPart row: `library.mjs record`, `page.mjs build`, Verify), `section-verify` for the content section, then the footer. Each pass returns them to `done`. `[EINPUT]` "does not carry the anchor": write the part from state first. `[EINPUT]` "nothing to adopt": already moved. Afterwards: `node "$PB/lib/navigation.mjs" refresh "$THEME"`.
 
 ### `page-qa`
 
-1. First page only: if its header/footer sections are not yet in the template parts, run `protoblocks-section-loop` `references/header-footer.md` "Moving them into the parts" first. That re-verifies sections, so re-run `status.mjs` afterwards. To list what still needs moving:
-
-<!-- test:run fixture=approved -->
-```bash
-PAGE=home
-node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));const p=a.find((x)=>x.slug===process.argv[1]);for(const s of p.sections)if(["pb-header","pb-footer"].includes(s.anchor)&&s.inPart!==true)console.log(s.n,s.anchor)' "$PAGE"
-```
-
-   Empty output: nothing to move (or the page has no header/footer section).
-2. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
+1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
 
 ```bash
 node "$PB/qa/page-qa.mjs" run "$THEME" <page>
 ```
 
-   Prints `{url, pass, breakpoints: [{name, mismatch, heightDelta, imageErrors, composite, pass}], a11y: {blocking, other}, pageErrors, warnings, file}` and exits 1 unless `pass`. The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). Only `serious`/`critical` axe violations inside `main`, `header`, `footer` or a `#pb-s…` section block the page; `minor`/`moderate` go into the final report. `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
-3. Fix failures:
+   Prints `{url, pass, breakpoints: [{name, status, mismatch, heightDelta, fullyMasked, masksApplied, masks, imageErrors, composite, pass}], a11y: {blocking, other}, pageErrors, warnings, file}` and exits 1 unless `pass`. Section masks (`sections[j].masks.<bp>`) are applied at the design position (via the crop range `sections[j].ranges.<bp>`) and at the position the section renders; a section with masks but no range is listed in `warnings` (re-crop it to record the range). The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). Only `serious`/`critical` axe violations inside `main`, `header`, `footer` or a `#pb-s…` section block the page; `minor`/`moderate` go into the final report. `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
+2. Fix failures:
    - Design difference: open the `composite` images, find the responsible section, fix it with `protoblocks-section-loop` (Build fix, gates, `page.mjs build`), then `qa-input.mjs prepare` for that section. Status now routes to `section-verify`; a pass returns it to `done` and page QA comes up again.
    - Blocking a11y violation: fix the block markup or colors (tokens), rebuild, re-verify every section whose markup changed.
    - `imageErrors` / `pageErrors`: broken media or console errors; fix them, rebuild.
    - `a11y.error`: axe could not run (QA deps, see Recovery).
-   - Still failing only where the developer already accepted a section difference: show the composites and ask. Only the developer may change `site.qa`.
-4. Record the run (every run, pass or fail):
+   - Design differences you cannot fix (for example ones the developer already accepted per section): show the composites and ask. They accept them (step 3 with `--accepted`) or you keep fixing. Never accept for them; only the developer may change `site.qa`.
+3. Record the run (every run, pass or fail):
 
 ```bash
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json"
 ```
 
-   Prints `{pass, status}`; writes `pageQa: {pass, file, at}`. A pass sets the page `seo`.
+   Prints `{pass, status}`; writes `pageQa: {pass, file, at}`. A pass sets the page `seo`. With the developer's acceptance:
+
+```bash
+node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json" --accepted "<what they accepted>"
+```
+
+   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
 
 ### `seo`
 
@@ -165,7 +177,7 @@ Load `protoblocks-seo` for `next.page`: `seo.mjs get`, infer, OG image, schema, 
 node "$PB/lib/seo.mjs" record-audit "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/seo-audit.json"
 ```
 
-`apply` writes `seo.appliedValues` (and sets a `done` page back to `seo`); `record-audit` writes the audit and, on a pass, page status `done`. `[EEDITED]`, `organization: kept` and `--force-organization`: see the questions in `SKILL.md`.
+`apply` writes `seo.appliedValues` (and sets a `done` page back to `seo`); `record-audit` writes the audit and, on a pass, page status `done`. It refuses with `[ESTATUS]` while a section of the page is open (reopened by a content fix): finish it, re-audit. `[EEDITED]` and `--force-organization`: see the questions in `SKILL.md`; `organization: kept` goes into the final report.
 
 ### `ask-more-pages`
 
@@ -173,7 +185,24 @@ node "$PB/lib/seo.mjs" record-audit "$THEME" <page> "$THEME/.protoblocks/artifac
 
 Otherwise every page is `done`:
 
-1. For each finished page not yet in the primary menu, ask "Add <page> to the primary menu?". On yes, add `{label, page}` to the spec stored in state and upsert it:
+1. List the finished pages to ask about (not in the primary menu, not declined before):
+
+<!-- test:run -->
+```bash
+node "$PB/lib/state.mjs" get "$THEME" | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8"));const has=(xs,p)=>(xs??[]).some((i)=>i.page===p||has(i.children,p));const items=s.site.navigation?.menus?.primary?.spec?.items;for(const p of s.pages)if(p.status==="done"&&!has(items,p.slug)&&p.notes?.menu!=="declined")console.log(p.slug)'
+```
+
+   For each, ask "Add <page> to the primary menu?". No: record the decline so it is never asked again:
+
+<!-- test:run -->
+```bash
+PAGE=home
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' "$PAGE")
+test "$PI" -ge 0
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.notes.menu" '"declined"'
+```
+
+   Yes: add `{label, page}` to the spec stored in state and upsert it:
 
 <!-- test:run -->
 ```bash

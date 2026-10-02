@@ -190,6 +190,7 @@ for (const { file } of DOCS) {
           assert.equal(page.sections.find((x) => x.n === 5).label, undefined);
         }
         if (kind === 'approved' && /status" '"building"'/.test(block)) assert.equal(page.status, 'building', 'build-page recipe sets the approved page building');
+        if (/notes\.menu/.test(block)) assert.equal(page.notes.menu, 'declined', 'menu decline recorded by slug');
         if (/\$SI\.notes/.test(block)) assert.equal(page.sections.find((x) => x.n === 3).notes, 'Image right, CTA pair');
         if (/\.masks/.test(block)) assert.equal(page.sections.find((x) => x.n === 1).masks.desktop[0].w, 720);
         if (/shellCap/.test(block)) assert.match(page.notes.shellCap, /1600px/);
