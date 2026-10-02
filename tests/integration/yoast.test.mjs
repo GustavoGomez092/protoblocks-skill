@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -80,7 +82,16 @@ const yoastGraph = (html) => {
   assert.ok(m, 'Yoast graph present');
   return JSON.parse(m[1])['@graph'];
 };
-const fetchHtml = async (url) => (await fetch(url)).text();
+// A fresh connection per request: Local's nginx closes idle keep-alive sockets after 3 s, and fetch's pool may reuse
+// one after the wp-cli calls between two requests (ECONNRESET).
+const fetchHtml = (url) => new Promise((resolve, reject) => {
+  (url.startsWith('https:') ? https : http).get(url, { agent: false, rejectUnauthorized: false }, (res) => {
+    let body = '';
+    res.setEncoding('utf8');
+    res.on('data', (d) => { body += d; });
+    res.on('end', () => resolve(body));
+  }).on('error', reject);
+});
 const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", ndash: '\u2013', mdash: '\u2014', middot: '\u00b7', bull: '\u2022', laquo: '\u00ab', raquo: '\u00bb' };
 const decodeEntities = (t) => t.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : NAMED[e.toLowerCase()] ?? m));
 const orgNode = (graph) => graph.find((p) => [].concat(p['@type']).includes('Organization'));
@@ -141,7 +152,7 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
       assert.deepEqual(JSON.parse(rawMeta), [{ '@type': 'Service', name: marker }], 'stored as a JSON string, readable as the theme reads it');
       assert.ok(rawMeta.includes('– café') && !rawMeta.includes('\\u'), 'stored with JSON_UNESCAPED_UNICODE');
 
-      const html = await (await fetch(`${SITE_URL}/${slug}/`)).text();
+      const html = await fetchHtml(`${SITE_URL}/${slug}/`);
       // The separator is the site's own (Yoast setting), not assumed to be "-".
       const { sep } = yoast(wp, 'site');
       const title = decodeEntities(html.match(/<title>(.*?)<\/title>/s)?.[1] ?? '');
@@ -156,7 +167,7 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
         const node = graph.find((p) => p.name === marker);
         assert.ok(node, 'custom node merged into the Yoast graph');
         assert.equal(node['@type'], 'Service');
-        const home = await (await fetch(`${SITE_URL}/`)).text();
+        const home = await fetchHtml(`${SITE_URL}/`);
         assert.ok(!home.includes(`PB ITEST MARKER ${hex}`), 'the JSON-LD must not appear on another page');
       } else {
         assert.equal(r.jsonld, 'unsupported');
