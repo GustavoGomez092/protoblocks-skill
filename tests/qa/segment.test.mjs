@@ -46,10 +46,44 @@ qtest('a full-width photo band whose left/right edges differ creates no spurious
     ],
   }, path.join(tmpDir(), 'photo.png'));
   const r = findCuts(await loadRaw(file));
-  // Inside the photo the background is unknown, so no cut can be placed at 300 (white -> photo);
-  // the first soundly detectable boundary is photo -> blue at 600. Nothing else may be cut.
-  assert.deepEqual(r.cuts.filter((c) => c.kind === 'background').map((c) => c.y), [600]);
+  // The photo is its own band (null background): cut into it at 300, out of it at 600.
+  // The internal 10-row stripe is shorter than minBand, so it creates no cut.
+  const bgCuts = r.cuts.filter((c) => c.kind === 'background');
+  assert.deepEqual(bgCuts.map((c) => c.y), [300, 600]);
+  assert.equal(bgCuts[0].to, null);
+  assert.equal(bgCuts[1].from, null);
+  assert.deepEqual(bgCuts[1].to, [200, 220, 240]);
   assert.deepEqual(r.cuts.filter((c) => c.y > 300 && c.y < 600), [], JSON.stringify(r.cuts));
+  assert.deepEqual(r.bands.map((b) => [b.y0, b.y1, b.bg === null]), [[0, 300, false], [300, 600, true], [600, 900, false]]);
+});
+
+qtest('a photo hero at the top is band 0 and is cut at its bottom edge', async () => {
+  const { findCuts } = await import(path.join(QA_DIR, 'segment.mjs'));
+  const { loadRaw } = await import(path.join(QA_DIR, 'image.mjs'));
+  const file = await makeImage({
+    width: W, height: 600, bg: [255, 255, 255],
+    rects: [
+      { x: 0, y: 0, w: 300, h: 250, color: [20, 30, 40] },
+      { x: 300, y: 0, w: 300, h: 250, color: [200, 180, 150] },
+    ],
+  }, path.join(tmpDir(), 'hero.png'));
+  const r = findCuts(await loadRaw(file));
+  const bg = r.cuts.filter((c) => c.kind === 'background');
+  assert.deepEqual(bg.map((c) => c.y), [250]);
+  assert.equal(bg[0].from, null);
+  assert.deepEqual(r.bands.map((b) => [b.y0, b.y1]), [[0, 250], [250, 600]]);
+});
+
+qtest('edge-touching text rows inside a solid band do not split it or hide a later cut', async () => {
+  const { findCuts } = await import(path.join(QA_DIR, 'segment.mjs'));
+  const { loadRaw } = await import(path.join(QA_DIR, 'image.mjs'));
+  const rects = [{ x: 0, y: 300, w: W, h: 300, color: [242, 242, 242] }];
+  // a 1-2 row dark mark touching the left edge only, every 30 rows (edges disagree on those rows)
+  for (let y = 20; y < 300; y += 30) rects.push({ x: 0, y, w: 50, h: 1 + (y / 30) % 2, color: [0, 0, 0] });
+  const file = await makeImage({ width: W, height: 600, bg: [255, 255, 255], rects }, path.join(tmpDir(), 'text.png'));
+  const r = findCuts(await loadRaw(file));
+  assert.deepEqual(r.cuts.filter((c) => c.kind === 'background').map((c) => c.y), [300]);
+  assert.equal(r.bands.length, 2);
 });
 
 qtest('a background colour change shorter than minBand produces no cut', async () => {
@@ -95,6 +129,23 @@ qtest('cropRanges rejects bad names and bad/out-of-bounds ranges with ERANGES an
     await assert.rejects(cropRanges(file, [{ name: 'ok', y0: 0, y1: 10 }, range], out), (e) => e.code === 'ERANGES' && re.test(e.message), JSON.stringify(range));
   }
   assert.equal(fs.existsSync(out), false, 'validation must happen before any file is written');
+});
+
+qtest('cropRanges rejects a non-array ranges argument with ERANGES', async () => {
+  const { cropRanges } = await import(path.join(QA_DIR, 'segment.mjs'));
+  const dir = tmpDir();
+  const file = await fixture(dir);
+  await assert.rejects(cropRanges(file, { name: 'a', y0: 0, y1: 10 }, path.join(dir, 'o')), (e) => e.code === 'ERANGES' && /array/.test(e.message));
+});
+
+qtest('CLI flag with a missing value is a usage error (exit 64)', async () => {
+  const dir = tmpDir();
+  const file = await fixture(dir);
+  for (const args of [['crop', file, '--out', path.join(dir, 'o'), '--ranges'], ['crop', file, '--ranges', '--out', path.join(dir, 'o')], ['analyze', file, '--verbose']]) {
+    const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 64, r.stderr);
+    assert.match(r.stderr, /Usage/);
+  }
 });
 
 qtest('CLI analyze prints the findCuts JSON shape', async () => {
