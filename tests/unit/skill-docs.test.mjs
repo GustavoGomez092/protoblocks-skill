@@ -18,7 +18,7 @@ const DEFAULT_LIMIT = 7168;
 // Per-skill SKILL.md byte limits. The protoblocks authoring skill predates the 7 KB rule and is larger.
 // CEILING, not a target: 14336 is the most it may ever reach. Do not raise it; move content into
 // references/ instead.
-const LIMITS = { protoblocks: 14336 };
+const LIMITS = { protoblocks: 14336, 'protoblocks-section-loop': 8192 };
 
 function docFiles() {
   const out = [];

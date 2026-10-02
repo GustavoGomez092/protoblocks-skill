@@ -73,6 +73,7 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | `sections[j].block` | Block slug the section uses. |
 | `sections[j].notes` | Plan notes (shared classes, assets to replace, etc.). |
 | `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
+| `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` (`references/header-footer.md`). |
 
 Find pages by `slug` and sections by `n`, not by array position.
 

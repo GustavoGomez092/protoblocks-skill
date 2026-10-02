@@ -18,7 +18,7 @@ export function pageSpecFromState(state, slug, { force = false } = {}) {
   if (!page) throw fail('ENOPAGE', `No page "${slug}" in state.`);
   const blocks = [...page.sections]
     .sort((a, b) => a.n - b.n)
-    .filter((s) => s.status !== 'skipped' && s.block)
+    .filter((s) => s.status !== 'skipped' && !s.inPart && s.block)
     .map((s) => ({
       name: s.block.includes('/') ? s.block : `proto-blocks/${s.block}`,
       attrs: { ...(s.attrs ?? {}), anchor: s.anchor },

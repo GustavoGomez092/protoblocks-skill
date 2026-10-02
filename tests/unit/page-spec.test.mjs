@@ -27,6 +27,15 @@ test('pageSpecFromState orders sections, adds anchors, skips skipped/unbuilt', (
   assert.throws(() => pageSpecFromState(state, 'nope'), (e) => e.code === 'ENOPAGE' && /No page "nope"/.test(e.message));
 });
 
+test('pageSpecFromState skips sections rendered by a template part (inPart)', () => {
+  const state = { pages: [{ slug: 'home', sections: [
+    { n: 1, anchor: 'pb-s1', block: 'site-header', status: 'done', inPart: true },
+    { n: 2, anchor: 'pb-s2', block: 'hero', status: 'done' },
+    { n: 3, anchor: 'pb-s3', block: 'site-footer', status: 'done', inPart: true },
+  ] }] };
+  assert.deepEqual(pageSpecFromState(state, 'home').blocks.map((b) => b.name), ['proto-blocks/hero']);
+});
+
 test('pageSpecFromState keeps namespaced block names and passes force', () => {
   const state = { pages: [{ slug: 'p', sections: [{ n: 1, anchor: 'pb-s1', block: 'acme/x', status: 'done' }] }] };
   const spec = pageSpecFromState(state, 'p', { force: true });
