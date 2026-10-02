@@ -60,7 +60,7 @@ $pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
    - `imageErrors`: not a motion problem; fix the image as in the section loop.
 6. Record:
    `node "$PB/lib/motion.mjs" record "$THEME" <page> <n> "<out>/motion-check.json" --presets a,b`
-   It sets the section `done` on a pass, and refuses a section that is not `animating` (`ESTATUS`). A failing check is refused (`EMOTION`) and persisted as `section.motion.attempts` with `lastResult`; a pass resets it. The error reports `attempts` and `capReached`: stop when `record` reports `capReached: true` (3 failed checks) and ask the developer to choose: simplify the motion, accept it (re-run `record` with `--accepted`; it adds the note "motion accepted by developer"), or remove the motion from the section (revert the attributes, then record a passing check).
+   It prints `{pass, attempts, capReached, status}` (also on a failure, which exits 1 with `[EMOTION]` on stderr). It refuses a check of another anchor or page URL, an unknown preset, and a section that is not `animating` (`ESTATUS`). A pass sets the section `done`; a failure sets `motion.check: "fail"` and counts `motion.attempts` (fields: `state-schema.md`). On `capReached: true` (`site.qa.maxIterations` failed checks) stop and ask the developer: simplify the motion, accept it (`record ... --accepted`, which notes "motion accepted by developer"), or remove it (revert the attributes, then record a passing check).
 7. Commit in the theme fork: `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(motion): <block>"`.
 
 ## Bespoke motion

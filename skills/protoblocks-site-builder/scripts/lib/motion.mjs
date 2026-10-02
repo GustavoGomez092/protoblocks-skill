@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { updateState, statePath } from './state.mjs';
-import { installThemeAssets } from './theme-assets.mjs';
+import { installThemeAssets, DEFAULT_ASSETS_DIR } from './theme-assets.mjs';
 
 export const PROFILES = Object.freeze({
   subtle: { duration: 0.7, ease: 'power2.out', stagger: 0.08, distance: 24 },
@@ -43,45 +43,74 @@ export function installMotion(themeDir) {
   return r;
 }
 
+// Default attempt cap when site.qa.maxIterations is not set.
 export const MAX_ATTEMPTS = 3;
 
-// A failing check (not accepted) is persisted as an attempt on the section, in its own state write, then reported
-// as EMOTION with the count. A pass or an acceptance replaces section.motion, which resets the count.
+// The preset names the shipped runtime knows (its REVEAL and CONTINUOUS lists), read from pb-motion.js itself.
+export function runtimePresets(file = path.join(DEFAULT_ASSETS_DIR, 'assets', 'js', 'pb-motion.js')) {
+  const src = fs.readFileSync(file, 'utf8');
+  const list = (name) => [...(src.match(new RegExp(`var ${name} = \\[([^\\]]*)\\]`))?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  return [...list('REVEAL'), ...list('CONTINUOUS')];
+}
+
+// Same page: origin and path (trailing slash ignored); query and fragment do not make another page.
+const pageKey = (u) => { try { const x = new URL(u); return `${x.origin}${x.pathname.replace(/\/+$/, '')}`; } catch { return String(u); } };
+
+// The check must be a result for this section: its anchor, and the page URL when state knows it. A stale or foreign
+// motion-check.json is refused before anything is counted.
+function assertCheckFor(check, page, sec, checkFile) {
+  if (check.anchor !== sec.anchor) throw fail(`${checkFile} is a motion check of anchor "${check.anchor}", not "${sec.anchor}" (section ${sec.n} on "${page.slug}"); re-run the check for this section.`, 'EMOTION');
+  if (page.url && pageKey(check.url) !== pageKey(page.url)) throw fail(`${checkFile} is a motion check of url "${check.url}", not this page's url "${page.url}"; re-run the check for this page.`, 'EMOTION');
+}
+
+// A failing check (not accepted) is persisted as an attempt on the section (check "fail"), in its own state write,
+// then reported as EMOTION with the count; e.result carries { pass, attempts, capReached, status }. A pass or an
+// acceptance replaces section.motion, which resets the count. The cap is site.qa.maxIterations (default 3).
 // Closing a section needs status "animating"; only an explicit acceptance may close it from another status.
 export function recordMotion(themeDir, slug, n, { presets = [], checkFile, accepted = false }) {
+  const known = runtimePresets();
+  const unknown = presets.filter((p) => !known.includes(p));
+  if (unknown.length) throw fail(`Unknown preset(s) ${unknown.join(', ')}; pb-motion presets: ${known.join(', ')}.`, 'EMOTION');
   let check;
   try { check = JSON.parse(fs.readFileSync(checkFile, 'utf8')); } catch (e) { throw fail(`cannot read motion check ${checkFile}: ${e.message}`, 'EMOTION'); }
   const passed = check.pass === true;
   const find = (s) => {
-    const sec = s.pages.find((p) => p.slug === slug)?.sections.find((x) => x.n === Number(n));
+    const page = s.pages.find((p) => p.slug === slug);
+    const sec = page?.sections.find((x) => x.n === Number(n));
     if (!sec) throw fail(`No section ${n} on page "${slug}".`, 'ENOSECTION');
     if (sec.status !== 'animating' && !accepted) throw fail(`Section ${n} on "${slug}" has status "${sec.status}", not "animating"; motion is recorded only while animating.`, 'ESTATUS');
+    assertCheckFor(check, page, sec, checkFile);
     return sec;
   };
+  const capOf = (s) => s.site.qa?.maxIterations ?? MAX_ATTEMPTS;
   if (!passed && !accepted) {
     let attempts;
+    let cap;
     updateState(themeDir, (s) => {
       const sec = find(s);
       attempts = (sec.motion?.attempts ?? 0) + 1;
-      sec.motion = { ...(sec.motion ?? {}), attempts, lastResult: checkFile };
+      cap = capOf(s);
+      sec.motion = { ...(sec.motion ?? {}), check: 'fail', attempts, lastResult: checkFile };
     });
-    const capReached = attempts >= MAX_ATTEMPTS;
+    const capReached = attempts >= cap;
     const e = fail(`Motion check did not pass (${checkFile}); attempts: ${attempts}, capReached: ${capReached}.${capReached ? ' Stop and ask the developer: simplify, accept (--accepted) or remove the motion.' : ' Fix the motion and re-run the check.'}`, 'EMOTION');
     e.attempts = attempts;
     e.capReached = capReached;
+    e.result = { pass: false, attempts, capReached, status: 'animating' };
     throw e;
   }
-  let status;
+  let result;
   updateState(themeDir, (s) => {
     const sec = find(s);
+    const attempts = (sec.motion?.attempts ?? 0) + 1;
     sec.motion = { presets, check: passed ? 'pass' : 'accepted', result: checkFile };
     const parts = (sec.notes ? String(sec.notes).split('; ') : []).filter((x) => x && x !== NOTE);
     if (!passed) parts.push(NOTE);
     if (parts.length) sec.notes = parts.join('; '); else delete sec.notes;
     sec.status = 'done';
-    status = sec.status;
+    result = { pass: passed, attempts, capReached: false, status: sec.status };
   });
-  return { status };
+  return result;
 }
 
 function usage() {
@@ -103,5 +132,10 @@ function main(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
-  try { main(process.argv.slice(2)); } catch (e) { process.stderr.write(`${e.code ? `[${e.code}] ` : ''}${e.message}\n`); process.exit(1); }
+  try { main(process.argv.slice(2)); } catch (e) {
+    // A failed check still prints its result JSON on stdout (same shape as a pass), plus the one-line reason on stderr.
+    if (e.result) process.stdout.write(`${JSON.stringify(e.result, null, 2)}\n`);
+    process.stderr.write(`${e.code ? `[${e.code}] ` : ''}${String(e.message).replace(/\n/g, ' ')}\n`);
+    process.exit(1);
+  }
 }

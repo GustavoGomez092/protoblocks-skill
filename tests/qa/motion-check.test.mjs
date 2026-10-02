@@ -258,3 +258,12 @@ qtest('motion-check CLI: usage exit 64, exit 1 when the check fails', async () =
     assert.ok(fs.existsSync(path.join(outDir, 'motion-check.json')));
   } finally { await srv.close().catch(() => {}); }
 });
+
+// A stale motion-check.json from an earlier passing run must not survive a run that crashes: record would trust it.
+qtest('motionCheck removes a previous motion-check.json before running, so a crashed run leaves none', () => withChecker(async (check) => {
+  const outDir = tmpDir();
+  const file = path.join(outDir, 'motion-check.json');
+  fs.writeFileSync(file, JSON.stringify({ pass: true, anchor: 'pb-nope', url: 'stale' }));
+  await assert.rejects(check('motion.html', { outDir, anchor: 'pb-nope' }), (e) => e.code === 'ENOSELECTOR');
+  assert.equal(fs.existsSync(file), false, 'stale passing result removed');
+}));

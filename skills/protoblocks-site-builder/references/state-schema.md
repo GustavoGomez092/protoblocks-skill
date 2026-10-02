@@ -75,6 +75,18 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
 | `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` (`references/header-footer.md`). |
 
+## `sections[j].motion` (written by `motion.mjs record`)
+
+| Field | Meaning |
+|---|---|
+| `presets` | pb-motion preset names used in the section (validated against the runtime's list). Set on a pass or acceptance. |
+| `check` | `pass`, `accepted` (developer accepted a failing check; the section `notes` get "motion accepted by developer") or `fail` (last recorded check failed). |
+| `result` | Path of the `motion-check.json` that closed the section (pass or acceptance). |
+| `attempts` | Failed checks recorded since the last pass or acceptance; `record` reports `capReached` when it reaches `site.qa.maxIterations` (3 when unset). Removed by a pass or acceptance. |
+| `lastResult` | Path of the last failing `motion-check.json`. Removed by a pass or acceptance. |
+
+`notes` is the section's own free-form field (see above), not part of `motion`.
+
 Find pages by `slug` and sections by `n`, not by array position.
 
 ## Enums and defaults

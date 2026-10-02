@@ -138,6 +138,8 @@ async function taxiCheck(page, url, sel) {
 
 export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir, browser, imageWaitMs }) {
   fs.mkdirSync(outDir, { recursive: true });
+  // A result from an earlier run must never outlive this one: if this run crashes, there is no file to record.
+  fs.rmSync(path.join(outDir, 'motion-check.json'), { force: true });
   const own = !browser;
   const b = browser ?? await launchBrowser();
   const selector = `#${anchor}`;

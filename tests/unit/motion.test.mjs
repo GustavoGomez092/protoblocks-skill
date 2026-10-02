@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { PROFILES, setProfile, recordMotion, installMotion } from '../../skills/protoblocks-site-builder/scripts/lib/motion.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
-function theme() {
+function theme(qa) {
   const t = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-mo-'));
   fs.mkdirSync(path.join(t, 'inc'));
-  initState(t, { url: 'http://a.local', path: '/x' });
+  initState(t, { url: 'http://a.local', path: '/x', ...(qa ? { qa } : {}) });
   updateState(t, (s) => { s.pages.push({ slug: 'home', status: 'building', sections: [{ n: 1, anchor: 'pb-s1', block: 'hero', status: 'animating' }] }); });
   return t;
 }
@@ -36,8 +36,8 @@ test('recordMotion closes a section only on pass or explicit acceptance', () => 
   const t = theme();
   const fail = path.join(t, 'fail.json');
   const pass = path.join(t, 'pass.json');
-  fs.writeFileSync(fail, JSON.stringify({ pass: false }));
-  fs.writeFileSync(pass, JSON.stringify({ pass: true }));
+  fs.writeFileSync(fail, JSON.stringify({ pass: false, anchor: 'pb-s1' }));
+  fs.writeFileSync(pass, JSON.stringify({ pass: true, anchor: 'pb-s1' }));
   assert.throws(() => recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail }), (e) => e.code === 'EMOTION');
   assert.equal(loadState(t).pages[0].sections[0].status, 'animating');
   recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail, accepted: true });
@@ -86,8 +86,8 @@ test('accepting twice does not duplicate the note; a later pass removes it', () 
   const t = theme();
   const fail = path.join(t, 'fail.json');
   const pass = path.join(t, 'pass.json');
-  fs.writeFileSync(fail, JSON.stringify({ pass: false }));
-  fs.writeFileSync(pass, JSON.stringify({ pass: true }));
+  fs.writeFileSync(fail, JSON.stringify({ pass: false, anchor: 'pb-s1' }));
+  fs.writeFileSync(pass, JSON.stringify({ pass: true, anchor: 'pb-s1' }));
   updateState(t, (s) => { s.pages[0].sections[0].notes = 'hero is tall'; });
   recordMotion(t, 'home', 1, { presets: [], checkFile: fail, accepted: true });
   recordMotion(t, 'home', 1, { presets: [], checkFile: fail, accepted: true });
@@ -99,8 +99,8 @@ test('accepting twice does not duplicate the note; a later pass removes it', () 
   const t2 = theme();
   const f2 = path.join(t2, 'fail.json');
   const p2 = path.join(t2, 'pass.json');
-  fs.writeFileSync(f2, JSON.stringify({ pass: false }));
-  fs.writeFileSync(p2, JSON.stringify({ pass: true }));
+  fs.writeFileSync(f2, JSON.stringify({ pass: false, anchor: 'pb-s1' }));
+  fs.writeFileSync(p2, JSON.stringify({ pass: true, anchor: 'pb-s1' }));
   recordMotion(t2, 'home', 1, { presets: [], checkFile: f2, accepted: true });
   updateState(t2, (st) => { st.pages[0].sections[0].status = 'animating'; });
   recordMotion(t2, 'home', 1, { presets: [], checkFile: p2 });
@@ -110,7 +110,7 @@ test('accepting twice does not duplicate the note; a later pass removes it', () 
 test('recordMotion reports a missing section as ENOSECTION', () => {
   const t = theme();
   const pass = path.join(t, 'pass.json');
-  fs.writeFileSync(pass, JSON.stringify({ pass: true }));
+  fs.writeFileSync(pass, JSON.stringify({ pass: true, anchor: 'pb-s1' }));
   assert.throws(() => recordMotion(t, 'home', 9, { presets: [], checkFile: pass }), (e) => e.code === 'ENOSECTION');
   assert.throws(() => recordMotion(t, 'nope', 1, { presets: [], checkFile: pass }), (e) => e.code === 'ENOSECTION');
 });
@@ -142,7 +142,7 @@ test('CLI: profile, record with flags, bad command and missing --presets value',
   assert.equal(r.status, 0);
   assert.equal(loadState(t).site.motionProfile.name, 'bold');
   const fail = path.join(t, 'fail.json');
-  fs.writeFileSync(fail, JSON.stringify({ pass: false }));
+  fs.writeFileSync(fail, JSON.stringify({ pass: false, anchor: 'pb-s1' }));
   r = cli('record', t, 'home', '1', fail, '--presets', 'fade-up,stagger-children', '--accepted');
   assert.equal(r.status, 0, r.stderr);
   const sec = loadState(t).pages[0].sections[0];
@@ -159,14 +159,14 @@ test('CLI: profile, record with flags, bad command and missing --presets value',
 const checkFiles = (t) => {
   const fail = path.join(t, 'fail.json');
   const pass = path.join(t, 'pass.json');
-  fs.writeFileSync(fail, JSON.stringify({ pass: false }));
-  fs.writeFileSync(pass, JSON.stringify({ pass: true }));
+  fs.writeFileSync(fail, JSON.stringify({ pass: false, anchor: 'pb-s1' }));
+  fs.writeFileSync(pass, JSON.stringify({ pass: true, anchor: 'pb-s1' }));
   return { fail, pass };
 };
 const sectionOf = (t) => loadState(t).pages[0].sections[0];
 
-test('failed motion checks are counted in state; the third reports capReached', () => {
-  const t = theme();
+test('failed motion checks are counted in state; the third reports capReached (site.qa.maxIterations 3)', () => {
+  const t = theme({ maxIterations: 3 });
   const { fail } = checkFiles(t);
   const attempt = () => { try { recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail }); } catch (e) { return e; } return null; };
   let e = attempt();
@@ -212,4 +212,78 @@ test('record is refused unless the section is animating (acceptance excepted); a
       assert.equal(sectionOf(t).status, 'done');
     }
   }
+});
+
+const writeCheck = (t, name, o) => { const f = path.join(t, name); fs.writeFileSync(f, JSON.stringify(o)); return f; };
+const emotion = (re) => (e) => e.code === 'EMOTION' && (!re || re.test(e.message));
+
+test('recordMotion rejects a check written for another anchor, counting nothing', () => {
+  const t = theme();
+  for (const pass of [true, false]) {
+    const other = writeCheck(t, `other-${pass}.json`, { pass, anchor: 'pb-s2', url: 'http://a.local/' });
+    assert.throws(() => recordMotion(t, 'home', 1, { checkFile: other }), emotion(/pb-s2.*pb-s1|anchor/));
+    assert.throws(() => recordMotion(t, 'home', 1, { checkFile: other, accepted: true }), emotion(/anchor/));
+  }
+  const none = writeCheck(t, 'none.json', { pass: true });
+  assert.throws(() => recordMotion(t, 'home', 1, { checkFile: none }), emotion(/anchor/));
+  assert.equal(sectionOf(t).motion, undefined, 'no attempt recorded');
+  assert.equal(sectionOf(t).status, 'animating');
+});
+
+test('recordMotion rejects a check of another page URL when the page has a URL in state', () => {
+  const t = theme();
+  updateState(t, (s) => { s.pages[0].url = 'http://a.local/home/'; });
+  const wrong = writeCheck(t, 'wrong.json', { pass: true, anchor: 'pb-s1', url: 'http://a.local/about/' });
+  assert.throws(() => recordMotion(t, 'home', 1, { checkFile: wrong }), emotion(/url/i));
+  assert.equal(sectionOf(t).status, 'animating');
+  // Same page: a fragment, a missing trailing slash or a query do not make it another page.
+  const same = writeCheck(t, 'same.json', { pass: true, anchor: 'pb-s1', url: 'http://a.local/home?x=1#pb-s1' });
+  assert.equal(recordMotion(t, 'home', 1, { checkFile: same }).status, 'done');
+});
+
+test('a failed record sets motion.check to "fail"', () => {
+  const t = theme();
+  const { fail } = checkFiles(t);
+  assert.throws(() => recordMotion(t, 'home', 1, { presets: ['fade-up'], checkFile: fail }), emotion());
+  assert.equal(sectionOf(t).motion.check, 'fail');
+});
+
+test('the attempt cap comes from site.qa.maxIterations, default 3 when unset', () => {
+  const run = (t) => { const { fail } = checkFiles(t); const out = []; for (let i = 0; i < 3; i++) { try { recordMotion(t, 'home', 1, { checkFile: fail }); } catch (e) { out.push(e.capReached); } } return out; };
+  assert.deepEqual(run(theme({ maxIterations: 2 })), [false, true, true]);
+  const t = theme();
+  updateState(t, (s) => { delete s.site.qa.maxIterations; });
+  assert.deepEqual(run(t), [false, false, true]);
+});
+
+test('recordMotion returns {pass, attempts, capReached, status}; a failure carries the same shape', () => {
+  const t = theme({ maxIterations: 3 });
+  const { fail, pass } = checkFiles(t);
+  let err;
+  try { recordMotion(t, 'home', 1, { checkFile: fail }); } catch (e) { err = e; }
+  assert.deepEqual(err.result, { pass: false, attempts: 1, capReached: false, status: 'animating' });
+  assert.deepEqual(recordMotion(t, 'home', 1, { checkFile: pass, presets: ['fade-up'] }), { pass: true, attempts: 2, capReached: false, status: 'done' });
+});
+
+test('recordMotion rejects unknown presets as EMOTION before touching state', () => {
+  const t = theme();
+  const { pass } = checkFiles(t);
+  assert.throws(() => recordMotion(t, 'home', 1, { checkFile: pass, presets: ['fade-up', 'wobble'] }), emotion(/wobble/));
+  assert.equal(sectionOf(t).status, 'animating');
+  assert.equal(recordMotion(t, 'home', 1, { checkFile: pass, presets: ['split-lines', 'marquee', 'counter'] }).status, 'done');
+});
+
+test('CLI record prints {pass, attempts, capReached, status} JSON on stdout for a pass and for a failure', () => {
+  const t = theme({ maxIterations: 3 });
+  const { fail, pass } = checkFiles(t);
+  let r = cli('record', t, 'home', '1', fail, '--presets', 'fade-up');
+  assert.equal(r.status, 1);
+  assert.deepEqual(JSON.parse(r.stdout), { pass: false, attempts: 1, capReached: false, status: 'animating' });
+  assert.match(r.stderr, /^\[EMOTION\] [^\n]+\n$/, 'one-line stderr message');
+  r = cli('record', t, 'home', '1', pass, '--presets', 'fade-up');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { pass: true, attempts: 2, capReached: false, status: 'done' });
+  r = cli('record', t, 'home', '1', pass, '--presets', 'nope');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\[EMOTION\].*nope/);
 });
