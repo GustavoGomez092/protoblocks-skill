@@ -26,7 +26,7 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
       } else {
         await page.screenshot({ path: out, fullPage });
       }
-      return { out, url, selector: selector ?? null, width, scale, box, consoleErrors: errors.console, pageErrors: errors.page };
+      return { out, url, selector: selector ?? null, width, scale, box, consoleErrors: errors.console, pageErrors: errors.page, imageErrors: errors.images };
     } finally {
       await context.close();
     }
