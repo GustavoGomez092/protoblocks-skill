@@ -27,17 +27,22 @@ export function auditExtract(e, { focusKeyword, ogImageInfo }) {
   const checks = [];
   const add = (id, ok, detail, fix, warnOnly = false) => checks.push({ id, status: ok ? 'pass' : warnOnly ? 'warn' : 'fail', detail, ...(ok ? {} : { fix }) });
   const kw = norm(focusKeyword);
+  const addKw = (id, ok, detail, fix, warnOnly = false) => (kw
+    ? add(id, ok, detail, fix, warnOnly)
+    : add(id, false, 'no focus keyword', 'Pass a non-empty focus keyword (--keyword).'));
 
   const h1s = e.h.filter((h) => h.level === 1);
   add('h1-count', h1s.length === 1, `${h1s.length} h1: ${h1s.map((h) => h.selector).join(', ') || 'none'}`, 'Exactly one h1 per page: demote extra section titles to h2 (block tagName/attribute).');
   const skips = e.h.slice(1).filter((h, i) => h.level > e.h[i].level + 1).map((h) => `${h.selector} (h${h.level})`);
   add('heading-order', skips.length === 0, skips.length ? `skipped levels at ${skips.join(', ')}` : 'ok', 'Use consecutive heading levels (h2 under h1, h3 under h2).', true);
-  add('kw-title', norm(e.title).includes(kw), e.title, 'Put the focus keyword near the start of the SEO title.');
-  add('kw-h1', h1s.some((h) => norm(h.text).includes(kw)), h1s[0]?.text ?? 'no h1', 'Include the focus keyword in the h1 (or pick a keyword the h1 already uses).');
-  add('kw-first-paragraph', norm(e.firstParagraph).includes(kw), (e.firstParagraph ?? '').slice(0, 120), 'Mention the focus keyword in the first paragraph.');
-  add('kw-description', norm(e.metaDescription).includes(kw), e.metaDescription ?? 'missing', 'Include the focus keyword in the meta description.');
+  addKw('kw-title', norm(e.title).includes(kw), e.title, 'Put the focus keyword near the start of the SEO title.');
+  addKw('kw-h1', h1s.some((h) => norm(h.text).includes(kw)), h1s[0]?.text ?? 'no h1', 'Include the focus keyword in the h1 (or pick a keyword the h1 already uses).');
+  addKw('kw-first-paragraph', norm(e.firstParagraph).includes(kw), (e.firstParagraph ?? '').slice(0, 120), 'Mention the focus keyword in the first paragraph.');
+  addKw('kw-description', norm(e.metaDescription).includes(kw), e.metaDescription ?? 'missing', 'Include the focus keyword in the meta description.');
+  const kwWords = kw.split(' ').filter((w) => w.length >= 3);
   const slug = (() => { try { return new URL(e.url).pathname; } catch { return e.url ?? ''; } })();
-  add('kw-slug', kw.split(' ').every((w) => slug.toLowerCase().includes(w)), slug, 'Consider a slug containing the keyword (ask before changing a published URL).', true);
+  const slugTokens = slug.toLowerCase().split(/[-/_.]+/).filter(Boolean);
+  addKw('kw-slug', kwWords.every((w) => slugTokens.some((t) => t.startsWith(w))), slug, 'Consider a slug containing the keyword (ask before changing a published URL).', true);
   add('title-length', (e.title ?? '').length > 0 && (e.title ?? '').length <= 60, `${(e.title ?? '').length} chars`, 'Shorten the SEO title to ≤ 60 characters.');
   const dl = (e.metaDescription ?? '').length;
   add('description-length', dl >= 120 && dl <= 156, `${dl} chars`, 'Rewrite the meta description to 120–156 characters.');
@@ -54,7 +59,7 @@ export function auditExtract(e, { focusKeyword, ogImageInfo }) {
   const missing = [];
   for (const n of nodes) {
     for (const t of [].concat(n['@type'])) {
-      for (const p of REQUIRED_PROPS[t] ?? []) if (n[p] === undefined || n[p] === '' || (Array.isArray(n[p]) && !n[p].length)) missing.push(`${t}.${p}`);
+      for (const p of Object.hasOwn(REQUIRED_PROPS, t) ? REQUIRED_PROPS[t] : []) if (n[p] === undefined || n[p] === '' || (Array.isArray(n[p]) && !n[p].length)) missing.push(`${t}.${p}`);
     }
   }
   add('jsonld-required', missing.length === 0, missing.length ? `missing ${[...new Set(missing)].join(', ')}` : 'ok', 'Add the missing properties to the schema pieces.');
@@ -74,14 +79,15 @@ export async function extractPage(page) {
     const root = document.querySelector('main') ?? document.body;
     const sel = (el) => { const sec = el.closest('[id^="pb-s"]'); return `${sec ? `section#${sec.id} ` : ''}${el.tagName.toLowerCase()}`; };
     const host = location.host;
+    const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('#wpadminbar, [hidden], [aria-hidden="true"]');
     return {
       url: location.href,
       title: document.title,
       metaDescription: meta('meta[name="description"]'),
       canonical: document.querySelector('link[rel="canonical"]')?.href ?? null,
       og: { title: meta('meta[property="og:title"]'), description: meta('meta[property="og:description"]'), image: meta('meta[property="og:image"]'), url: meta('meta[property="og:url"]') },
-      h: [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map((h) => ({ level: Number(h.tagName[1]), text: h.textContent.trim(), selector: sel(h) })),
-      firstParagraph: [...root.querySelectorAll('p')].map((p) => p.textContent.trim()).find((t) => t.length >= 40) ?? '',
+      h: [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter(visible).map((h) => ({ level: Number(h.tagName[1]), text: h.textContent.trim(), selector: sel(h) })),
+      firstParagraph: [...root.querySelectorAll('p')].filter(visible).map((p) => p.textContent.trim()).find((t) => t.length >= 40) ?? '',
       imgs: [...document.querySelectorAll('img')].map((i) => ({ src: i.getAttribute('src'), alt: i.hasAttribute('alt') ? i.getAttribute('alt') : null })),
       links: [...root.querySelectorAll('a[href]')].map((a) => ({ href: a.getAttribute('href'), internal: a.host === host && !a.getAttribute('href').startsWith('#') })),
       jsonld: [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => s.textContent),
@@ -101,7 +107,7 @@ export async function seoAudit({ url, focusKeyword, out, browser }) {
       let ogImageInfo = null;
       if (e.og.image) {
         try {
-          const res = await context.request.get(new URL(e.og.image, e.url).href);
+          const res = await context.request.get(new URL(e.og.image, e.url).href, { timeout: 15000 });
           const meta = res.ok() ? await sharp(await res.body()).metadata() : {};
           ogImageInfo = { ok: res.ok(), status: res.status(), width: meta.width ?? 0, height: meta.height ?? 0 };
         } catch (err) { ogImageInfo = { ok: false, status: 0, width: 0, height: 0, error: err.message }; }

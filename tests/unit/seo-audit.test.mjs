@@ -244,3 +244,35 @@ test('failing checks carry a fix; passing ones do not', () => {
   assert.ok(r.checks.find((c) => c.id === 'canonical').fix);
   assert.equal('fix' in r.checks.find((c) => c.id === 'kw-title'), false);
 });
+
+test('JSON-LD @type of constructor/toString does not throw or count as known types', () => {
+  const e = good();
+  e.jsonld = [JSON.stringify({ '@type': ['constructor', 'toString', '__proto__', 'hasOwnProperty'], name: 'x' })];
+  const r = run(e);
+  assert.equal(byId(r)['jsonld-required'], 'pass');
+});
+
+test('kw-slug matches keyword words as prefixes of slug tokens and ignores words under 3 chars', () => {
+  const r = (url) => { const x = good(); x.url = url; return byId(auditExtract(x, { focusKeyword: 'a plumber in austin', ogImageInfo: og }))['kw-slug']; };
+  assert.equal(r('http://a.local/austin-plumbers/'), 'pass');
+  assert.equal(r('http://a.local/home/'), 'warn');
+  assert.equal(r('http://a.local/services/austin/plumbers'), 'pass');
+});
+
+test('kw-slug does not match mid-token substrings', () => {
+  const x = good();
+  x.url = 'http://a.local/unplumbered/';
+  assert.equal(byId(auditExtract(x, { focusKeyword: 'plumber', ogImageInfo: og }))['kw-slug'], 'warn');
+});
+
+test('empty or whitespace keyword fails every kw-* check with "no focus keyword"', () => {
+  for (const kw of ['', '   \n', undefined]) {
+    const r = auditExtract(good(), { focusKeyword: kw, ogImageInfo: og });
+    assert.equal(r.pass, false);
+    for (const id of ['kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description', 'kw-slug']) {
+      const c = r.checks.find((x) => x.id === id);
+      assert.equal(c.status, 'fail', id);
+      assert.equal(c.detail, 'no focus keyword', id);
+    }
+  }
+});
