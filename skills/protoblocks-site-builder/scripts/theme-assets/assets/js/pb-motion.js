@@ -160,7 +160,43 @@
     };
   }
 
+  // SplitText freezes the current line breaks into wrappers, so a split made before the element's web font arrives
+  // keeps fallback-font lines (wrong wraps, clipped masks). Split presets wait for the font, at most FONT_WAIT_MS;
+  // past that the element reveals with a plain fade, never split. The element stays hidden meanwhile, under the
+  // usual backstops (the plugin watchdog, this runtime's own done observer).
+  var SPLIT = ['split-lines', 'split-chars'];
+  var FONT_WAIT_MS = 2500;
+  function fontSpec(el) {
+    var cs = window.getComputedStyle(el);
+    return cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+  }
+  // Resolves true once the fonts the element's text needs are loaded (and no other font is still loading), false on
+  // timeout. null: nothing to wait for, split now.
+  function fontsFor(el) {
+    var fonts = document.fonts;
+    if (!fonts || !fonts.ready || typeof fonts.check !== 'function') return null;
+    var spec;
+    var text = el.textContent || ' ';
+    try { spec = fontSpec(el); if (fonts.check(spec, text) && fonts.status !== 'loading') return null; } catch (e) { return null; }
+    var loaded = fonts.load(spec, text).then(function () { return fonts.ready; }, function () { return fonts.ready; }).then(function () { return true; });
+    return Promise.race([loaded, new Promise(function (r) { setTimeout(function () { r(false); }, FONT_WAIT_MS); })]);
+  }
+
   function initReveal(el, name) {
+    var wait = SPLIT.indexOf(name) >= 0 && window.SplitText ? fontsFor(el) : null;
+    if (!wait) { startReveal(el, name); return; }
+    var live = true;
+    own(el, function () { live = false; }); // torn down while waiting: never split
+    wait.then(function (ready) {
+      if (!live) return;
+      live = false;
+      // Revealed by someone else meanwhile (the watchdog): the CSS no longer hides it; leave the authored text alone.
+      if (el.getAttribute('data-proto-animate') === 'done') return;
+      try { startReveal(el, ready ? name : 'fade-in'); } catch (e) { recover(el, name, e); }
+    });
+  }
+
+  function startReveal(el, name) {
     var o = opts(el);
     var tween = revealTween(el, name, o);
     if (!tween) { done(el); return; }
@@ -228,19 +264,21 @@
         if (isReveal) initReveal(el, name);
         else if (CONTINUOUS.indexOf(name) >= 0) initContinuous(el, name);
         else done(el);
-      } catch (e) {
-        // Never leave content hidden: undo whatever the preset already did (kill its tween, restore counter text and
-        // aria-label, revert SplitText), then strip GSAP's from-state from the element and everything inside it.
-        release(el);
-        // Only nodes with an inline style can hold GSAP's from-state; skipping the rest avoids leaving style="" behind.
-        var styled = [el].concat(Array.prototype.slice.call(el.querySelectorAll('[style]'))).filter(function (n) { return n.hasAttribute('style'); });
-        if (window.gsap && styled.length) {
-          try { window.gsap.set(styled, { clearProps: 'opacity,transform,clipPath' }); } catch (e2) {}
-        }
-        done(el);
-        if (window.console) console.warn('[pb-motion] ' + name + ' failed:', e);
-      }
+      } catch (e) { recover(el, name, e); }
     });
+  }
+
+  // Never leave content hidden: undo whatever the preset already did (kill its tween, restore counter text and
+  // aria-label, revert SplitText), then strip GSAP's from-state from the element and everything inside it.
+  function recover(el, name, e) {
+    release(el);
+    // Only nodes with an inline style can hold GSAP's from-state; skipping the rest avoids leaving style="" behind.
+    var styled = [el].concat(Array.prototype.slice.call(el.querySelectorAll('[style]'))).filter(function (n) { return n.hasAttribute('style'); });
+    if (window.gsap && styled.length) {
+      try { window.gsap.set(styled, { clearProps: 'opacity,transform,clipPath' }); } catch (e2) {}
+    }
+    done(el);
+    if (window.console) console.warn('[pb-motion] ' + name + ' failed:', e);
   }
 
   // Stop motion inside root (all of it without root): kill tweens, triggers and observers, and forget the elements so

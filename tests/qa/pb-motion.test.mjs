@@ -11,13 +11,13 @@ const havePhp = spawnSync('php', ['-v']).status === 0;
 // Imported lazily so the file still loads (and qtest skips) when the QA deps are not installed.
 const launchBrowser = async () => (await import(path.join(QA_DIR, 'browser.mjs'))).launchBrowser();
 
-async function open(browser, url, { reducedMotion = false, block = [] } = {}) {
+async function open(browser, url, { reducedMotion = false, block = [], waitUntil = 'load' } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.message)));
   for (const pattern of block) await page.route(pattern, (r) => r.abort());
-  await page.goto(url, { waitUntil: 'load' });
+  await page.goto(url, { waitUntil });
   return { ctx, page, errors };
 }
 
@@ -243,6 +243,48 @@ qtest('counter: a three-counter row counts with ~0 anchor CLS and leaves no rese
   const after = await page.$$eval('.stat span[id]', (els) => els.map((e) => ({ text: e.textContent, minWidth: e.style.minWidth, display: e.style.display, fvn: e.style.fontVariantNumeric })));
   for (const a of after) assert.deepEqual({ minWidth: a.minWidth, display: a.display, fvn: a.fvn }, { minWidth: '', display: '', fvn: '' }, JSON.stringify(after));
 }));
+
+// SplitText measures lines from the current layout. Splitting before a web font arrives freezes fallback-font line
+// breaks into the line wrappers; the split must wait for the font.
+qtest('split-lines waits for a late web font: one split, made with the font, with its line count', () => withPage('motion-font.html', {}, async (page, errors) => {
+  assert.ok(await allDone(page, 6000), 'heading revealed');
+  const r = await page.evaluate(() => ({ splits: window.__splits, height: document.getElementById('t2').getBoundingClientRect().height, html: document.getElementById('t2').innerHTML, fontLoaded: document.fonts.check('40px PbWide') }));
+  assert.equal(r.fontLoaded, true, 'precondition: the web font loaded');
+  const lines = Math.round(r.height / 50);
+  assert.equal(lines, 3, `precondition: the font-loaded heading wraps to 3 lines (${r.height}px)`);
+  assert.equal(r.splits.length, 1, JSON.stringify(r.splits));
+  assert.deepEqual(r.splits[0], { lines, font: true });
+  assert.equal(r.html, 'Split lines heading that wraps', 'split reverted after the reveal');
+  assert.deepEqual(errors, []);
+}));
+
+// The late font holds the load event, so the page is taken at DOMContentLoaded, while the split is still waiting.
+qtest('split-lines torn down while waiting for its font never splits', () => withPage('motion-font.html', { waitUntil: 'domcontentloaded' }, async (page) => {
+  assert.equal(await page.evaluate(() => document.fonts.check('40px PbWide')), false, 'precondition: font still loading');
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } })));
+  await page.waitForFunction(() => document.fonts.check('40px PbWide'), null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  const r = await page.evaluate(() => ({ splits: window.__splits.length, html: document.getElementById('t2').innerHTML, triggers: window.ScrollTrigger.getAll().length }));
+  assert.deepEqual(r, { splits: 0, html: 'Split lines heading that wraps', triggers: 0 });
+}));
+
+// A font request that never answers also holds the load event, so this page is opened at DOMContentLoaded.
+qtest('split-lines whose font never loads still reveals the heading, unsplit', () => withPage('motion-font.html?font=hang', { waitUntil: 'domcontentloaded' }, async (page) => {
+  assert.ok(await allDone(page, 6000), 'heading revealed');
+  const st = await state(page, '#t2');
+  assert.equal(st.o, '1');
+  assert.equal(await page.evaluate(() => window.__splits.length), 0, 'no split with the fallback font');
+}));
+
+qtest('split-lines with a late font: motion check passes with anchor CLS within budget', async () => {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const r = await motionCheck({ url: `${srv.url}/motion-font.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.ok(r.cls <= 0.01, `cls ${r.cls} (motion ${r.clsMotion}, baseline ${r.clsBaseline})`);
+    assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+  } finally { await srv.close().catch(() => {}); }
+});
 
 qtest('marquee: clone copy is hidden from AT, inert, and has no duplicate ids', () => withPage('motion-extra.html', {}, async (page) => {
   const dom = await page.evaluate(() => {
