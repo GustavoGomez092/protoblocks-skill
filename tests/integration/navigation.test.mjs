@@ -10,7 +10,7 @@ import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/li
 const NAV = path.join(WP_SCRIPTS_DIR, 'navigation.php');
 const ids = (wp, type, name) => wp.check(['post', 'list', `--post_type=${type}`, `--name=${name}`, '--post_status=any', '--format=ids']).trim().split(/\s+/).filter(Boolean);
 const purge = (wp) => {
-  for (const [type, name] of [['page', 'pb-nav-home'], ['page', 'pb-nav-later'], ['wp_navigation', 'pb-nav-itest']]) {
+  for (const [type, name] of [['page', 'pb-nav-home'], ['page', 'pb-nav-later'], ['page', 'pb-nav-draft'], ['page', 'pb-nav-child'], ['page', 'pb-nav-parent'], ['wp_navigation', 'pb-nav-itest']]) {
     const found = ids(wp, type, name);
     if (found.length) wp.check(['post', 'delete', ...found, '--force']);
   }
@@ -65,6 +65,58 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
     const after = wp.evalFile(NAV, ['get', 'itest']).content;
     assert.equal((after.match(/"kind":"post-type"/g) ?? []).length, 2);
     assert.deepEqual(refreshMenus(wp, theme).refreshed, []);
+  } finally {
+    purge(wp);
+  }
+});
+
+itest('trashed menus are reused (not duplicated) and get uses the same lookup', () => {
+  const wp = testWp();
+  purge(wp);
+  try {
+    const spec = { title: 'Primary', items: [{ label: 'X', url: 'https://example.com' }] };
+    const a = upsertMenu(wp, 'itest', spec);
+    wp.check(['eval', `wp_trash_post(${a.id});`]); // wp-cli refuses to trash wp_navigation; WP core trashes it (slug gets __trashed)
+    assert.equal(wp.check(['post', 'get', String(a.id), '--field=post_status']).trim(), 'trash');
+    assert.equal(wp.evalFile(NAV, ['get', 'itest']).id, a.id);
+    const b = upsertMenu(wp, 'itest', spec);
+    assert.equal(b.id, a.id);
+    assert.equal(b.created, false);
+    assert.equal(wp.check(['post', 'get', String(b.id), '--field=post_status']).trim(), 'publish');
+    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--name=pb-nav-itest', '--format=count']).trim(), '1');
+    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--name=pb-nav-itest-2', '--format=count']).trim(), '0');
+  } finally {
+    purge(wp);
+  }
+});
+
+itest('only published pages resolve; nested slugs resolve', () => {
+  const wp = testWp();
+  purge(wp);
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
+  try {
+    const draftId = wp.check(['post', 'create', '--post_type=page', '--post_status=draft', '--post_title=PB Nav Draft', '--post_name=pb-nav-draft', '--porcelain']).trim();
+    const parentId = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', '--post_title=PB Nav Parent', '--post_name=pb-nav-parent', '--porcelain']).trim();
+    const childId = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_parent=${parentId}`, '--post_title=PB Nav Child', '--post_name=pb-nav-child', '--porcelain']).trim();
+    const spec = { title: 'Primary', items: [
+      { label: 'Draft', page: 'pb-nav-draft' },
+      { label: 'Child', page: 'pb-nav-parent/pb-nav-child' },
+    ] };
+    const a = upsertMenu(wp, 'itest', spec);
+    assert.deepEqual(a.pending, [{ label: 'Draft', page: 'pb-nav-draft' }]);
+    const c1 = wp.evalFile(NAV, ['get', 'itest']).content;
+    assert.doesNotMatch(c1, new RegExp(`"id":${draftId}`));
+    assert.match(c1, new RegExp(`"id":${childId},[^}]*"kind":"post-type"`));
+    assert.equal((c1.match(/"kind":"post-type"/g) ?? []).length, 1);
+
+    initState(theme, { url: 'http://proto-blocks.local', path: '/x' });
+    updateState(theme, (s) => { setPath(s, 'site.navigation.menus.itest', { id: a.id, spec, pending: a.pending }); });
+    wp.check(['post', 'update', draftId, '--post_status=publish']);
+    assert.deepEqual(refreshMenus(wp, theme).refreshed, ['itest']);
+    assert.deepEqual(loadState(theme).site.navigation.menus.itest.pending, []);
+    const c2 = wp.evalFile(NAV, ['get', 'itest']).content;
+    assert.match(c2, new RegExp(`"id":${draftId}`));
+    assert.equal((c2.match(/"kind":"post-type"/g) ?? []).length, 2);
   } finally {
     purge(wp);
   }

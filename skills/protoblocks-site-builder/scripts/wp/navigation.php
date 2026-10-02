@@ -13,10 +13,12 @@ if ($key === '') { $pb_fail('Missing menu key.'); }
 $slug = 'pb-nav-' . $key;
 
 function pb_nav_find(string $slug) {
+    // Trashed posts get a "__trashed" slug suffix; include them so upsert revives instead of duplicating.
     $found = get_posts([
-        'post_type' => 'wp_navigation', 'name' => $slug, 'numberposts' => 1,
-        'post_status' => ['publish', 'draft', 'private'],
+        'post_type' => 'wp_navigation', 'post_name__in' => [$slug, $slug . '__trashed'], 'numberposts' => 5,
+        'post_status' => ['publish', 'draft', 'private', 'pending', 'future', 'trash'],
     ]);
+    foreach ($found as $post) { if ($post->post_status !== 'trash') { return $post; } }
     return $found ? $found[0] : null;
 }
 
@@ -24,7 +26,7 @@ function pb_nav_link_attrs(array $item, array &$pending): array {
     $attrs = ['label' => (string) ($item['label'] ?? '')];
     if (!empty($item['page'])) {
         $page = get_page_by_path((string) $item['page'], OBJECT, 'page');
-        if ($page && $page->post_status !== 'trash') {
+        if ($page && $page->post_status === 'publish') {
             return $attrs + ['type' => 'page', 'id' => (int) $page->ID, 'url' => get_permalink($page), 'kind' => 'post-type'];
         }
         $pending[] = ['label' => $attrs['label'], 'page' => (string) $item['page']];

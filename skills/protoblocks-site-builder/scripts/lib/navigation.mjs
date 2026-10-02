@@ -8,7 +8,14 @@ import { loadState, updateState, setPath, statePath } from './state.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'navigation.php');
 
+const KEY_RE = /^[a-z0-9_-]+$/;
+
 export function upsertMenu(wp, key, spec) {
+  if (!KEY_RE.test(key ?? '')) {
+    const e = new Error(`Invalid menu key "${key}": use lowercase letters, digits, "-" or "_".`);
+    e.code = 'ENAVKEY';
+    throw e;
+  }
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-nav-')), `${key}.json`);
   fs.writeFileSync(file, JSON.stringify(spec));
   try {
@@ -20,7 +27,7 @@ export function upsertMenu(wp, key, spec) {
 
 function record(themeDir, key, spec, result) {
   if (!fs.existsSync(statePath(themeDir))) return;
-  updateState(themeDir, (s) => { setPath(s, `site.navigation.menus.${key}`, { id: result.id, spec, pending: result.pending }); });
+  updateState(themeDir, (s) => { setPath(s, `site.navigation.menus.${result.key}`, { id: result.id, spec, pending: result.pending }); });
 }
 
 export function refreshMenus(wp, themeDir) {
@@ -36,7 +43,7 @@ export function refreshMenus(wp, themeDir) {
 
 function main(argv) {
   const [cmd, themeDir, key, file] = argv;
-  if (!themeDir || !['upsert', 'refresh'].includes(cmd)) {
+  if (!themeDir || !['upsert', 'refresh'].includes(cmd) || (cmd === 'upsert' && !(key && file))) {
     process.stderr.write('Usage: node navigation.mjs upsert <themeDir> <key> <spec.json> | refresh <themeDir>\n');
     process.exit(64);
   }
