@@ -19,7 +19,7 @@ if ($cmd === 'hash' || $cmd === 'get') {
     $post = $id ? get_post($id) : null;
     if (!$post) { $fail('EINPUT', "No post with ID {$id}."); }
     if ($cmd === 'hash') { $out(['postId' => $id, 'contentHash' => $hash($id)]); return; }
-    $out(['postId' => $id, 'postType' => $post->post_type, 'status' => $post->post_status, 'built' => (bool) get_post_meta($id, '_pb_built', true),
+    $out(['postId' => $id, 'postType' => $post->post_type, 'status' => $post->post_status, 'title' => $post->post_title, 'slug' => $post->post_name, 'built' => (bool) get_post_meta($id, '_pb_built', true),
           'content' => (string) get_post_field('post_content', $id, 'raw'), 'contentHash' => $hash($id)]);
     return;
 }
@@ -55,7 +55,6 @@ if (!empty($spec['postId'])) {
 }
 if (!$target) {
     $p = get_page_by_path($slug, OBJECT, 'page');
-    if ($p && $p->post_type !== 'page') { $fail('ENOTPAGE', "Post {$p->ID} is a \"{$p->post_type}\", not a page."); }
     if ($p && $p->post_status !== 'trash') { $target = $p; }
 }
 
@@ -77,6 +76,11 @@ if ($cmd === 'plan') {
     return;
 }
 if ($guard) { $out(['ok' => false] + $guard); return; }
+// The caller backed up (or planned against) a specific content hash; if the post moved on since, re-plan and re-back-up.
+if ($target && !empty($spec['backedUpHash']) && $current !== (string) $spec['backedUpHash']) {
+    $out(['ok' => false, 'code' => 'ESTALE', 'message' => "Page {$target->ID} changed after the backup was taken (it was {$spec['backedUpHash']}, is now {$current})."]);
+    return;
+}
 
 // ---- build the content --------------------------------------------------------------------------------------------
 $warnings = [];
@@ -96,19 +100,50 @@ foreach ($spec['blocks'] as $i => $b) {
     $blocks[] = ['blockName' => $b['name'], 'attrs' => (array) ($b['attrs'] ?? []), 'innerBlocks' => $inner, 'innerHTML' => '', 'innerContent' => array_fill(0, count($inner), null)];
 }
 
+$title = (string) ($spec['title'] ?? $slug);
+$name = $slug;
+$status = 'publish';
+$last = is_array($spec['lastWritten'] ?? null) ? $spec['lastWritten'] : null;
+$kept = ['title' => false, 'slug' => false];
+if ($target) {
+    // Never silently revert the developer's choices. title/slug: if the post differs from what the builder last
+    // wrote, keep the developer's value (force does not change this; force is about content). status: a builder page
+    // is always published, so draft/pending/private/future means the developer unpublished it; stay that way unless forced.
+    if ($last && isset($last['title']) && $target->post_title !== $last['title']) {
+        $kept['title'] = true; $title = $target->post_title;
+        $warnings[] = "Kept the developer's page title \"{$target->post_title}\" (the builder last wrote \"{$last['title']}\", state asks for \"" . ($spec['title'] ?? $slug) . "\").";
+    }
+    if ($last && isset($last['slug']) && $target->post_name !== $last['slug']) {
+        $kept['slug'] = true; $name = $target->post_name;
+        $warnings[] = "Kept the developer's page slug \"{$target->post_name}\" (the builder last wrote \"{$last['slug']}\").";
+    }
+    if (in_array($target->post_status, ['draft', 'pending', 'private', 'future'], true)) {
+        if ($force) { $warnings[] = "Page {$target->ID} was {$target->post_status}; --force republished it."; }
+        else { $status = $target->post_status; $warnings[] = "Page {$target->ID} is {$target->post_status} (set by the developer); it stays {$target->post_status}. Re-run with --force, after asking the developer, to publish it."; }
+    }
+}
 $postarr = [
-    'post_type' => 'page', 'post_status' => 'publish', 'post_name' => $slug,
-    'post_title' => (string) ($spec['title'] ?? $slug), 'post_content' => serialize_blocks($blocks),
+    'post_type' => 'page', 'post_status' => $status, 'post_name' => $name,
+    'post_title' => $title, 'post_content' => serialize_blocks($blocks),
 ];
 $backup_rev = null;
 if ($target) {
     $postarr['ID'] = (int) $target->ID;
-    $rev = wp_save_post_revision((int) $target->ID); // null when revisions are off or nothing changed
-    $backup_rev = is_int($rev) && $rev > 0 ? $rev : null;
+    // Only when the content actually changes (an idempotent rebuild must not add revisions).
+    if ($current !== hash('sha256', $postarr['post_content'])) {
+        $rev = wp_save_post_revision((int) $target->ID); // null when revisions are off or nothing changed
+        $backup_rev = is_int($rev) && $rev > 0 ? $rev : null;
+    }
 }
-$id = $target ? wp_update_post(wp_slash($postarr), true) : wp_insert_post(wp_slash($postarr), true);
+// Nothing to change at all: skip the update so an idempotent rebuild leaves the post (and its revisions) untouched.
+$unchanged = $target && $current === hash('sha256', $postarr['post_content']) && $target->post_title === $title
+    && $target->post_name === $name && $target->post_status === $status;
+$id = $unchanged ? (int) $target->ID : ($target ? wp_update_post(wp_slash($postarr), true) : wp_insert_post(wp_slash($postarr), true));
 if (is_wp_error($id) || !$id) { $fail('EWRITE', is_wp_error($id) ? $id->get_error_message() : 'The page could not be written.'); }
 update_post_meta($id, '_pb_built', 1);
 clean_post_cache($id);
 $out(['ok' => true, 'postId' => (int) $id, 'slug' => get_post_field('post_name', $id), 'url' => get_permalink($id), 'contentHash' => $hash((int) $id),
-      'created' => $target === null, 'backupRevisionId' => $backup_rev, 'warnings' => $warnings]);
+      'created' => $target === null, 'backupRevisionId' => $backup_rev, 'warnings' => $warnings,
+      // What the builder itself wrote (a kept developer value stays at the builder's previous value, so it keeps being detected).
+      'written' => ['title' => $kept['title'] ? $last['title'] : get_post_field('post_title', $id, 'raw'),
+                    'slug' => $kept['slug'] ? $last['slug'] : get_post_field('post_name', $id), 'postStatus' => get_post_status($id)]]);

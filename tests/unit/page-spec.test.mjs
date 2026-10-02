@@ -24,7 +24,7 @@ test('pageSpecFromState orders sections, adds anchors, skips skipped/unbuilt', (
   assert.deepEqual(spec.blocks.map((b) => b.name), ['proto-blocks/hero-split', 'proto-blocks/cta']);
   assert.deepEqual(spec.blocks[1].attrs, { heading: 'Go', anchor: 'pb-s2' });
   assert.match(spec.blocks[0].innerRaw, /wp:paragraph/);
-  assert.throws(() => pageSpecFromState(state, 'nope'), /No page "nope"/);
+  assert.throws(() => pageSpecFromState(state, 'nope'), (e) => e.code === 'ENOPAGE' && /No page "nope"/.test(e.message));
 });
 
 test('pageSpecFromState keeps namespaced block names and passes force', () => {
@@ -54,7 +54,7 @@ function fake(handlers) {
   const exec = (cmd, args) => {
     const script = path.basename(args[1]);
     const sub = args[2];
-    const spec = sub === 'write' || sub === 'plan' ? JSON.parse(fs.readFileSync(args[3], 'utf8')) : null;
+    const spec = ['write', 'plan', 'refresh'].includes(sub) ? JSON.parse(fs.readFileSync(args[3], 'utf8')) : null;
     calls.push({ script, sub, spec, args });
     const h = handlers[`${script}:${sub}`];
     if (!h) throw new Error(`unexpected call ${script} ${sub}`);
@@ -64,7 +64,7 @@ function fake(handlers) {
   return { wp: createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec }), calls };
 }
 
-const okWrite = (over = {}) => ({ ok: true, postId: 7, slug: 'home', url: 'http://x.test/home/', contentHash: 'h-new', created: false, backupRevisionId: 31, warnings: [], ...over });
+const okWrite = (over = {}) => ({ ok: true, postId: 7, slug: 'home', url: 'http://x.test/home/', contentHash: 'h-new', created: false, backupRevisionId: 31, warnings: [], written: { title: 'Home', slug: 'home', postStatus: 'publish' }, ...over });
 const plan = (over = {}) => ({ target: { postId: 7, hash: 'h-old', built: true, status: 'publish' }, guard: null, needsBackup: false, ...over });
 
 test('buildPage writes through, records state, advances planning to building', () => {
@@ -102,7 +102,7 @@ test('overwriting content that is not the builder\'s saves a backup file BEFORE 
   let backupExistedAtWrite = null;
   const { wp, calls } = fake({
     'page.php:plan': plan({ needsBackup: true, target: { postId: 7, hash: 'h-hand', built: true, status: 'publish' } }),
-    'page.php:get': { postId: 7, content: '<p>hand written ünï</p>', contentHash: 'h-hand', postType: 'page', status: 'publish', built: true },
+    'page.php:get': { postId: 7, content: '<p>hand written ünï</p>', contentHash: 'h-hand', postType: 'page', status: 'draft', built: true, title: 'Dev title', slug: 'dev-slug' },
     'page.php:write': () => {
       const dir = path.join(theme, '.protoblocks', 'artifacts', 'backups');
       backupExistedAtWrite = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -110,12 +110,68 @@ test('overwriting content that is not the builder\'s saves a backup file BEFORE 
     },
   });
   const r = buildPage(wp, theme, 'home', { force: true });
-  assert.equal(backupExistedAtWrite.length, 1);
+  assert.equal(backupExistedAtWrite.length, 2, "the .html and its .json sidecar exist before write");
   assert.match(r.backupFile, /backups[\\/]home-7-\d{4}-\d\d-\d\dT[\d-]+Z\.html$/);
   assert.equal(fs.readFileSync(r.backupFile, 'utf8'), '<p>hand written ünï</p>');
   assert.equal(r.backupRevisionId, null);
   assert.deepEqual(calls.map((c) => c.sub), ['plan', 'get', 'write']);
   assert.equal(calls[2].spec.force, true);
+  assert.equal(calls[2].spec.backedUpHash, 'h-hand', 'write is told which hash the backup was taken from');
+  const side = JSON.parse(fs.readFileSync(r.backupFile.replace(/\.html$/, '.json'), 'utf8'));
+  assert.deepEqual({ ...side, at: typeof side.at }, { postId: 7, title: 'Dev title', slug: 'dev-slug', status: 'draft', contentHash: 'h-hand', at: 'string' });
+  assert.ok(!Number.isNaN(Date.parse(side.at)));
+});
+
+test('when no backup is needed, write still gets the planned hash as backedUpHash', () => {
+  const theme = setup();
+  const { wp, calls } = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite() });
+  buildPage(wp, theme, 'home');
+  assert.equal(calls[1].spec.backedUpHash, 'h-old');
+  const t2 = setup({ pageOverrides: { postId: null, contentHash: null } });
+  const f2 = fake({ 'page.php:plan': plan({ target: null }), 'page.php:write': okWrite({ created: true }) });
+  buildPage(f2.wp, t2, 'home');
+  assert.equal(f2.calls[1].spec.backedUpHash ?? null, null);
+});
+
+test('ESTALE from write is thrown with a re-plan hint and leaves state alone', () => {
+  const theme = setup();
+  const { wp } = fake({ 'page.php:plan': plan(), 'page.php:write': { ok: false, code: 'ESTALE', message: 'Page 7 changed after the backup was taken.' } });
+  assert.throws(() => buildPage(wp, theme, 'home'), (e) => e.code === 'ESTALE' && /re-run/i.test(e.message) && !/Ask the developer/.test(e.message));
+  assert.equal(loadState(theme).pages[0].contentHash, 'h-old');
+});
+
+test('overwriting an untracked built page (no stored hash) adds a warning naming the backup', () => {
+  const theme = setup({ pageOverrides: { postId: null, contentHash: null } });
+  const { wp } = fake({
+    'page.php:plan': plan({ needsBackup: true, target: { postId: 9, hash: 'h-x', built: true, status: 'publish' } }),
+    'page.php:get': { postId: 9, content: 'c', contentHash: 'h-x', postType: 'page', status: 'publish', built: true, title: 't', slug: 'home' },
+    'page.php:write': okWrite({ postId: 9 }),
+  });
+  const r = buildPage(wp, theme, 'home');
+  assert.ok(r.warnings.some((w) => /untracked/i.test(w) && w.includes(r.backupFile)), JSON.stringify(r.warnings));
+});
+
+test('written title/slug/status are recorded in state and sent back as lastWritten on the next build', () => {
+  const theme = setup();
+  const written = { title: 'Builder title', slug: 'home', postStatus: 'draft' };
+  const f1 = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite({ written, warnings: ['kept the developer title'] }) });
+  const r = buildPage(f1.wp, theme, 'home');
+  assert.deepEqual(loadState(theme).pages[0].written, written);
+  assert.deepEqual(r.warnings, ['kept the developer title']);
+  assert.equal(f1.calls[0].spec.lastWritten, null);
+  const f2 = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite({ written }) });
+  buildPage(f2.wp, theme, 'home');
+  assert.deepEqual(f2.calls[0].spec.lastWritten, written);
+  assert.deepEqual(f2.calls[1].spec.lastWritten, written);
+});
+
+test('page status never regresses from seo or done', () => {
+  for (const status of ['seo', 'done', 'building']) {
+    const theme = setup({ pageOverrides: { status } });
+    const { wp } = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite() });
+    buildPage(wp, theme, 'home');
+    assert.equal(loadState(theme).pages[0].status, status);
+  }
 });
 
 test('a failed backup write aborts before the overwrite', () => {
@@ -148,16 +204,16 @@ test('a final slug that differs from the requested one is reported as a warning'
 });
 
 test('refreshMenus runs only when a pending link targets this slug; a failure is reported, not thrown', () => {
-  const nav = { id: 1, key: 'primary', created: false, pending: [] };
+  const nav = { id: 1, pending: [], patched: [{ label: 'Home', page: 'home' }], missing: [], previousHash: 'p', contentHash: 'c' };
   let n = 0;
   let theme = setup({ pending: true });
-  let f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:upsert': () => { n++; return nav; } });
+  let f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:refresh': () => { n++; return nav; } });
   assert.deepEqual(buildPage(f.wp, theme, 'home').refreshedMenus, ['primary']);
   assert.equal(n, 1);
 
   theme = setup({ pending: false });
   n = 0;
-  f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:upsert': () => { n++; return nav; } });
+  f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:refresh': () => { n++; return nav; } });
   assert.deepEqual(buildPage(f.wp, theme, 'home').refreshedMenus, []);
   assert.equal(n, 0);
 
@@ -167,7 +223,7 @@ test('refreshMenus runs only when a pending link targets this slug; a failure is
   assert.deepEqual(buildPage(f.wp, theme, 'home').refreshedMenus, []);
 
   theme = setup({ pending: true });
-  f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:upsert': () => { throw new Error('nav boom'); } });
+  f = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite(), 'navigation.php:refresh': () => { throw new Error('nav boom'); } });
   const r = buildPage(f.wp, theme, 'home');
   assert.deepEqual(r.refreshedMenus, []);
   assert.match(r.menuRefreshError, /nav boom|failed/);

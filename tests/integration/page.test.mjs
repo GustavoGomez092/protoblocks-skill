@@ -33,6 +33,7 @@ const mkForeign = (wp, created, slug, { type = 'page', status = 'publish', conte
   return id;
 };
 const content = (wp, id) => wp.check(['post', 'get', String(id), '--field=post_content']).replace(/\n$/, '');
+const revisions = (wp, id) => Number(wp.check(['post', 'list', '--post_type=revision', `--post_parent=${id}`, '--post_status=any', '--format=count']).trim());
 const php = (wp, cmd, spec) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-pagephp-'));
   const file = path.join(dir, 'spec.json');
@@ -62,21 +63,40 @@ itest('buildPage creates, rebuilds idempotently, guards hand edits, and force sa
     assert.equal(wp.check(['post', 'meta', 'get', String(a.postId), '_pb_built']).trim(), '1');
     assert.equal(loadState(theme).pages[0].status, 'building');
 
+    const revsAfterA = revisions(wp, a.postId);
     const b = buildPage(wp, theme, slug);
     assert.equal(b.created, false);
     assert.equal(b.postId, a.postId);
+    assert.equal(b.contentHash, a.contentHash, 'an idempotent rebuild stores identical content');
+    assert.equal(revisions(wp, a.postId), revsAfterA, 'an idempotent rebuild adds no revision');
     assert.equal(b.backupFile, null, 'rebuilding the builder\'s own content needs no file backup');
+    assert.deepEqual(b.warnings, []);
 
+    // state lost the hash of a page the builder built: overwritten with a backup and a warning
+    updateState(theme, (st) => { st.pages[0].contentHash = null; });
+    const u = buildPage(wp, theme, slug);
+    assert.ok(u.backupFile && fs.existsSync(u.backupFile));
+    assert.ok(u.warnings.some((w) => /untracked/i.test(w) && w.includes(u.backupFile)), JSON.stringify(u.warnings));
+
+    const bdir = path.join(theme, '.protoblocks', 'artifacts', 'backups');
+    const backupsBefore = fs.readdirSync(bdir).length;
     const hand = '<!-- wp:paragraph --><p>hand edit</p><!-- /wp:paragraph -->';
     wp.check(['post', 'update', String(a.postId), `--post_content=${hand}`]);
     assert.throws(() => buildPage(wp, theme, slug), (e) => e.code === 'EEDITED' && /--force/.test(e.message) && e.message.includes('backups'));
     assert.equal(content(wp, a.postId), hand, 'guard must not touch the post');
-    assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts', 'backups')), false);
+    assert.equal(fs.readdirSync(bdir).length, backupsBefore, 'a refused build writes no backup');
 
     const f = buildPage(wp, theme, slug, { force: true });
     assert.equal(f.postId, a.postId);
     assert.ok(f.backupFile && fs.existsSync(f.backupFile));
     assert.equal(fs.readFileSync(f.backupFile, 'utf8'), hand);
+    const side = JSON.parse(fs.readFileSync(f.backupFile.replace(/\.html$/, '.json'), 'utf8'));
+    assert.equal(side.postId, a.postId);
+    assert.equal(side.slug, slug);
+    assert.equal(side.title, 'Itest');
+    assert.equal(side.status, 'publish');
+    assert.equal(side.contentHash, crypto.createHash('sha256').update(hand).digest('hex'));
+    assert.ok(Date.parse(side.at) > 0);
     assert.match(content(wp, a.postId), /pb-gate-ok/);
     if (f.backupRevisionId !== null) assert.equal(content(wp, f.backupRevisionId), hand);
   } finally {
@@ -122,6 +142,61 @@ itest('foreign and non-page posts: ESLUGTAKEN, EFOREIGN, ENOTPAGE; force overwri
     assert.throws(() => buildPage(wp, themeN, slugN), (e) => e.code === 'ENOTPAGE');
     assert.throws(() => buildPage(wp, themeN, slugN, { force: true }), (e) => e.code === 'ENOTPAGE');
     assert.equal(content(wp, idN), '<p>client original</p>');
+  } finally {
+    cleanup(wp, created);
+  }
+});
+
+itest('the builder never reverts the developer\'s title, slug or status', async () => {
+  const wp = testWp();
+  const created = [];
+  try {
+    const slug = pageSlug('dev');
+    const theme = newTheme([statePage(slug)]);
+    const a = buildPage(wp, theme, slug);
+    created.push(a.postId);
+    assert.deepEqual(loadState(theme).pages[0].written, { title: 'Itest', slug, postStatus: 'publish' });
+
+    const devSlug = `${slug}-renamed`;
+    wp.check(['post', 'update', String(a.postId), '--post_title=Dev Title', `--post_name=${devSlug}`, '--post_status=draft']);
+    updateState(theme, (st) => { st.pages[0].title = 'Builder Title 2'; });
+    const snap = () => JSON.parse(wp.check(['post', 'get', String(a.postId), '--fields=post_title,post_name,post_status', '--format=json']));
+
+    for (let i = 0; i < 2; i++) { // twice: the divergence must keep being detected
+      const r = buildPage(wp, theme, slug);
+      assert.equal(r.postId, a.postId);
+      assert.deepEqual(snap(), { post_title: 'Dev Title', post_name: devSlug, post_status: 'draft' });
+      assert.ok(r.warnings.some((w) => /title/i.test(w) && /Dev Title/.test(w)), JSON.stringify(r.warnings));
+      assert.ok(r.warnings.some((w) => /slug/i.test(w) && w.includes(devSlug)));
+      assert.ok(r.warnings.some((w) => /draft/.test(w) && /--force/.test(w)));
+    }
+
+    const f = buildPage(wp, theme, slug, { force: true });
+    assert.deepEqual(snap(), { post_title: 'Dev Title', post_name: devSlug, post_status: 'publish' });
+    assert.ok(f.warnings.some((w) => /republished/.test(w)));
+    // private is treated like draft
+    wp.check(['post', 'update', String(a.postId), '--post_status=private']);
+    buildPage(wp, theme, slug);
+    assert.equal(snap().post_status, 'private');
+  } finally {
+    cleanup(wp, created);
+  }
+});
+
+itest('write refuses with ESTALE when the post changed after the backup was taken', async () => {
+  const wp = testWp();
+  const created = [];
+  try {
+    const slug = pageSlug('stale');
+    const w = php(wp, 'write', good(slug));
+    created.push(w.postId);
+    const before = content(wp, w.postId);
+    const stale = php(wp, 'write', { ...good(slug), postId: w.postId, expectedHash: w.contentHash, backedUpHash: 'deadbeef' });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.code, 'ESTALE');
+    assert.equal(content(wp, w.postId), before);
+    const ok = php(wp, 'write', { ...good(slug), postId: w.postId, expectedHash: w.contentHash, backedUpHash: w.contentHash });
+    assert.equal(ok.ok, true);
   } finally {
     cleanup(wp, created);
   }

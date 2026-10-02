@@ -92,6 +92,7 @@ test('state-mutating CLIs refuse with EWRONGSITE and change nothing', () => {
     ['navigation.mjs', ['refresh', theme]],
     ['parts.mjs', ['write', theme, 'header', markup]],
     ['parts.mjs', ['overrides', theme]],
+    ['page.mjs', ['build', theme, 'home']],
   ]) {
     const r = spawnSync(process.execPath, [path.join(LIB, script), ...args], { encoding: 'utf8' });
     assert.equal(r.status, 1, `${script} ${args[0]}: ${r.stderr}`);
