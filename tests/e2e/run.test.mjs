@@ -2,9 +2,17 @@
 // build -> per-section numeric QA -> motion -> header/footer part move (adopt, rebuild, re-verify) -> page QA -> Yoast
 // SEO -> done -> ask-more-pages, driving the script surface only (no LLM judgement), on the Local test site.
 //
+// Two passes: WordPress' global styles disabled (Proto-Blocks' "Disable WP Global Styles" on) and on. The theme shell
+// fixes come from the builder's managed pb-shell.css only (the e2e blocks carry no page-shell workarounds).
+//
 // SAFETY (the developer's real site). Run it only through the site lock (it skips unless PB_SITE_LOCK=1, which the
 // lock script exports; tests/README.md):
-//   /private/tmp/claude-501/pb-site-test.sh <worktree> test:e2e
+//   tests/pb-site-test.sh <worktree> test:e2e
+// - Run manifest: tests/.tmp/site-run-<hex>.json is written before the first change and updated after each (fork slug,
+//   page/menu/attachment names and ids, option snapshots, the Tailwind cache copy, the Yoast snapshot). SIGTERM/SIGINT
+//   restore from it synchronously; a manifest left behind makes the next run refuse to start (tests/recover.mjs).
+// - Global styles: the pass sets proto_blocks_tailwind.disable_global_styles only when it differs; the whole option is
+//   snapshotted and restored exactly (and checked afterwards).
 // - Options: setupSite runs only when the plugins are active and the options ensurePlugins would write are already
 //   in their target state (else skip). Theme-switch options (theme_mods_<original>, sidebars_widgets,
 //   theme_switched, current_theme) and those setup options are snapshotted and restored; theme_mods_<fork> is deleted.
@@ -38,6 +46,7 @@ import {
   snapshotTailwind, restoreTailwind,
 } from '../integration/helpers.mjs';
 import { haveQaDeps, QA_DIR } from '../qa/helpers.mjs';
+import { createRun, leftoverReason, onInterrupt, recoverOnSignal, rawOption as rawOpt } from '../site-run.mjs';
 import { setupSite } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
 import { forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 import { installMotion, recordMotion, runtimePresets } from '../../skills/protoblocks-site-builder/scripts/lib/motion.mjs';
@@ -68,8 +77,9 @@ const OPTIONS_PHP = path.join(REPO, 'tests', 'integration', 'yoast-options.php')
 // Same crash-recovery file as tests/integration/yoast.test.mjs: one snapshot at a time, never overwritten.
 const SNAPSHOT_FILE = path.join(TMP, 'yoast-options-snapshot.json');
 const RESTORE_COMMAND = `${path.join(TMP, 'wp-test-site')} eval-file ${OPTIONS_PHP} restore ${SNAPSHOT_FILE}`;
-const PARTS = [154, 159]; // the developer's header/footer template parts: read only
-const MENU_ID = 15; // the developer's navigation menu: read only
+// The developer's header/footer template parts and navigation menu: only read (checked unchanged afterwards).
+const PARTS = (process.env.PB_E2E_PARTS ?? '154,159').split(',').map(Number);
+const MENU_ID = Number(process.env.PB_E2E_MENU ?? 15);
 const NAV_CLI = path.join(REPO, 'skills', 'protoblocks-site-builder', 'scripts', 'lib', 'navigation.mjs');
 // The pipeline must stop and clean up well inside the 10-minute window the lock script runs in.
 const BUDGET_MS = 420000;
@@ -188,6 +198,21 @@ function restoreOptions(wp, snapshot) {
 }
 const rawOption = (wp, name) => wp.run(['option', 'get', name, '--format=json']).stdout.trim();
 
+// Proto-Blocks' "Disable WP Global Styles" (Tailwind/Manager.php: proto_blocks_tailwind['disable_global_styles']).
+const GS_KEY = 'disable_global_styles';
+const globalStylesDisabled = (wp) => {
+  const raw = rawOpt(wp, 'proto_blocks_tailwind');
+  const v = raw === null ? null : JSON.parse(raw);
+  return v !== null && typeof v === 'object' && v[GS_KEY] === true;
+};
+/** Turns WordPress' global styles on or off through the Proto-Blocks setting; writes only when it differs. */
+function setGlobalStyles(wp, on) {
+  if (globalStylesDisabled(wp) === !on) return false;
+  wp.check(['eval', `$o = get_option('proto_blocks_tailwind', []); if (!is_array($o)) { $o = []; } $o['${GS_KEY}'] = ${on ? 'false' : 'true'}; update_option('proto_blocks_tailwind', $o);`]);
+  assert.equal(globalStylesDisabled(wp), !on, 'the global-styles setting took effect');
+  return true;
+}
+
 // The verdict a scripted (no-LLM) visual QA writes: copied field by field from check-section's result.json, so
 // recordVerdict's cross-check against result.json/input.json sees exactly the measured numbers.
 function verdictFromResult(result) {
@@ -215,9 +240,12 @@ function skipReason() {
   return '';
 }
 
-test('e2e: design.html becomes a done landing page on the Local test site (scripts only)', { timeout: 900000 }, async (t) => {
+async function e2ePass(t, { globalStyles }) {
   const why = skipReason();
   if (why) { t.skip(why); return; }
+  // An interrupted earlier run may have left the site changed: refuse until tests/recover.mjs restored it.
+  const left = leftoverReason();
+  if (left) throw new Error(left);
   const wp = testWp();
   // setupSite (ensurePlugins) installs/activates plugins and writes options unless they are already in their target
   // state; this test never lets it write: skip instead.
@@ -263,11 +291,24 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
 
   // Every snapshot is taken before the Yoast crash file is written, so a crash file always means "options taken".
   const tailwindBefore = snapshotTailwind(wp);
-  const wpOptionNames = [...themeOptionNames(), ...SETUP_OPTION_NAMES];
+  // Theme-switch, setup and plugin options; proto_blocks_tailwind holds the global-styles setting this pass may change.
+  const wpOptionNames = [...themeOptionNames(), ...SETUP_OPTION_NAMES, 'proto_blocks_tailwind'];
   const wpOptionsBefore = snapshotWpOptions(wp, wpOptionNames);
+  const globalStylesDisabledBefore = globalStylesDisabled(wp);
   const yoastBefore = snapshotOptions(wp);
   const yoastRawBefore = { wpseo_titles: rawOption(wp, 'wpseo_titles'), wpseo_social: rawOption(wp, 'wpseo_social') };
+  // The run manifest, before the first change: everything this pass may create or change, by exact name.
+  const run = createRun({ kind: 'e2e', pass: globalStyles ? 'global-styles-on' : 'global-styles-off', site: TEST_SITE, publicPath: PUBLIC, wrapper: path.join(TMP, 'wp-test-site') });
+  run.update((d) => {
+    d.originalTheme = before.stylesheet;
+    d.options = { ...wpOptionsBefore };
+    d.yoast = { snapshotFile: SNAPSHOT_FILE };
+    d.forks = [{ slug: themeSlug }];
+    d.posts = [{ type: 'page', name: pageSlug }, { type: 'wp_navigation', name: `pb-nav-e2e-${hex}` }, { type: 'attachment', name: `pb-e2e-og-${hex}` }];
+  }).setTailwind(tailwindBefore);
+  const offSignals = onInterrupt((sig) => recoverOnSignal(wp, run, sig));
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(yoastBefore, null, 2));
+  report.globalStyles = { pass: globalStyles ? 'on' : 'off', disabledBefore: globalStylesDisabledBefore };
 
   let err;
   let pageId = null;
@@ -275,7 +316,9 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   const ownedMedia = [];
   let server;
   try {
-    // 0. The design: block CSS is copied verbatim into design.html.
+    // 0. This pass's WordPress global styles (Proto-Blocks setting; restored with the option snapshot).
+    report.globalStyles.changed = setGlobalStyles(wp, globalStyles);
+    // The design: block CSS is copied verbatim into design.html.
     const designHtml = fs.readFileSync(path.join(HERE, 'design.html'), 'utf8');
     for (const b of BLOCK_NAMES) assert.ok(designHtml.includes(fs.readFileSync(path.join(BLOCKS, b, 'style.css'), 'utf8')), `design.html carries ${b}/style.css verbatim`);
 
@@ -311,6 +354,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     assert.equal(navRun.status, 0, `navigation.mjs upsert: ${navRun.stderr}`);
     const menu = JSON.parse(navRun.stdout);
     menuId = menu.id;
+    run.setPostId(`pb-nav-e2e-${hex}`, 'wp_navigation', menuId);
     report.steps.menu = { key: menuKey, id: menu.id, created: menu.created, pending: menu.pending };
     assert.equal(menu.created, true);
     assert.deepEqual(menu.pending, []);
@@ -372,6 +416,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     budget('build');
     const built = buildPage(wp, themeDir, pageSlug);
     pageId = built.postId;
+    run.setPostId(pageSlug, 'page', pageId);
     report.steps.build = { postId: built.postId, url: built.url, created: built.created, warnings: built.warnings };
     assert.equal(built.created, true);
     assert.deepEqual(built.warnings, []);
@@ -379,6 +424,8 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     const html = (await fetchHtml(pageUrl)).body;
     for (const def of SECTIONS) assert.equal(html.split(`id="${def.anchor}"`).length - 1, 1, `#${def.anchor} renders once`);
     assert.equal((html.match(/<(header|footer) class="wp-block-template-part/g) ?? []).length, 2, 'the setup-time header and footer parts render (no anchor yet)');
+    assert.equal(html.includes("id='global-styles-inline-css'") || html.includes('id="global-styles-inline-css"'), globalStyles, `WordPress global styles are ${globalStyles ? 'printed' : 'not printed'} in this pass`);
+    assert.match(html, /<link[^>]+id=['"]pb-shell-css['"][^>]+\/assets\/css\/pb-shell\.css/, 'the managed page-shell stylesheet is enqueued');
     assert.match(html, /data-pb-motion="split-lines"[^>]*data-proto-animate="manual"/);
     assert.match(html, /data-pb-motion="fade-up"[^>]*data-proto-animate="manual"[^>]*data-pb-delay="0.15"/);
     lap('build');
@@ -450,6 +497,8 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       const row = await verify(SECTIONS[n - 1], 'after-move');
       assert.equal(row.numericPass, true, `re-verification of #${row.anchor} after the move: ${JSON.stringify(row, null, 2)}`);
       assert.equal(row.status, 'done', 'a re-verified section returns to done');
+      // Rendered by the template parts, the header and footer still span the viewport (pb-shell.css).
+      if (n !== 2) for (const b of row.breakpoints) assert.equal(b.widthDelta ?? 0, 0, `#${row.anchor} ${b.name} widthDelta after the move`);
     }
     assert.deepEqual(refreshMenus(wp, themeDir), { refreshed: [], menus: {} }, 'no pending menu links');
     const moved = loadState(themeDir).pages.find((p) => p.slug === pageSlug).sections;
@@ -476,7 +525,10 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     assert.equal(og.height, 630);
     const seo = SEO(ogFile);
     const applied = applySeo(wp, themeDir, pageSlug, seo, { index: false });
-    for (const m of applied.media ?? []) ownedMedia.push(m);
+    for (const m of applied.media ?? []) {
+      ownedMedia.push(m);
+      if (!m.reused) run.setPostId(`pb-e2e-og-${hex}`, 'attachment', m.id);
+    }
     report.steps.seoApply = { index: applied.index, jsonld: applied.jsonld, media: applied.media, warnings: applied.warnings ?? [], organization: applied.organization ?? null };
     assert.equal(applied.index, 'skipped');
     assert.equal(applied.media.length, 1);
@@ -568,7 +620,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     const yoastAfter = step('restore yoast options', () => restoreOptions(wp, yoastBefore));
     const yoastRawAfter = step('read yoast options', () => ({ wpseo_titles: rawOption(wp, 'wpseo_titles'), wpseo_social: rawOption(wp, 'wpseo_social') }));
     const yoastIdentical = yoastAfter !== undefined && JSON.stringify(yoastAfter) === JSON.stringify(yoastBefore) && isDeepStrictEqual(yoastRawAfter, yoastRawBefore);
-    if (yoastIdentical) fs.rmSync(SNAPSHOT_FILE, { force: true });
+    if (yoastIdentical) { fs.rmSync(SNAPSHOT_FILE, { force: true }); run.update((d) => { d.yoast = null; }); }
     else problems.push(`Yoast options were not restored exactly; snapshot kept at ${SNAPSHOT_FILE}. Restore with:\n  ${RESTORE_COMMAND}`);
     // Leftover check.
     const after = step('fingerprint site', () => siteFingerprint(wp));
@@ -576,6 +628,11 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     const wpOptionsAfter = step('read options', () => snapshotWpOptions(wp, wpOptionNames));
     const themeModsAfter = step('theme mods list', () => themeModsList(wp));
     const leakedMods = step('leaked theme mods', () => leakedThemeMods(wp));
+    const globalStylesDisabledAfter = step('global-styles setting', () => globalStylesDisabled(wp));
+    // Everything restored: the run manifest goes; otherwise it stays for tests/recover.mjs.
+    offSignals();
+    if (problems.length) problems.push(`run manifest kept for recovery: ${run.file}`);
+    else run.close();
     report.leftovers = {
       activeTheme: after?.stylesheet ?? null,
       activeThemeRestored: after?.stylesheet === before.stylesheet && after?.template === before.template,
@@ -595,6 +652,8 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       themeModsAfter: themeModsAfter ?? null,
       leakedThemeMods: leakedMods ?? null,
       optionsSame: wpOptionsAfter ? isDeepStrictEqual(wpOptionsAfter, wpOptionsBefore) : null,
+      globalStylesSetting: { disabledBefore: globalStylesDisabledBefore, disabledAfter: globalStylesDisabledAfter ?? null, same: globalStylesDisabledAfter === globalStylesDisabledBefore },
+      runManifestLeft: fs.existsSync(run.file),
       optionsBefore: wpOptionsBefore,
       optionsAfter: wpOptionsAfter ?? null,
       problems,
@@ -603,7 +662,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     report.error = err ? String(err.stack ?? err) : null;
     try {
       fs.writeFileSync(path.join(work, 'summary.json'), `${JSON.stringify(report, null, 2)}\n`);
-      fs.writeFileSync(path.join(TMP, 'e2e-last-summary.json'), `${JSON.stringify(report, null, 2)}\n`);
+      fs.writeFileSync(path.join(TMP, `e2e-last-summary-${globalStyles ? 'gs-on' : 'gs-off'}.json`), `${JSON.stringify(report, null, 2)}\n`);
     } catch { /* reporting only */ }
     say(`leftovers: ${JSON.stringify(report.leftovers)}`);
     say(`summary: ${path.join(work, 'summary.json')}`);
@@ -623,5 +682,10 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   assert.equal(L.themeModsDropped, true, `theme_mods_${themeSlug} was created by the switch and deleted`);
   assert.deepEqual(L.leakedThemeMods.filter((n) => n.startsWith('theme_mods_pb-e2e-')), [], 'no theme_mods_pb-e2e-* row left');
   assert.deepEqual(L.themeModsAfter, L.themeModsBefore, 'theme_mods_* rows identical to before the run');
-  assert.equal(L.optionsSame, true, 'theme-switch and setup options identical to before the run');
-});
+  assert.equal(L.optionsSame, true, 'theme-switch, setup and plugin options identical to before the run');
+  assert.equal(L.globalStylesSetting.same, true, 'Proto-Blocks "Disable WP Global Styles" as before the run');
+  assert.equal(L.runManifestLeft, false, 'no run manifest left');
+}
+
+test('e2e (WP global styles disabled): design.html becomes a done landing page on the Local test site (scripts only)', { timeout: 900000 }, (t) => e2ePass(t, { globalStyles: false }));
+test('e2e (WP global styles on): design.html becomes a done landing page on the Local test site (scripts only)', { timeout: 900000 }, (t) => e2ePass(t, { globalStyles: true }));

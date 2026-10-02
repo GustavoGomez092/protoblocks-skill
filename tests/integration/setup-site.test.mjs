@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { itest, testWp, restoreTheme, ORIGINAL_THEME, PUBLIC, TEST_SITE, takeThemeSnapshot, dropThemeMods, leakedThemeMods, setupWriteReason, snapshotOptions, SETUP_OPTION_NAMES } from './helpers.mjs';
+import { itest, testWp, restoreTheme, ORIGINAL_THEME, PUBLIC, TEST_SITE, takeThemeSnapshot, dropThemeMods, leakedThemeMods, setupWriteReason, snapshotOptions, SETUP_OPTION_NAMES, siteRun, trackFork, untrackFork } from './helpers.mjs';
 import { setupSite } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
 import { MANAGED_START } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 import { loadState, statePath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
@@ -37,6 +37,9 @@ itest('setupSite forks, activates and records state; a second run reuses the for
   let err;
   const problems = [];
   takeThemeSnapshot(wp);
+  // Run manifest: the fork (deleted with the guards) and the setup options, before setupSite runs.
+  siteRun().update((d) => { d.options = { ...d.options, ...optionsBefore }; });
+  trackFork({ slug });
   try {
     const opts = { cwd: PUBLIC, site: TEST_SITE, name: 'PB Itest Setup', slug };
     const first = await setupSite(opts);
@@ -78,7 +81,10 @@ itest('setupSite forks, activates and records state; a second run reuses the for
       else problems.push(`left in place for inspection (not provably this test's fork, or the original theme is not active): ${themeDir}`);
     }
     // The switch created theme_mods_<slug>; delete exactly that row once the fork is gone.
-    if (!fs.existsSync(themeDir)) { try { dropThemeMods(wp, slug); } catch (e) { problems.push(`theme mods: ${e.message}`); } }
+    if (!fs.existsSync(themeDir)) { try { dropThemeMods(wp, slug); untrackFork(slug); } catch (e) { problems.push(`theme mods: ${e.message}`); } }
+    if (!problems.length && JSON.stringify(snapshotOptions(wp, SETUP_OPTION_NAMES)) === JSON.stringify(optionsBefore)) {
+      siteRun().update((d) => { for (const n of SETUP_OPTION_NAMES) delete d.options[n]; });
+    }
     t.diagnostic(`themes: ${fs.readdirSync(THEMES).join(', ')}`);
     t.diagnostic(`plugins before: ${pluginsBefore.trim()}`);
     t.diagnostic(`plugins after: ${wp.run(['plugin', 'list', '--fields=name,status,version', '--format=json']).stdout.trim()}`);

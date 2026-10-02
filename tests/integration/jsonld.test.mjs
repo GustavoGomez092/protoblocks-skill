@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { itest, testWp, SITE_URL } from './helpers.mjs';
+import { itest, testWp, SITE_URL, trackPost, deleteOwnPosts } from './helpers.mjs';
 import { jsonldSupported, JSONLD_META_KEY } from '../../skills/protoblocks-site-builder/scripts/lib/jsonld.mjs';
 
 const graphOf = async (slug) => {
@@ -18,6 +18,7 @@ itest('theme JSON-LD extension merges _proto_jsonld into the Yoast graph', async
   const mk = (slug, title) => {
     const id = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_name=${slug}`, `--post_title=${title}`, '--porcelain']).trim();
     ids.push(id);
+    trackPost({ id: Number(id), type: 'page', name: slug });
     return id;
   };
   try {
@@ -46,8 +47,7 @@ itest('theme JSON-LD extension merges _proto_jsonld into the Yoast graph', async
     assert.ok(![].concat(webPage(badGraph)['@type']).includes('FAQPage'));
     assert.ok(!badGraph.some((p) => p['@type'] === 'Question'));
   } finally {
-    for (const id of ids) {
-      try { wp.check(['post', 'delete', id, '--force']); } catch (err) { console.error(`cleanup failed for page ${id}: ${err.message}`); }
-    }
+    const gone = deleteOwnPosts(wp, ids);
+    for (const id of ids) if (!gone.includes(Number(id))) console.error(`cleanup failed for page ${id}`);
   }
 });

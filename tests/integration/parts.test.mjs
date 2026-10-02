@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { itest, testWp, useItestTheme, restoreTheme } from './helpers.mjs';
+import { itest, testWp, useItestTheme, restoreTheme, trackPost, untrackPosts, trackTerm, untrackTerms } from './helpers.mjs';
 import { listOverrides, removeOverride, recoveryCommand } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 import { serializeAttrs } from '../../skills/protoblocks-site-builder/scripts/lib/blocks.mjs';
 import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
@@ -21,6 +21,8 @@ function harness(wp) {
   const create = (slug, theme) => {
     const id = wp.check(['post', 'create', '--post_type=wp_template_part', '--post_status=publish', `--post_name=${slug}`, `--post_title=${slug}`, '--post_content=x', '--porcelain']).trim();
     ids.push(id);
+    trackPost({ id: Number(id), type: 'wp_template_part', name: slug }); // run manifest: recovery deletes exactly this
+    if (!terms.has(fakeTheme)) trackTerm({ taxonomy: 'wp_theme', slug: fakeTheme });
     terms.add(fakeTheme);
     wp.check(['post', 'term', 'set', id, 'wp_theme', theme]);
     // WordPress may suffix the slug at insert time; pin the exact probe slug.
@@ -29,8 +31,8 @@ function harness(wp) {
   };
   const status = (id) => wp.check(['post', 'get', id, '--field=post_status']).trim();
   const cleanup = () => {
-    for (const id of ids) wp.run(['post', 'delete', id, '--force']);
-    for (const t of terms) wp.run(['term', 'delete', 'wp_theme', t, '--by=slug']);
+    for (const id of ids) if (wp.run(['post', 'delete', id, '--force']).code === 0) untrackPosts((p) => p.id === Number(id));
+    for (const t of terms) if (wp.run(['term', 'delete', 'wp_theme', t, '--by=slug']).code === 0) untrackTerms((x) => x.slug === t);
   };
   return { probe, fakeTheme, create, status, cleanup };
 }

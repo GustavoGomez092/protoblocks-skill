@@ -2,9 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { isDeepStrictEqual } from 'node:util';
 import { createWp, WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { resolveLocalSite, writeWrapper } from '../../skills/protoblocks-site-builder/scripts/lib/local-site.mjs';
+import {
+  createRun, leftoverReason, THROWAWAY_FORK, onInterrupt, recoverOnSignal, LOCK_SCRIPT, RECOVER_COMMAND,
+  snapshotTailwind as snapTailwind, restoreTailwind as putTailwind, restoreOptions as putOptions, rawOption,
+} from '../site-run.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const TEST_SITE = process.env.PB_TEST_SITE ?? 'Proto Blocks';
@@ -12,7 +15,7 @@ export const TEST_SITE = process.env.PB_TEST_SITE ?? 'Proto Blocks';
 // Site tests run on the developer's real Local site, one run at a time across worktrees. They only run under the
 // lock script (tests/README.md), which exports PB_SITE_LOCK=1; anything else skips before WP-CLI is ever called.
 export const SITE_LOCKED = process.env.PB_SITE_LOCK === '1';
-export const LOCK_REASON = 'run via the site lock script: /private/tmp/claude-501/pb-site-test.sh <worktree> <npm script> (tests/README.md)';
+export const LOCK_REASON = `run via the site lock script: ${LOCK_SCRIPT} <worktree> <npm script> (tests/README.md)`;
 
 const resolved = resolveLocalSite({ query: TEST_SITE });
 const WRAPPER = path.join(REPO, 'tests', '.tmp', 'wp-test-site');
@@ -51,21 +54,59 @@ if (boot) {
   }
 }
 
+// An interrupted earlier run (its manifest is still in tests/.tmp) may have left the site changed: refuse to start.
+const leftover = boot ? leftoverReason() : '';
+
 export const SITE_URL = siteUrl;
 export const ORIGINAL_THEME = originalTheme;
 export const runtime = { wp: WRAPPER, mode: 'local-wrapper', publicPath: PUBLIC, url: SITE_URL };
 /** Why site tests must not run now ('' when they may): the lock, the site, WP-CLI or an unknown original theme. */
 export const siteSkipReason = () => (!SITE_LOCKED ? LOCK_REASON : !haveSite ? `start the Local site "${TEST_SITE}"` : skipReason);
+/** Why site tests must refuse to start ('' when they may): a manifest left by an interrupted run. */
+export const siteRefuseReason = () => leftover;
 export const itest = (name, fn) => {
   if (!SITE_LOCKED) return test.skip(`${name} (${LOCK_REASON})`, fn);
   if (!haveSite) return test.skip(`${name} (start the Local site "${TEST_SITE}")`, fn);
   if (skipReason) return test.skip(`${name} (${skipReason})`, fn);
+  if (leftover) return test(name, () => { throw new Error(leftover); });
   return test(name, fn);
 };
 export const testWp = () => {
   if (!SITE_LOCKED) throw Object.assign(new Error(`Refusing to talk to the test site: ${LOCK_REASON}`), { code: 'ENOLOCK' });
   return createWp(runtime);
 };
+
+// The run manifest of this test file's process (tests/site-run.mjs): written before the first site change, updated
+// with every snapshot and every post/term/theme folder the tests create, removed again as they clean up. SIGTERM/SIGINT
+// run the same restore synchronously; a manifest that is not empty when the process exits stays for tests/recover.mjs.
+let run = null;
+export function siteRun() {
+  if (run) return run;
+  if (!SITE_LOCKED || !boot) throw Object.assign(new Error(`Refusing to record site changes: ${siteSkipReason() || 'no site'}`), { code: 'ENOLOCK' });
+  run = createRun({ kind: 'integration', test: path.basename(process.argv[1] ?? ''), site: TEST_SITE, publicPath: PUBLIC, wrapper: WRAPPER });
+  onInterrupt((sig) => recoverOnSignal(createWp(runtime), run, sig));
+  process.on('exit', () => {
+    if (run.isEmpty()) run.close();
+    else process.stderr.write(`site-test run manifest kept (cleanup incomplete): ${run.file}\nRestore the site with: ${RECOVER_COMMAND}\n`);
+  });
+  return run;
+}
+/** Records a post this test created (or is about to create, by its unique name); type and name are checked on recovery. */
+export const trackPost = (rec) => siteRun().addPost(rec);
+/** Forgets the posts matching `pred` (deleted by the test itself). */
+export const untrackPosts = (pred) => siteRun().dropPosts(pred);
+export const trackTerm = (rec) => siteRun().addTerm(rec);
+export const untrackTerms = (pred) => siteRun().dropTerms(pred);
+/** Records a throwaway theme folder (`foreign: true` for a plain folder that is not a fork). */
+export const trackFork = (rec) => siteRun().addFork(rec);
+export const untrackFork = (slug) => siteRun().dropFork(slug);
+/** Deletes the given post ids (`--force`) and forgets the ones that are gone. */
+export function deleteOwnPosts(wp, ids) {
+  for (const id of ids) wp.run(['post', 'delete', String(id), '--force']);
+  const gone = new Set(ids.map(Number).filter((id) => wp.run(['post', 'get', String(id), '--field=ID']).code !== 0));
+  if (run) untrackPosts((p) => gone.has(p.id));
+  return [...gone];
+}
 
 export async function useItestTheme(wp) {
   const themes = path.join(PUBLIC, 'wp-content', 'themes');
@@ -99,48 +140,55 @@ export async function useItestTheme(wp) {
 let themeSnap = null;
 /** Call before a test switches themes; restoreTheme puts these options back after re-activating the original. */
 export function takeThemeSnapshot(wp, extraOptions = []) {
-  themeSnap ??= { options: snapshotOptions(wp, [...themeOptionNames(), ...extraOptions]), tailwind: snapshotTailwind(wp) };
+  if (!themeSnap) {
+    themeSnap = { options: snapshotOptions(wp, [...themeOptionNames(), ...extraOptions]), tailwind: snapshotTailwind(wp) };
+    // Into the run manifest before the switch, so an interrupted run can put them back.
+    siteRun().update((d) => { d.originalTheme = ORIGINAL_THEME; d.options = { ...d.options, ...themeSnap.options }; }).setTailwind(themeSnap.tailwind);
+  }
   return themeSnap;
 }
 
+/**
+ * Re-activates the original theme, then restores the theme-switch options and the Tailwind cache, also when the
+ * activation fails (the failure is still thrown afterwards, with anything not restored). Until everything is back the
+ * snapshot is kept, so calling it again retries the whole restore.
+ */
 export const restoreTheme = (wp) => {
   const tmpDir = path.join(REPO, 'tests', '.tmp');
   const originalThemeFile = path.join(tmpDir, 'original-theme.txt');
-  wp.check(['theme', 'activate', ORIGINAL_THEME]);
-  if (fs.existsSync(originalThemeFile)) {
-    fs.unlinkSync(originalThemeFile);
+  const errors = [];
+  try {
+    wp.check(['theme', 'activate', ORIGINAL_THEME]);
+    if (fs.existsSync(originalThemeFile)) fs.unlinkSync(originalThemeFile);
+  } catch (e) {
+    errors.push(`re-activating ${ORIGINAL_THEME} failed: ${e.message}`);
   }
   if (themeSnap) {
     const snap = themeSnap;
-    themeSnap = null;
-    const left = restoreOptions(wp, snap.options);
-    if (!restoreTailwind(wp, snap.tailwind)) left.push('Proto-Blocks Tailwind cache');
-    if (left.length) throw new Error(`theme-switch options not restored: ${left.join(', ')}`);
+    let left = [];
+    try { left = restoreOptions(wp, snap.options); } catch (e) { left = [`options (${e.message})`]; }
+    let tw = false;
+    try { tw = restoreTailwind(wp, snap.tailwind); } catch { /* reported below */ }
+    if (!tw) left.push('Proto-Blocks Tailwind cache');
+    if (left.length) errors.push(`theme-switch options not restored: ${left.join(', ')}`);
+    else if (!errors.length) {
+      themeSnap = null;
+      run?.update((d) => { d.originalTheme = null; for (const n of Object.keys(snap.options)) delete d.options[n]; }).clearTailwind();
+    }
   }
+  if (errors.length) throw new Error(errors.join('; '));
 };
 
 // Options a theme switch writes (wp-includes/theme.php switch_theme): the theme mods of the theme switched to and
 // from, the widget assignment, theme_switched and current_theme. Throwaway themes get their row deleted; the rest
 // are snapshotted before a switch and put back after.
-const rawOption = (wp, name) => {
-  const r = wp.run(['option', 'get', name, '--format=json']);
-  return r.code === 0 ? r.stdout.trim() : null;
-};
 export const themeOptionNames = () => [`theme_mods_${ORIGINAL_THEME}`, 'sidebars_widgets', 'theme_switched', 'current_theme'];
 export const snapshotOptions = (wp, names) => Object.fromEntries(names.map((n) => [n, rawOption(wp, n)]));
 /** Puts each option back to its snapshot (deleting the ones that were absent); returns the names still different. */
-export function restoreOptions(wp, snap) {
-  for (const [name, value] of Object.entries(snap)) {
-    const now = rawOption(wp, name);
-    if (now === value) continue;
-    if (value === null) wp.check(['option', 'delete', name]);
-    else wp.check(['option', 'update', name, value, '--format=json']);
-  }
-  return Object.entries(snapshotOptions(wp, Object.keys(snap))).filter(([n, v]) => v !== snap[n]).map(([n]) => n);
-}
+export const restoreOptions = (wp, snap) => putOptions(wp, snap);
 
 // Throwaway theme slugs whose theme_mods_ row a test may delete: exactly the per-run unique forks.
-const THROWAWAY_THEME = /^pb-(e2e|itest-fork|itest-setup)-[0-9a-f]{8}$/;
+const THROWAWAY_THEME = THROWAWAY_FORK;
 /** Deletes exactly theme_mods_<slug> of a throwaway fork that is no longer active (no pattern, no other row). */
 export function dropThemeMods(wp, slug) {
   if (!THROWAWAY_THEME.test(slug)) throw new Error(`refusing to delete theme_mods_${slug}: not a throwaway test theme`);
@@ -174,56 +222,7 @@ export function setupWriteReason(wp) {
 export const SETUP_OPTION_NAMES = ['proto_blocks_wizard_completed', 'proto_blocks_component_style', 'permalink_structure'];
 
 // Gates and tokens recompile Proto-Blocks' site-wide Tailwind cache for the active (test) theme; tests put it back.
-// Proto-Blocks' Tailwind cache: every file under uploads/proto-blocks/tailwind (recursively), whether the cache dir and
-// its parent existed, and the proto_blocks_tailwind option (null = absent).
-const TW_DIR = PUBLIC ? path.join(PUBLIC, 'wp-content', 'uploads', 'proto-blocks', 'tailwind') : '';
-const TW_PARENT = TW_DIR ? path.dirname(TW_DIR) : '';
-function walkFiles(dir, base = dir, out = {}) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walkFiles(p, base, out);
-    else if (e.isFile()) out[path.relative(base, p)] = fs.readFileSync(p);
-  }
-  return out;
-}
-function walkDirs(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isDirectory()) { const p = path.join(dir, e.name); out.push(p); walkDirs(p, out); }
-  return out;
-}
-export function snapshotTailwind(wp) {
-  const exists = fs.existsSync(TW_DIR);
-  const opt = wp.run(['option', 'get', 'proto_blocks_tailwind', '--format=json']);
-  return {
-    parentExisted: fs.existsSync(TW_PARENT),
-    dirExisted: exists,
-    dirs: exists ? walkDirs(TW_DIR).map((d) => path.relative(TW_DIR, d)) : [],
-    files: exists ? walkFiles(TW_DIR) : {},
-    option: opt.code === 0 ? opt.stdout.trim() : null,
-  };
-}
-export function restoreTailwind(wp, snap) {
-  if (fs.existsSync(TW_DIR)) {
-    // Files this run added (not in the snapshot), then directories it added, deepest first, only when empty.
-    for (const rel of Object.keys(walkFiles(TW_DIR))) if (!Object.hasOwn(snap.files, rel)) fs.rmSync(path.join(TW_DIR, rel));
-    for (const d of walkDirs(TW_DIR).sort((a, b) => b.length - a.length)) {
-      if (!snap.dirs.includes(path.relative(TW_DIR, d)) && fs.readdirSync(d).length === 0) fs.rmdirSync(d);
-    }
-  }
-  for (const [rel, buf] of Object.entries(snap.files)) {
-    fs.mkdirSync(path.dirname(path.join(TW_DIR, rel)), { recursive: true });
-    fs.writeFileSync(path.join(TW_DIR, rel), buf);
-  }
-  // A cache dir (and parent) the run created goes again when empty.
-  if (!snap.dirExisted && fs.existsSync(TW_DIR) && fs.readdirSync(TW_DIR).length === 0) fs.rmdirSync(TW_DIR);
-  if (!snap.parentExisted && fs.existsSync(TW_PARENT) && fs.readdirSync(TW_PARENT).length === 0) fs.rmdirSync(TW_PARENT);
-  const opt = wp.run(['option', 'get', 'proto_blocks_tailwind', '--format=json']);
-  const now = opt.code === 0 ? opt.stdout.trim() : null;
-  if (snap.option === null && now !== null) wp.check(['option', 'delete', 'proto_blocks_tailwind']);
-  else if (snap.option !== null && now !== snap.option) wp.check(['option', 'update', 'proto_blocks_tailwind', snap.option, '--format=json']);
-  const after = snapshotTailwind(wp);
-  return after.option === snap.option && after.dirExisted === snap.dirExisted && after.parentExisted === snap.parentExisted
-    && isDeepStrictEqual(after.dirs.sort(), [...snap.dirs].sort())
-    && Object.keys(after.files).length === Object.keys(snap.files).length
-    && Object.entries(snap.files).every(([n, b]) => after.files[n] && Buffer.compare(after.files[n], b) === 0);
-}
-
+// The cache files, directories and the proto_blocks_tailwind option (tests/site-run.mjs).
+export const snapshotTailwind = (wp) => snapTailwind(wp, PUBLIC);
+/** Puts the cache and option back byte for byte; true when they match the snapshot afterwards. */
+export const restoreTailwind = (wp, snap) => putTailwind(wp, PUBLIC, snap);

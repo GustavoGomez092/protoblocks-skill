@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { itest, testWp, SITE_URL, useItestTheme, restoreTheme } from './helpers.mjs';
+import { itest, testWp, SITE_URL, useItestTheme, restoreTheme, trackPost, deleteOwnPosts, siteRun } from './helpers.mjs';
 import { createWp, WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { buildPage } from '../../skills/protoblocks-site-builder/scripts/lib/page.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
@@ -12,12 +12,14 @@ import { initState, updateState, loadState } from '../../skills/protoblocks-site
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'blocks');
 const PAGE_PHP = path.join(WP_SCRIPTS_DIR, 'page.php');
 
-// Safety: this file only ever deletes post ids it created itself (collected in `created`), in finally, never by
-// query, name or pattern. All slugs are unique per run.
+// Safety: this file only ever deletes post ids it created itself (collected in `created`, and recorded in the run
+// manifest with their type and slug), in finally, never by query, name or pattern. All slugs are unique per run.
 const run = crypto.randomBytes(4).toString('hex');
 const pageSlug = (n) => `pb-itest-page-${run}-${n}`;
 const foreignSlug = (n) => `pb-itest-foreign-${run}-${n}`;
-const cleanup = (wp, created) => { if (created.length) wp.run(['post', 'delete', ...created.map(String), '--force']); };
+const cleanup = (wp, created) => deleteOwnPosts(wp, created);
+// Remember a post this test created: in `created` (for finally) and in the run manifest (for an interrupted run).
+const own = (created, id, name, type = 'page') => { created.push(id); trackPost({ id: Number(id), type, name }); };
 
 function newTheme(pages) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-pagestate-'));
@@ -29,7 +31,7 @@ const statePage = (slug, sections = [{ n: 1, anchor: 'pb-s1', block: 'pb-gate-ok
   ({ slug, title: 'Itest', status: 'planning', postId: null, contentHash: null, plan: { approvedAt: '2026-10-01T00:00:00.000Z', by: 'developer' }, sections, ...extra });
 const mkForeign = (wp, created, slug, { type = 'page', status = 'publish', content = '<p>client original</p>' } = {}) => {
   const id = Number(wp.check(['post', 'create', `--post_type=${type}`, `--post_status=${status}`, `--post_name=${slug}`, '--post_title=Client page', `--post_content=${content}`, '--porcelain']).trim());
-  created.push(id);
+  own(created, id, slug, type);
   return id;
 };
 const content = (wp, id) => wp.check(['post', 'get', String(id), '--field=post_content']).replace(/\n$/, '');
@@ -53,7 +55,7 @@ itest('buildPage creates, rebuilds idempotently, guards hand edits, and force sa
     const theme = newTheme([statePage(slug)]);
 
     const a = buildPage(wp, theme, slug);
-    created.push(a.postId);
+    own(created, a.postId, slug);
     assert.equal(a.created, true);
     assert.equal(a.slug, slug);
     assert.equal(a.backupRevisionId, null);
@@ -155,11 +157,12 @@ itest('the builder never reverts the developer\'s title, slug or status', async 
     const slug = pageSlug('dev');
     const theme = newTheme([statePage(slug)]);
     const a = buildPage(wp, theme, slug);
-    created.push(a.postId);
+    own(created, a.postId, slug);
     assert.deepEqual(loadState(theme).pages[0].written, { title: 'Itest', slug, postStatus: 'publish' });
 
     const devSlug = `${slug}-renamed`;
     wp.check(['post', 'update', String(a.postId), '--post_title=Dev Title', `--post_name=${devSlug}`, '--post_status=draft']);
+    siteRun().update((d) => { d.posts.find((p) => p.id === a.postId).name = devSlug; }); // recovery checks the name
     updateState(theme, (st) => { st.pages[0].title = 'Builder Title 2'; });
     const snap = () => JSON.parse(wp.check(['post', 'get', String(a.postId), '--fields=post_title,post_name,post_status', '--format=json']));
 
@@ -196,7 +199,7 @@ itest('write refuses with ESTALE when the post changed after the backup was take
   try {
     const slug = pageSlug('stale');
     const w = php(wp, 'write', good(slug));
-    created.push(w.postId);
+    own(created, w.postId, slug);
     const before = content(wp, w.postId);
     const stale = php(wp, 'write', { ...good(slug), postId: w.postId, expectedHash: w.contentHash, backedUpHash: 'deadbeef' });
     assert.equal(stale.ok, false);
@@ -216,14 +219,14 @@ itest('trashed pages are never reused or overwritten', async () => {
     const slug = pageSlug('trash');
     const theme = newTheme([statePage(slug)]);
     const a = buildPage(wp, theme, slug);
-    created.push(a.postId);
+    own(created, a.postId, slug);
     wp.check(['post', 'delete', String(a.postId)]); // moves to trash
     assert.equal(wp.check(['post', 'get', String(a.postId), '--field=post_status']).trim(), 'trash');
     const trashedContent = content(wp, a.postId);
 
     // state still points at the trashed id
     const b = buildPage(wp, theme, slug);
-    created.push(b.postId);
+    own(created, b.postId, slug);
     assert.equal(b.created, true);
     assert.notEqual(b.postId, a.postId);
     assert.equal(content(wp, a.postId), trashedContent);
@@ -234,7 +237,7 @@ itest('trashed pages are never reused or overwritten', async () => {
     wp.check(['post', 'delete', String(b.postId)]);
     updateState(theme, (s) => { s.pages[0].postId = null; s.pages[0].contentHash = null; });
     const c = buildPage(wp, theme, slug);
-    created.push(c.postId);
+    own(created, c.postId, slug);
     assert.equal(c.created, true);
     assert.ok(![a.postId, b.postId].includes(c.postId));
     assert.equal(wp.check(['post', 'get', String(c.postId), '--field=post_status']).trim(), 'publish');
@@ -268,7 +271,7 @@ itest('page.php validates the spec (EINPUT) and warns about dropped freeform HTM
     assert.equal(wp.check(['post', 'list', '--post_type=page', `--name=${slug}`, '--post_status=any', '--format=ids']).trim(), '');
 
     const w = php(wp, 'write', { ...good(slug), blocks: [{ ...blk, innerRaw: '<p>loose</p><!-- wp:paragraph --><p>kept</p><!-- /wp:paragraph -->' }] });
-    created.push(w.postId);
+    own(created, w.postId, slug);
     assert.equal(w.ok, true);
     assert.ok(w.warnings.some((x) => /pb-s1/.test(x) && /freeform|non-block/i.test(x)), JSON.stringify(w.warnings));
     const stored = content(wp, w.postId);

@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { itest, testWp, SITE_URL } from './helpers.mjs';
+import { itest, testWp, SITE_URL, siteRun, trackPost, untrackPosts } from './helpers.mjs';
 import { applySeo, seoGet } from '../../skills/protoblocks-site-builder/scripts/lib/seo.mjs';
 import { importMedia } from '../../skills/protoblocks-site-builder/scripts/lib/media.mjs';
 import { initState, updateState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
@@ -58,6 +58,7 @@ async function withOptionsRestored(wp, fn) {
   }
   const before = snapshotOptions(wp);
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(before, null, 2));
+  siteRun().update((d) => { d.yoast = { snapshotFile: SNAPSHOT_FILE }; }); // an interrupted run restores from it
   let failure = null;
   try { await fn(); } catch (e) { failure = e; }
   // Always restore; a restore problem must not hide the test's own error (it is reported, and the snapshot kept).
@@ -73,6 +74,7 @@ async function withOptionsRestored(wp, fn) {
     assert.deepEqual(after, before, msg);
   }
   fs.rmSync(SNAPSHOT_FILE, { force: true });
+  siteRun().update((d) => { d.yoast = null; });
   if (failure) throw failure;
 }
 
@@ -96,8 +98,16 @@ const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", ndash: '\u2013
 const decodeEntities = (t) => t.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : NAMED[e.toLowerCase()] ?? m));
 const orgNode = (graph) => graph.find((p) => [].concat(p['@type']).includes('Organization'));
 
-const createPage = (wp, slug, title) => Number(wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_name=${slug}`, `--post_title=${title}`, '--porcelain']).trim());
-const deleteById = (wp, id) => { try { wp.check(['post', 'delete', String(id), '--force']); } catch (err) { console.error(`cleanup failed for ${id}: ${err.message}`); } };
+// Every post this file creates is also recorded in the run manifest, and forgotten once deleted.
+const createPage = (wp, slug, title) => {
+  const id = Number(wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_name=${slug}`, `--post_title=${title}`, '--porcelain']).trim());
+  trackPost({ id, type: 'page', name: slug });
+  return id;
+};
+const ownMedia = (owned, id) => { if (!owned.has(id)) { owned.add(id); trackPost({ id: Number(id), type: 'attachment' }); } };
+const deleteById = (wp, id) => {
+  try { wp.check(['post', 'delete', String(id), '--force']); untrackPosts((p) => p.id === Number(id)); } catch (err) { console.error(`cleanup failed for ${id}: ${err.message}`); }
+};
 const yoast = (wp, ...args) => wp.evalFile(YOAST_PHP, args);
 const yoastSpec = (wp, spec) => {
   const f = path.join(TMP, `yoast-spec-${crypto.randomBytes(4).toString('hex')}.json`);
@@ -122,7 +132,7 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
       const og = path.join(work, `pb-itest-seo-${hex}-og.png`);
       const logo = path.join(work, `pb-itest-seo-${hex}-logo.png`);
       writePng(og); writePng(logo);
-      const track = (r) => { for (const m of r.media) if (!m.reused) owned.add(m.id); };
+      const track = (r) => { for (const m of r.media) if (!m.reused) ownMedia(owned, m.id); };
 
       setOptions(wp, { company_name: 'Existing Co' });
       const seo = {
@@ -192,7 +202,7 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
       const logo2File = path.join(work, `pb-itest-seo-${hex}-logo2.png`);
       writePng(logo2File);
       const logo2 = importMedia(wp, logo2File, { alt: 'pb itest logo 2' });
-      if (!logo2.reused) owned.add(logo2.id);
+      if (!logo2.reused) ownMedia(owned, logo2.id);
       // Control: changing the logo options without clearing the cache leaves the old logo rendered (the bug).
       wp.check(['eval', `WPSEO_Options::set('company_logo_id', ${logo2.id}); WPSEO_Options::set('company_logo', wp_get_attachment_url(${logo2.id}));`]);
       assert.equal(orgNode(yoastGraph(await fetchHtml(`${SITE_URL}/${slug}/`)))?.logo?.url, logo1Url, 'control: the cached logo meta wins');

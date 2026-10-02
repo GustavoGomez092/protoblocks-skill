@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { after } from 'node:test';
-import { itest, testWp, runtime } from './helpers.mjs';
+import { itest, testWp, runtime, trackPost, deleteOwnPosts } from './helpers.mjs';
 import { createWp, WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { importMedia, imageAttr } from '../../skills/protoblocks-site-builder/scripts/lib/media.mjs';
 
@@ -15,17 +15,19 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-media-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 // Import and remember the id (also from a typed error that carries e.id) so `finally` can delete exactly what we made.
+// Each id also goes into the run manifest (type attachment), so an interrupted run deletes exactly these.
+const own = (ids, id) => { if (!ids.includes(id)) { ids.push(id); trackPost({ id: Number(id), type: 'attachment' }); } };
 const imp = (wp, ids, file, opts) => {
   try {
     const m = importMedia(wp, file, opts);
-    ids.push(m.id);
+    own(ids, m.id);
     return m;
   } catch (e) {
-    if (e.id) ids.push(e.id);
+    if (e.id) own(ids, e.id);
     throw e;
   }
 };
-const cleanup = (wp, ids) => { for (const id of ids) wp.run(['post', 'delete', String(id), '--force']); };
+const cleanup = (wp, ids) => deleteOwnPosts(wp, ids);
 
 function randomPng(name) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });

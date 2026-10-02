@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { itest, testWp } from './helpers.mjs';
+import { itest, testWp, trackPost, untrackPosts } from './helpers.mjs';
 import { upsertMenu, refreshMenus } from '../../skills/protoblocks-site-builder/scripts/lib/navigation.mjs';
 import { initState, loadState, updateState, setPath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
@@ -16,9 +16,12 @@ function fixture(wp) {
   const page = (n) => `pb-itest-nav-${hex}-${n}`;
   const names = [];
   const tmpDirs = [];
+  // The run manifest gets every name before the post exists (recovery deletes exactly these names and types).
+  for (const name of [`pb-nav-${key}`, `pb-nav-${key}__trashed`]) trackPost({ type: 'wp_navigation', name });
   const ids = (type, name) => wp.check(['post', 'list', `--post_type=${type}`, `--name=${name}`, '--post_status=any', '--format=ids']).trim().split(/\s+/).filter(Boolean);
   const createPage = (n, extra = []) => {
     names.push(page(n));
+    trackPost({ type: 'page', name: page(n) });
     return wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_title=PB Itest Nav ${n}`, `--post_name=${page(n)}`, ...extra, '--porcelain']).trim();
   };
   const purge = () => {
@@ -27,6 +30,7 @@ function fixture(wp) {
       assert.match(name, new RegExp(`${hex}`), 'purge only touches this test\'s unique names');
       const found = ids(type, name);
       if (found.length) wp.check(['post', 'delete', ...found, '--force']);
+      untrackPosts((p) => p.type === type && p.name === name);
     }
   };
   const get = () => wp.evalFilePayload(path.join(WP_SCRIPTS_DIR, 'navigation.php'), 'get', { key });
