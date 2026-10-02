@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { loadState, statePath } from './state.mjs';
 
 const CLOSED = new Set(['done', 'skipped']);
+// Every action nextAction can return. The orchestrator SKILL.md has one action-table row per entry (tested).
+export const ACTIONS = Object.freeze(['setup', 'breakdown', 'build-page', 'section-build', 'section-verify', 'section-animate', 'page-qa', 'seo', 'ask-more-pages']);
 
 export function nextAction(state) {
   if (!state) return { action: 'setup', why: 'no build state yet' };

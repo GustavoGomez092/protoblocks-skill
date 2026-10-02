@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { nextAction, summarize } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
+import { nextAction, summarize, ACTIONS } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 const SCRIPT = new URL('../../skills/protoblocks-site-builder/scripts/lib/status.mjs', import.meta.url).pathname;
@@ -141,4 +141,33 @@ test('CLI: corrupt build.json exits 1 with EPARSE', () => {
   const r = spawnSync('node', [SCRIPT, dir], { encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^\[EPARSE\]/);
+});
+
+// The orchestrator docs cannot drift from the state machine: ACTIONS is exactly what nextAction returns, and every
+// action has its own row in the SKILL.md action table and its own section in references/pipeline.md.
+test('ACTIONS lists exactly the actions nextAction returns', () => {
+  const pg = (status, sections, extra = {}) => ({ slug: 'home', status, sections, ...extra });
+  const states = [
+    null,
+    base([]),
+    base([pg('planning', [])]),
+    base([pg('planning', [sec(1, 'planned')], { plan: { approvedAt: 'x' } })]),
+    ...['planned', 'building', 'verifying', 'animating'].map((st) => base([pg('building', [sec(1, st)], { plan: { approvedAt: 'x' } })])),
+    base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' } })]),
+    base([pg('seo', [sec(1, 'done')], { pageQa: { pass: true } })]),
+  ];
+  assert.deepEqual([...new Set(states.map((s) => nextAction(s).action))].sort(), [...ACTIONS].sort());
+  assert.ok(Object.isFrozen(ACTIONS));
+});
+
+test('every action has a row in the orchestrator SKILL.md action table and a pipeline.md section', () => {
+  const dir = new URL('../../skills/protoblocks-site-builder/', import.meta.url).pathname;
+  const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+  const table = skill.split(/^## Actions$/m)[1]?.split(/^## /m)[0] ?? '';
+  const firstCells = table.split('\n').filter((l) => l.startsWith('| `')).map((l) => l.split('|')[1]);
+  const rowActions = firstCells.flatMap((c) => [...c.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]));
+  for (const a of ACTIONS) assert.ok(rowActions.includes(a), `SKILL.md "## Actions" table has no row for \`${a}\``);
+  for (const a of rowActions) assert.ok(ACTIONS.includes(a), `SKILL.md action table row \`${a}\` is not an action nextAction returns`);
+  const pipeline = fs.readFileSync(path.join(dir, 'references', 'pipeline.md'), 'utf8');
+  for (const a of ACTIONS) assert.match(pipeline, new RegExp(`^### \`${a}\``, 'm'), `pipeline.md has no "### \`${a}\`" section`);
 });

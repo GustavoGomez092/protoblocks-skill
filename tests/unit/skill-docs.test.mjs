@@ -18,7 +18,7 @@ const DEFAULT_LIMIT = 7168;
 // Per-skill SKILL.md byte limits. The protoblocks authoring skill predates the 7 KB rule and is larger.
 // CEILING, not a target: 14336 is the most it may ever reach. Do not raise it; move content into
 // references/ instead.
-const LIMITS = { protoblocks: 14336, 'protoblocks-section-loop': 8192 };
+const LIMITS = { protoblocks: 14336, 'protoblocks-section-loop': 8192, 'protoblocks-site-builder': 9728 };
 
 function docFiles() {
   const out = [];
@@ -128,7 +128,8 @@ function runnableBlocks(text) {
 }
 
 // default: a first page ("home") being planned. later: "home" is built and its header/footer live in the template
-// parts (inPart), and a later page ("about") is being planned.
+// parts (inPart), and a later page ("about") is being planned. approved: "home" has an approved plan but is still
+// "planning" (status.mjs: build-page), and its header/footer sections are built but not yet in the parts.
 function fixture(kind) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-docs-'));
   initState(theme, { url: 'https://x.local', path: theme });
@@ -138,6 +139,13 @@ function fixture(kind) {
     const pages = kind === 'later' ? [['other', [1, 2]], ['home', [1, 3, 5]], ['about', [1, 2, 4]]] : [['other', [1, 2]], ['home', [1, 3, 5]]];
     for (const [slug, ns] of pages) {
       s.pages.push({ slug, title: slug, status: 'planning', postId: null, contentHash: null, design: { frames: [] }, sections: sections(ns) });
+    }
+    if (kind === 'approved') {
+      const home = s.pages[1];
+      home.plan = { approvedAt: '2026-10-01T00:00:00.000Z', by: 'developer' };
+      Object.assign(home.sections[0], { anchor: 'pb-header', label: 'Header', block: 'site-header', decision: 'new' });
+      Object.assign(home.sections[1], { label: 'Hero', block: 'hero-split', decision: 'new' });
+      Object.assign(home.sections[2], { anchor: 'pb-footer', label: 'Footer', block: 'site-footer', decision: 'new' });
     }
     if (kind === 'later') {
       const home = s.pages[1];
@@ -181,6 +189,7 @@ for (const { file } of DOCS) {
           assert.equal(page.sections.find((x) => x.n === 1).inPart, undefined, 'first page: built as a section first');
           assert.equal(page.sections.find((x) => x.n === 5).label, undefined);
         }
+        if (kind === 'approved' && /status" '"building"'/.test(block)) assert.equal(page.status, 'building', 'build-page recipe sets the approved page building');
         if (/\$SI\.notes/.test(block)) assert.equal(page.sections.find((x) => x.n === 3).notes, 'Image right, CTA pair');
         if (/\.masks/.test(block)) assert.equal(page.sections.find((x) => x.n === 1).masks.desktop[0].w, 720);
         if (/shellCap/.test(block)) assert.match(page.notes.shellCap, /1600px/);
