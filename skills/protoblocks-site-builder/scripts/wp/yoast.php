@@ -1,7 +1,7 @@
 <?php
 /**
  * Yoast SEO writer.
- * Usage: wp eval-file yoast.php apply <spec.json path> | get <postId>
+ * Usage: wp eval-file yoast.php apply <spec.json path> | get <postId> | site
  * The spec is a file so free text never travels as WP-CLI argv.
  * Prints one JSON line: the result, or {"error":{"code","message"}} (exit 0, like media.php; the JS caller throws
  * the typed code, because a non-zero exit would reach it as an untyped WpError). Codes: EYOAST, EUSAGE, EINPUT, ENOPOST, EMETA.
@@ -26,6 +26,14 @@ $positive = function ($v): int { return (is_int($v) || (is_string($v) && ctype_d
 $https = function ($u): bool { return is_string($u) && (parse_url($u, PHP_URL_SCHEME) === 'https') && (string) parse_url($u, PHP_URL_HOST) !== ''; };
 $host_is = function (string $host, string $domain): bool { $host = strtolower($host); return $host === $domain || str_ends_with($host, '.' . $domain); };
 
+if ($cmd === 'site') {
+    // What %%sitename%% and %%sep%% render to on this site, so the title length can be checked for real.
+    if (count($args) !== 1) { $fail('EUSAGE', 'Usage: yoast.php site'); }
+    $seps = WPSEO_Option_Titles::get_instance()->get_separator_options();
+    $key = (string) WPSEO_Options::get('separator', 'sc-dash');
+    $out(['siteName' => html_entity_decode((string) get_bloginfo('name'), ENT_QUOTES, 'UTF-8'), 'sep' => html_entity_decode((string) ($seps[$key] ?? '-'), ENT_QUOTES, 'UTF-8')]);
+    return;
+}
 if ($cmd === 'get') {
     if (count($args) !== 2) { $fail('EUSAGE', 'Usage: yoast.php get <postId>'); }
     $id = $positive($args[1]);
@@ -40,7 +48,7 @@ if ($cmd === 'get') {
     $out($data);
     return;
 }
-if ($cmd !== 'apply' || count($args) !== 2) { $fail('EUSAGE', 'Usage: yoast.php apply <spec.json> | get <postId>'); }
+if ($cmd !== 'apply' || count($args) !== 2) { $fail('EUSAGE', 'Usage: yoast.php apply <spec.json> | get <postId> | site'); }
 
 // ---- parse and validate everything first ----
 $raw = is_readable((string) $args[1]) && is_file((string) $args[1]) ? file_get_contents((string) $args[1]) : false;
@@ -115,22 +123,32 @@ if ($featured_id !== null && !get_post_thumbnail_id($id)) {
 
 $org_state = 'skipped';
 if ($org !== null) {
-    if (WPSEO_Options::get('company_name', '') === '' || !empty($spec['forceOrganization'])) {
+    $force = !empty($spec['forceOrganization']);
+    // Only an unconfigured Company site is filled in; a Person site (or any named organization) is kept unless forced.
+    $unconfigured = WPSEO_Options::get('company_or_person', '') === 'company' && WPSEO_Options::get('company_name', '') === '';
+    if ($unconfigured || $force) {
         WPSEO_Options::set('company_or_person', 'company');
         WPSEO_Options::set('company_name', (string) $org['name']);
         if (!empty($org['logoId'])) {
             WPSEO_Options::set('company_logo_id', (int) $org['logoId']);
             WPSEO_Options::set('company_logo', (string) wp_get_attachment_url((int) $org['logoId']));
+        } elseif ($force) {
+            WPSEO_Options::set('company_logo_id', 0);
+            WPSEO_Options::set('company_logo', '');
         }
+        if ($force) { WPSEO_Options::set('facebook_site', ''); WPSEO_Options::set('twitter_site', ''); }
         $others = [];
+        $have_facebook = false;
+        $have_twitter = false;
         foreach ($socials as $s) {
             $host = (string) parse_url($s, PHP_URL_HOST);
             $path = trim((string) parse_url($s, PHP_URL_PATH), '/');
-            if ($host_is($host, 'facebook.com')) { WPSEO_Options::set('facebook_site', $s); }
-            elseif (($host_is($host, 'twitter.com') || $host_is($host, 'x.com')) && $path !== '') { WPSEO_Options::set('twitter_site', explode('/', $path)[0]); }
+            // The first Facebook / Twitter URL fills its dedicated field; any further ones stay as other URLs.
+            if ($host_is($host, 'facebook.com') && !$have_facebook) { WPSEO_Options::set('facebook_site', $s); $have_facebook = true; }
+            elseif (($host_is($host, 'twitter.com') || $host_is($host, 'x.com')) && $path !== '' && !$have_twitter) { WPSEO_Options::set('twitter_site', explode('/', $path)[0]); $have_twitter = true; }
             else { $others[] = $s; }
         }
-        WPSEO_Options::set('other_social_urls', $others);
+        if ($socials || $force) { WPSEO_Options::set('other_social_urls', $others); }
         $org_state = 'set';
     } else {
         $org_state = 'kept';

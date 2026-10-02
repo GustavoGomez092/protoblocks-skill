@@ -16,10 +16,14 @@ const isHttps = (u) => {
   try { return new URL(u).protocol === 'https:'; } catch { return false; }
 };
 
-export const renderTitle = (t) => String(t).replace(/%%sep%%/g, '-').replace(/%%sitename%%/g, '');
+// Renders Yoast vars for length checks. Without context the site name is empty and the separator is "-".
+export const renderTitle = (t, { siteName = '', sep = '-' } = {}) => String(t).replace(/%%sep%%/g, () => sep).replace(/%%sitename%%/g, () => siteName);
+// Social titles carry no site name: drop the vars, then any separator left dangling at either end.
+export const socialTitle = (t) => String(t).replace(/%%(sep|sitename)%%/g, '').replace(/^[\s\-–—|·•:]+|[\s\-–—|·•:]+$/g, '');
 const val = (leaf) => leaf?.value;
 
-export function validateSeo(seo) {
+/** ctx = { siteName, sep } (from `yoast.php site`) makes the title check use the real rendered title. */
+export function validateSeo(seo, ctx) {
   if (!seo || typeof seo !== 'object' || Array.isArray(seo)) return ['seo: must be an object of {value, inferred} leaves'];
   const errors = [];
   for (const [k, leaf] of Object.entries(seo)) {
@@ -31,7 +35,10 @@ export function validateSeo(seo) {
   else if (/[%<>]/.test(kw)) errors.push('focusKeyword: must not contain %, < or >');
   const title = val(seo.title);
   if (typeof title !== 'string' || !title.trim()) errors.push('title: required');
-  else if (renderTitle(title).length > 60) errors.push(`title: renders to ${renderTitle(title).length} chars (max 60 before the site name)`);
+  else if (ctx) {
+    const rendered = renderTitle(title, ctx).trim();
+    if (rendered.length > 60) errors.push(`title: renders to ${rendered.length} chars (max 60) with site name "${ctx.siteName}": ${rendered}`);
+  } else if (renderTitle(title).length > 60) errors.push(`title: renders to ${renderTitle(title).length} chars (max 60 before the site name)`);
   const d = val(seo.description);
   if (typeof d !== 'string' || d.length < 120 || d.length > 156) errors.push(`description: ${typeof d === 'string' ? d.length : 0} chars (need 120–156)`);
   else if (/[\r\n]/.test(d)) errors.push('description: must not contain newlines');
@@ -59,10 +66,10 @@ export function buildYoastSpec({ postId, seo, ogImageId = null, organizationLogo
       focuskw: val(seo.focusKeyword),
       title,
       metadesc: desc,
-      'opengraph-title': renderTitle(title),
+      'opengraph-title': socialTitle(title),
       'opengraph-description': desc,
       'opengraph-image-id': ogImageId,
-      'twitter-title': renderTitle(title),
+      'twitter-title': socialTitle(title),
       'twitter-description': desc,
       'twitter-image-id': ogImageId,
       schema_page_type: val(seo.schemaPageType) ?? 'WebPage',
@@ -97,6 +104,10 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   if (ogFile !== undefined) requireFile(ogFile, 'ogImage.file');
   const org = val(seo.organization);
   if (org?.logo?.file !== undefined) requireFile(org.logo.file, 'organization.logo.file');
+  // The rendered <title> must be <= 60, so check it with this site's real name and separator before any import.
+  const site = yoastError(wp, ['site']);
+  const siteErrors = validateSeo(seo, { siteName: String(site.siteName ?? ''), sep: String(site.sep ?? '-') });
+  if (siteErrors.length) throw fail('ESEO', `Invalid SEO:\n- ${siteErrors.join('\n- ')}`);
   const media = [];
   let ogImageId = val(seo.ogImage)?.id ?? null;
   if (ogFile) {
@@ -113,8 +124,10 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   const spec = buildYoastSpec({ postId: page.postId, seo, ogImageId, organizationLogoId, forceOrganization });
   // No schema leaf leaves the page's existing JSON-LD untouched; an explicit empty array clears it.
   let jsonld = 'none';
-  if (!spec.jsonld) delete spec.jsonld;
-  else if (spec.jsonld.length > 0) {
+  if (!spec.jsonld) {
+    // A schema the skill applied earlier would otherwise linger on the page after it was dropped from the SEO.
+    if (page.seo?.schema) { spec.jsonld = []; jsonld = 'cleared'; } else delete spec.jsonld;
+  } else if (spec.jsonld.length > 0) {
     jsonld = jsonldSupported(wp) ? 'written' : 'unsupported';
     if (jsonld === 'unsupported') delete spec.jsonld;
   }
@@ -131,7 +144,9 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   result.media = media;
   updateState(themeDir, (s) => {
     const p = s.pages.find((x) => x.slug === slug);
-    if (p) p.seo = { ...seo, applied: new Date().toISOString(), ogImageId };
+    if (!p) return;
+    p.seo = { ...seo, applied: new Date().toISOString(), ogImageId };
+    if (p.status === 'done') p.status = 'seo'; // the old audit no longer applies
   });
   return result;
 }

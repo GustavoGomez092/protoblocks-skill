@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
-import { validateSeo, buildYoastSpec, applySeo, recordAudit } from '../../skills/protoblocks-site-builder/scripts/lib/seo.mjs';
+import { validateSeo, buildYoastSpec, applySeo, recordAudit, renderTitle, socialTitle } from '../../skills/protoblocks-site-builder/scripts/lib/seo.mjs';
 
 const SEO_CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'protoblocks-site-builder', 'scripts', 'lib', 'seo.mjs');
 const desc = 'Licensed emergency plumbers in Austin available 24/7. Upfront pricing, same-day repairs and a 1-year guarantee on every job we do.';
@@ -68,7 +68,8 @@ test('buildYoastSpec maps fields and falls back for social titles', () => {
   const spec = buildYoastSpec({ postId: 9, seo, ogImageId: 44, organizationLogoId: null, forceOrganization: false });
   assert.equal(spec.meta.focuskw, 'emergency plumber');
   assert.equal(spec.meta.metadesc, desc);
-  assert.equal(spec.meta['opengraph-title'], 'Emergency Plumber Austin - ');
+  assert.equal(spec.meta['opengraph-title'], 'Emergency Plumber Austin');
+  assert.equal(spec.meta['twitter-title'], 'Emergency Plumber Austin');
   assert.equal(spec.meta['opengraph-image-id'], 44);
   assert.equal(spec.meta['twitter-image-id'], 44);
   assert.equal(spec.featuredImageId, 44);
@@ -78,7 +79,7 @@ test('buildYoastSpec maps fields and falls back for social titles', () => {
 });
 
 // ---- applySeo with a scripted WP-CLI ----
-function harness({ jsonldSupported = true, indexCode = 0 } = {}) {
+function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Acme Plumbing', sep: '-' }, applyReply = null } = {}) {
   const calls = [];
   const specs = [];
   const exec = (cmd, args) => {
@@ -86,7 +87,9 @@ function harness({ jsonldSupported = true, indexCode = 0 } = {}) {
     if (args[0] === 'eval') return { code: 0, stdout: jsonldSupported ? '1' : '0', stderr: '' };
     if (args[0] === 'yoast') return { code: indexCode, stdout: '', stderr: indexCode ? 'boom' : '' };
     if (args[0] === 'eval-file' && args[1].endsWith('media.php')) return { code: 0, stdout: '{"id":77,"url":"u","alt":"a","mime":"image/png","reused":true}\n', stderr: '' };
+    if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site') return { code: 0, stdout: `${JSON.stringify(site)}\n`, stderr: '' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php')) {
+      if (applyReply) return { code: 0, stdout: `${JSON.stringify(applyReply)}\n`, stderr: '' };
       specs.push(JSON.parse(fs.readFileSync(args[3], 'utf8')));
       return { code: 0, stdout: '{"postId":9,"written":["focuskw"],"featuredImageSet":false,"organization":"skipped"}\n', stderr: '' };
     }
@@ -253,4 +256,73 @@ test('CLI: record-audit works end to end', () => {
   const bad = cli('record-audit', theme, 'nope', auditFile({ pass: true }));
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /^\[ENOPAGE\]/);
+});
+
+// ---- fix round 1 ----
+test('renderTitle: defaults drop the site name; context substitutes the real site name and separator', () => {
+  assert.equal(renderTitle('A %%sep%% %%sitename%%'), 'A - ');
+  assert.equal(renderTitle('A %%sep%% %%sitename%%', { siteName: 'Acme', sep: '|' }), 'A | Acme');
+});
+
+test('socialTitle drops Yoast vars and dangling separators', () => {
+  assert.equal(socialTitle('Emergency Plumber Austin %%sep%% %%sitename%%'), 'Emergency Plumber Austin');
+  assert.equal(socialTitle('%%sitename%% %%sep%% Emergency Plumber'), 'Emergency Plumber');
+  assert.equal(socialTitle('Plumber – '), 'Plumber');
+  assert.equal(socialTitle('Plumber | Austin'), 'Plumber | Austin');
+  for (const sepChar of ['-', '–', '—', '|', '·', '•', ':']) assert.equal(socialTitle(`Plumber ${sepChar} %%sitename%%`), 'Plumber', sepChar);
+});
+
+test('validateSeo with site context checks the fully rendered title against 60 chars', () => {
+  const t = 'Emergency Plumber in Austin Texas Open 24 7 %%sep%% %%sitename%%';
+  const leaf = withLeaf('title', t);
+  assert.deepEqual(validateSeo(leaf), [], 'without context the site name is not counted');
+  assert.deepEqual(validateSeo(leaf, { siteName: 'Acme', sep: '-' }), []);
+  const errs = validateSeo(leaf, { siteName: 'Acme Plumbing and Heating Services', sep: '|' }).join('\n');
+  assert.match(errs, /title: renders to \d+ chars/);
+  assert.match(errs, /Acme Plumbing and Heating Services/);
+});
+
+test('applySeo validates the title with the real site name and separator, before any import', () => {
+  const long = { ...seo, title: { value: 'Emergency Plumber Austin Texas 24 7 Service %%sep%% %%sitename%%', inferred: false }, ogImage: { value: { file: png }, inferred: false } };
+  const a = harness({ site: { siteName: 'Acme Plumbing and Heating Services', sep: '|' } });
+  assert.throws(() => applySeo(a.wp, project(), 'home', long, { index: false }), code('ESEO'));
+  assert.ok(!a.calls.some((c) => c[1]?.endsWith('media.php')), 'no import for a title that cannot be applied');
+  const b = harness({ site: { siteName: 'Acme', sep: '-' } });
+  assert.equal(applySeo(b.wp, project(), 'home', long, { index: false }).index, 'skipped');
+});
+
+test('applySeo: re-applying a done page returns it to seo; other statuses are untouched', () => {
+  const theme = project([{ slug: 'home', title: 'Home', status: 'done', postId: 9, sections: [], seo: { audit: { pass: true, file: '/a', at: 'x' } } }]);
+  applySeo(harness().wp, theme, 'home', seo, { index: false });
+  const p = loadState(theme).pages[0];
+  assert.equal(p.status, 'seo');
+  assert.equal(p.seo.audit, undefined, 'the old audit no longer applies');
+  const t2 = project([{ slug: 'home', title: 'Home', status: 'building', postId: 9, sections: [] }]);
+  applySeo(harness().wp, t2, 'home', seo, { index: false });
+  assert.equal(loadState(t2).pages[0].status, 'building');
+});
+
+test('applySeo: schema previously applied by the skill is cleared when the new SEO has none', () => {
+  const { schema: _s, ...noSchema } = seo;
+  const prior = [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [], seo: { schema: seo.schema } }];
+  const a = harness();
+  const r = applySeo(a.wp, project(prior), 'home', noSchema, { index: false });
+  assert.deepEqual(a.specs[0].jsonld, []);
+  assert.equal(r.jsonld, 'cleared');
+  const b = harness();
+  assert.equal(applySeo(b.wp, project(), 'home', noSchema, { index: false }).jsonld, 'none');
+  assert.equal('jsonld' in b.specs[0], false, 'no prior skill schema: leave the page JSON-LD alone');
+  const c = harness();
+  applySeo(c.wp, project(prior), 'home', seo, { index: false });
+  assert.equal(c.specs[0].jsonld.length, 1, 'a new schema replaces the old one');
+});
+
+test('applySeo: an {error} reply from yoast.php becomes a typed throw and state is not touched', () => {
+  const theme = project();
+  const a = harness({ applyReply: { error: { code: 'ENOPOST', message: 'Post 9 does not exist' } } });
+  assert.throws(() => applySeo(a.wp, theme, 'home', seo, { index: false }), (e) => e.code === 'ENOPOST' && /Post 9/.test(e.message));
+  assert.equal(loadState(theme).pages[0].seo, undefined);
+  const b = harness({ applyReply: { error: { message: 'odd' } } });
+  assert.throws(() => applySeo(b.wp, theme, 'home', seo, { index: false }), code('EYOAST'));
+  assert.ok(!a.calls.some((c) => c[0] === 'yoast'), 'no index after a failed write');
 });

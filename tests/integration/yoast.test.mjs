@@ -14,9 +14,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TMP = path.resolve(HERE, '..', '.tmp');
 const OPTIONS_PHP = path.join(HERE, 'yoast-options.php');
 const YOAST_PHP = path.join(WP_SCRIPTS_DIR, 'yoast.php');
-// Crash recovery: tests/.tmp/yoast-options-snapshot.json holds the options as they were before the test;
-// restore with: wp eval-file tests/integration/yoast-options.php set tests/.tmp/yoast-options-snapshot.json
+// Crash recovery: tests/.tmp/yoast-options-snapshot.json holds the options as they were before the test.
 const SNAPSHOT_FILE = path.join(TMP, 'yoast-options-snapshot.json');
+const RESTORE_COMMAND = `${path.join(TMP, 'wp-test-site')} eval-file ${OPTIONS_PHP} restore ${SNAPSHOT_FILE}`;
 
 const desc = 'Licensed emergency plumbers in Austin available 24/7. Upfront pricing, same-day repairs and a 1-year guarantee on every job we do.';
 
@@ -37,21 +37,27 @@ function writePng(file) {
 }
 
 const snapshotOptions = (wp) => wp.evalFile(OPTIONS_PHP, ['snapshot']);
-const setOptions = (wp, obj) => {
-  const f = path.join(TMP, `yoast-options-set-${crypto.randomBytes(4).toString('hex')}.json`);
+const optionsCommand = (wp, cmd, obj) => {
+  const f = path.join(TMP, `yoast-options-${cmd}-${crypto.randomBytes(4).toString('hex')}.json`);
   fs.writeFileSync(f, JSON.stringify(obj));
-  try { return wp.evalFile(OPTIONS_PHP, ['set', f]); } finally { fs.rmSync(f, { force: true }); }
+  try { return wp.evalFile(OPTIONS_PHP, [cmd, f]); } finally { fs.rmSync(f, { force: true }); }
 };
+const setOptions = (wp, flat) => optionsCommand(wp, 'set', flat); // seeds some of the 7 keys
+const restoreOptions = (wp, snapshot) => optionsCommand(wp, 'restore', snapshot);
 
-/** Snapshot the real Yoast options, run fn, then restore them exactly and assert they match. */
+/** Snapshot the real Yoast options (the 7 keys and the whole wpseo_titles / wpseo_social), run fn, restore, assert equal. */
 async function withOptionsRestored(wp, fn) {
   fs.mkdirSync(TMP, { recursive: true });
+  if (fs.existsSync(SNAPSHOT_FILE)) {
+    // A snapshot left behind means an earlier run crashed with the options possibly modified. Never overwrite it.
+    throw new Error(`${SNAPSHOT_FILE} exists: a previous run crashed before restoring the Yoast options.\nRestore them, then delete the file:\n  ${RESTORE_COMMAND}`);
+  }
   const before = snapshotOptions(wp);
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(before, null, 2));
   try {
     await fn();
   } finally {
-    const after = setOptions(wp, before);
+    const after = restoreOptions(wp, before);
     assert.deepEqual(after, before, 'Yoast options must be restored exactly');
     fs.rmSync(SNAPSHOT_FILE, { force: true });
   }
@@ -115,6 +121,7 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
       assert.match(html, /<title>Emergency Plumber Austin - /);
       assert.ok(html.includes(`<meta name="description" content="${desc}"`));
       assert.match(html, /"AboutPage"/);
+      assert.match(html, /<meta property="og:title" content="Emergency Plumber Austin" ?\/>/, 'social title has no dangling separator');
       if (r.jsonld === 'written') {
         const m = html.match(/<script type="application\/ld\+json" class="yoast-schema-graph">(.*?)<\/script>/s);
         assert.ok(m, 'Yoast graph present');
@@ -133,12 +140,35 @@ itest('applySeo writes Yoast meta, JSON-LD and Organization that the front end r
       track(forced);
       assert.equal(forced.organization, 'set');
       const org = snapshotOptions(wp);
-      assert.equal(org.company_name, 'New Co');
-      assert.equal(org.company_or_person, 'company');
-      assert.equal(org.company_logo_id, forced.media[1].id);
-      assert.equal(org.facebook_site, 'https://www.facebook.com/pbitest');
-      assert.equal(org.twitter_site, 'pbitest');
-      assert.deepEqual(org.other_social_urls, ['https://www.linkedin.com/company/pbitest']);
+      assert.equal(org.options.company_name, 'New Co');
+      assert.equal(org.options.company_or_person, 'company');
+      assert.equal(org.options.company_logo_id, forced.media[1].id);
+      assert.equal(org.options.facebook_site, 'https://www.facebook.com/pbitest');
+      assert.equal(org.options.twitter_site, 'pbitest');
+      assert.deepEqual(org.options.other_social_urls, ['https://www.linkedin.com/company/pbitest']);
+
+      // A forced organization without a logo clears the old one; only the first facebook / twitter URL gets its own field.
+      const noLogo = { ...seo, organization: { value: { name: 'New Co', socials: ['https://www.facebook.com/a', 'https://www.facebook.com/b', 'https://x.com/h1', 'https://twitter.com/h2'] }, inferred: false } };
+      assert.equal(applySeo(wp, theme, slug, noLogo, { index: false, forceOrganization: true }).organization, 'set');
+      const o2 = snapshotOptions(wp).options;
+      assert.equal(o2.company_logo_id, 0);
+      assert.equal(o2.company_logo, '');
+      assert.equal(o2.facebook_site, 'https://www.facebook.com/a');
+      assert.equal(o2.twitter_site, 'h1');
+      assert.deepEqual(o2.other_social_urls, ['https://www.facebook.com/b', 'https://twitter.com/h2']);
+
+      // A forced organization replaces the old Facebook / Twitter fields rather than leaving stale ones.
+      const xOnly = { ...noLogo, organization: { value: { name: 'New Co', socials: ['https://x.com/h3'] }, inferred: false } };
+      applySeo(wp, theme, slug, xOnly, { index: false, forceOrganization: true });
+      const o3 = snapshotOptions(wp).options;
+      assert.equal(o3.facebook_site, '');
+      assert.equal(o3.twitter_site, 'h3');
+      assert.deepEqual(o3.other_social_urls, []);
+
+      // Dropping the schema from the SEO clears the JSON-LD the skill wrote earlier.
+      const { schema: _drop, ...noSchema } = noLogo;
+      assert.equal(applySeo(wp, theme, slug, noSchema, { index: false }).jsonld, 'cleared');
+      assert.equal(yoast(wp, 'get', String(id)).jsonld, null);
     } finally {
       if (id) deleteById(wp, id);
       for (const att of owned) deleteById(wp, att);
@@ -180,6 +210,55 @@ itest('yoast.php rejects bad input with typed errors and writes nothing', async 
       assert.equal(wp.run(['post', 'meta', 'get', String(id), '_wp_page_template']).stdout.trim(), '', 'unknown key was not written');
       // And a valid spec still works after the rejections.
       assert.equal(yoastSpec(wp, { postId: id, meta: { focuskw: 'guard ok' } }).written[0], 'focuskw');
+    } finally {
+      if (id) deleteById(wp, id);
+    }
+  });
+});
+
+itest('a Person site keeps its Organization, an unconfigured Company keeps existing socials, and the rendered title is checked', async () => {
+  const wp = testWp();
+  const hex = crypto.randomBytes(4).toString('hex');
+  const slug = `pb-itest-seo-${hex}`;
+  let id = null;
+  await withOptionsRestored(wp, async () => {
+    try {
+      id = createPage(wp, slug, 'Person Page');
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-seoit-'));
+      const theme = path.join(work, 'theme');
+      initState(theme, { url: SITE_URL, path: '/x' });
+      updateState(theme, (s) => { s.pages.push({ slug, title: 'Person Page', status: 'seo', postId: id, sections: [] }); });
+      const seo = {
+        focusKeyword: { value: 'emergency plumber', inferred: true, why: 'H1' },
+        title: { value: 'Emergency Plumber Austin %%sep%% %%sitename%%', inferred: false },
+        description: { value: desc, inferred: false },
+        organization: { value: { name: 'New Co', socials: [] }, inferred: false },
+      };
+      try {
+        setOptions(wp, { company_or_person: 'person', company_name: '' });
+        assert.equal(applySeo(wp, theme, slug, seo, { index: false }).organization, 'kept');
+        const person = snapshotOptions(wp).options;
+        assert.equal(person.company_or_person, 'person', 'a Person site is never flipped to Company');
+        assert.equal(person.company_name, '');
+
+        setOptions(wp, { company_or_person: 'company', company_name: '', other_social_urls: ['https://example.com/pb-existing'] });
+        assert.equal(applySeo(wp, theme, slug, seo, { index: false }).organization, 'set');
+        const company = snapshotOptions(wp).options;
+        assert.equal(company.company_name, 'New Co');
+        assert.deepEqual(company.other_social_urls, ['https://example.com/pb-existing'], 'no socials supplied: existing ones stay');
+
+        setOptions(wp, { separator: 'sc-ndash' });
+        const site = yoast(wp, 'site');
+        assert.equal(typeof site.siteName, 'string');
+        assert.equal(site.sep, '\u2013', 'an HTML-entity separator is decoded to its character');
+        const n = 61 - (2 + site.sep.length + site.siteName.length);
+        if (n >= 1) {
+          const tooLong = { ...seo, title: { value: `${'x'.repeat(n)} %%sep%% %%sitename%%`, inferred: false } };
+          assert.throws(() => applySeo(wp, theme, slug, tooLong, { index: false }), (e) => e.code === 'ESEO' && /title: renders to 61 chars/.test(e.message));
+        }
+      } finally {
+        fs.rmSync(work, { recursive: true, force: true });
+      }
     } finally {
       if (id) deleteById(wp, id);
     }
