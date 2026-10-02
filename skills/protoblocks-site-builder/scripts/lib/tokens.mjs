@@ -9,10 +9,31 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([\w\s.,%+\-*\/()#]+\)|transparent|currentColor)$/;
 const LENGTH = /^(0|-?\d*\.?\d+(px|rem|em|%|vw|vh|ch)|(clamp|calc|min|max)\([\w\s.,%+\-*\/()#]+\))$/;
 const UNITLESS = /^-?\d*\.?\d+$/;
-const UNSAFE = /[;{}\\]|\/\*|\*\/|[\r\n]|@|url\(/i;
-const SAFE = (v) => typeof v === 'string' && v.trim() !== '' && !UNSAFE.test(v);
+const UNSAFE = /[;{}\\"'!<>\t\0]|\/\*|\*\/|[\r\n]|@|url\(/i;
+// Parentheses must never close more than they open, and must end balanced.
+const balanced = (v) => {
+  let depth = 0;
+  for (const ch of v) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')' && --depth < 0) return false;
+  }
+  return depth === 0;
+};
+// Single value (colour/length): at most one top-level call, e.g. rejects `rgb(1)(2)`.
+const singleCall = (v) => {
+  let depth = 0;
+  const s = v.trim();
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] === '(') depth += 1;
+    else if (s[i] === ')') { depth -= 1; if (depth === 0 && i !== s.length - 1) return false; }
+  }
+  return true;
+};
+const SAFE = (v) => typeof v === 'string' && v.trim() !== '' && !UNSAFE.test(v) && balanced(v);
+const SINGLE = (v) => SAFE(v) && singleCall(v);
 const FAMILY = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,60}$/;
-const FALLBACK_ITEM = /^[A-Za-z0-9 \-"']+$/;
+const FALLBACK_ITEM = /^[A-Za-z0-9 \-]+$/;
+const GENERIC = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong']);
 const fallbackOk = (v) => SAFE(v) && v.split(',').every((i) => FALLBACK_ITEM.test(i.trim()));
 const DEFAULT_FALLBACK = 'ui-sans-serif, system-ui, sans-serif';
 
@@ -29,7 +50,7 @@ export function validateTokens(t) {
     }
   };
   if (!t.colors || typeof t.colors !== 'object' || !Object.keys(t.colors).length) errors.push('colors: at least one color is required');
-  group('colors', (v) => (SAFE(v) && COLOR.test(v.trim()) ? null : `invalid color ${JSON.stringify(v)}`));
+  group('colors', (v) => (SINGLE(v) && COLOR.test(v.trim()) ? null : `invalid color ${JSON.stringify(v)}`));
   group('fonts', (v) => {
     if (!v || typeof v.family !== 'string' || !FAMILY.test(v.family)) return 'invalid family (letters, digits, spaces and hyphens only, max 61 chars)';
     if (v.fallback !== undefined && !fallbackOk(v.fallback)) return 'invalid fallback';
@@ -38,21 +59,22 @@ export function validateTokens(t) {
   });
   group('type', (v) => {
     const size = typeof v === 'string' ? v : v?.size;
-    if (!SAFE(size) || !LENGTH.test(size)) return `invalid size ${JSON.stringify(size)}`;
+    if (!SINGLE(size) || !LENGTH.test(size)) return `invalid size ${JSON.stringify(size)}`;
     if (typeof v === 'object') {
-      if (v.lineHeight !== undefined && !(SAFE(String(v.lineHeight)) && (UNITLESS.test(String(v.lineHeight)) || LENGTH.test(String(v.lineHeight))))) return 'invalid lineHeight';
-      if (v.letterSpacing !== undefined && !(SAFE(v.letterSpacing) && LENGTH.test(v.letterSpacing))) return 'invalid letterSpacing';
+      if (v.lineHeight !== undefined && !(SINGLE(String(v.lineHeight)) && (UNITLESS.test(String(v.lineHeight)) || LENGTH.test(String(v.lineHeight))))) return 'invalid lineHeight';
+      if (v.letterSpacing !== undefined && !(SINGLE(v.letterSpacing) && LENGTH.test(v.letterSpacing))) return 'invalid letterSpacing';
       if (v.fontWeight !== undefined && !/^[1-9]00$/.test(String(v.fontWeight))) return 'invalid fontWeight';
     }
     return null;
   });
-  group('radii', (v) => (SAFE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
-  group('spacing', (v) => (SAFE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
+  group('radii', (v) => (SINGLE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
+  group('spacing', (v) => (SINGLE(v) && LENGTH.test(v) ? null : `invalid length ${JSON.stringify(v)}`));
   group('shadows', (v) => (SAFE(v) ? null : `invalid shadow ${JSON.stringify(v)}`));
   return errors;
 }
 
-const fontStack = (f) => `"${f.family.trim()}", ${f.fallback ?? DEFAULT_FALLBACK}`;
+const fallbackStack = (fb) => fb.split(',').map((i) => i.trim()).map((i) => (GENERIC.has(i) ? i : `"${i}"`)).join(', ');
+const fontStack = (f) => `"${f.family.trim()}", ${fallbackStack(f.fallback ?? DEFAULT_FALLBACK)}`;
 const title = (k) => k.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 
 export function renderTailwindTheme(t) {

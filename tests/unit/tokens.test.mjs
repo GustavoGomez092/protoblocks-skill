@@ -170,7 +170,7 @@ test('validateTokens restricts font family and fallback', () => {
   assert.deepEqual(e({ family: 'Source Sans 3' }), []);
   assert.ok(e({ family: 'A', fallback: 'serif, sans(' }).some((x) => x.startsWith('fonts.f:')));
   assert.ok(e({ family: 'A', fallback: 'serif,' }).some((x) => x.startsWith('fonts.f:')));
-  assert.deepEqual(e({ family: 'A', fallback: '"Helvetica Neue", Arial, sans-serif' }), []);
+  assert.deepEqual(e({ family: 'A', fallback: 'Helvetica Neue, Arial, sans-serif' }), []);
 });
 
 test('googleFontsUrl percent-encodes family names', () => {
@@ -243,4 +243,43 @@ test('applyTokens stages via .tmp files: a failing staged write leaves every tar
   fs.mkdirSync(path.join(theme, 'style.css.tmp')); // makes staging the last file fail
   assert.throws(() => applyTokens(theme, tokens));
   for (const [f, c] of Object.entries(files)) assert.equal(fs.readFileSync(path.join(theme, f), 'utf8'), c, f);
+});
+
+test('fallback items cannot contain quotes; non-generic items are quoted when rendered', () => {
+  const e = (fallback) => validateTokens({ colors: { a: '#000' }, fonts: { f: { family: 'A', fallback } } });
+  for (const fb of ['"', 'a"b', "x'", '"Helvetica Neue", Arial']) {
+    assert.ok(e(fb).some((x) => x.startsWith('fonts.f:')), JSON.stringify(fb));
+  }
+  const css = renderTailwindTheme({ colors: { a: '#000' }, fonts: { f: { family: 'Inter', fallback: 'Helvetica Neue, Arial, sans-serif' } } });
+  assert.match(css, /--font-f: "Inter", "Helvetica Neue", "Arial", sans-serif;/);
+  const json = mergeThemeJson({}, { colors: { a: '#000' }, fonts: { f: { family: 'Inter', fallback: 'Helvetica Neue, serif' } } });
+  assert.equal(json.settings.typography.fontFamilies[0].fontFamily, '"Inter", "Helvetica Neue", serif');
+  for (const g of ['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong']) {
+    assert.match(renderTailwindTheme({ colors: { a: '#000' }, fonts: { f: { family: 'I', fallback: g } } }), new RegExp(`--font-f: "I", ${g};`), g);
+  }
+  assert.match(renderTailwindTheme({ colors: { a: '#000' }, fonts: { f: { family: 'Inter' } } }), /--font-f: "Inter", ui-sans-serif, system-ui, sans-serif;/);
+});
+
+test('free-text values reject quotes, !, <, >, tab and NUL', () => {
+  for (const ch of ['"', "'", '!', '<', '>', '\t', '\0']) {
+    const v = `0 0 1px red${ch}x`;
+    assert.ok(validateTokens({ colors: { a: '#000' }, shadows: { s: v } }).some((x) => x.startsWith('shadows.s:')), JSON.stringify(ch));
+    assert.ok(validateTokens({ colors: { a: '#000' }, shadows: { s: ch } }).some((x) => x.startsWith('shadows.s:')), `alone ${JSON.stringify(ch)}`);
+  }
+  assert.ok(validateTokens({ colors: { a: '#000' }, shadows: { a: '"' } }).some((x) => x.startsWith('shadows.a:')));
+});
+
+test('values must have balanced parentheses that form a single call for colours and lengths', () => {
+  const bad = ['rgb(0 0 0))', 'rgb(1)(2)', '(rgb(0 0 0)', 'rgb(0 0 0'];
+  for (const v of bad) assert.ok(validateTokens({ colors: { a: v } }).some((x) => x.startsWith('colors.a:')), `color ${v}`);
+  for (const v of ['calc(1px))', 'calc(1px)(2px)', 'calc((1px)', 'calc(1px']) {
+    assert.ok(validateTokens({ colors: { a: '#000' }, spacing: { s: v } }).some((x) => x.startsWith('spacing.s:')), `spacing ${v}`);
+    assert.ok(validateTokens({ colors: { a: '#000' }, radii: { s: v } }).some((x) => x.startsWith('radii.s:')), `radii ${v}`);
+    assert.ok(validateTokens({ colors: { a: '#000' }, type: { s: v } }).some((x) => x.startsWith('type.s:')), `type ${v}`);
+  }
+  for (const v of ['0 0 1px rgba(0,0,0,0.1))', '0 0 (1px', ') 0 0 red', '0 0 1px rgb(0)(', '0 0 1px red)(', ')(']) {
+    assert.ok(validateTokens({ colors: { a: '#000' }, shadows: { s: v } }).some((x) => x.startsWith('shadows.s:')), `shadow ${v}`);
+  }
+  assert.deepEqual(validateTokens({ colors: { a: '#000' }, spacing: { s: 'calc(100% - 2rem)', t: 'clamp(1rem, 2vw, 3rem)', u: 'clamp(1rem, calc(1vw + 2px), min(3rem, 4rem))' },
+    shadows: { s: '0 1px 2px rgba(0,0,0,0.1), 0 0 1px rgb(0 0 0 / 0.2)' } }), []);
 });
