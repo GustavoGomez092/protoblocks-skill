@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, updateState } from './state.mjs';
 import { refreshMenus } from './navigation.mjs';
+import { assertSlug } from './slugs.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'page.php');
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -14,6 +15,7 @@ const USAGE = 'Usage: node page.mjs build <themeDir> <slug> [--force]\n';
 export const backupsDir = (themeDir) => path.join(themeDir, '.protoblocks', 'artifacts', 'backups');
 
 export function pageSpecFromState(state, slug, { force = false } = {}) {
+  assertSlug(slug, 'page slug'); // page.php re-checks with sanitize_title (defence in depth)
   const page = state.pages.find((p) => p.slug === slug);
   if (!page) throw fail('ENOPAGE', `No page "${slug}" in state.`);
   const blocks = [...page.sections]

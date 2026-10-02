@@ -4,8 +4,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime } from './wp.mjs';
 import { loadState, updateState, statePath } from './state.mjs';
+import { assertSlug, isSlug } from './slugs.mjs';
 
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const USAGE = 'Usage: node library.mjs list <themeDir> | record <themeDir> <block> <page> [--purpose T] [--variants a,b]\n';
 
@@ -15,12 +15,8 @@ function fail(code, message) {
   return e;
 }
 
-const assertBlock = (block) => {
-  if (typeof block !== 'string' || !SLUG.test(block)) throw fail('EBLOCK', `Invalid block slug ${JSON.stringify(block)}; use lowercase letters, digits and dashes`);
-};
-const assertPage = (page) => {
-  if (typeof page !== 'string' || !SLUG.test(page)) throw fail('ESLUG', `Invalid page slug ${JSON.stringify(page)}; use lowercase letters, digits and dashes`);
-};
+const assertBlock = (block) => assertSlug(block, 'block slug', 'EBLOCK');
+const assertPage = (page) => assertSlug(page, 'page slug', 'ESLUG');
 const assertVariants = (variants) => {
   if (!Array.isArray(variants) || !variants.every((v) => typeof v === 'string' && TOKEN.test(v))) {
     throw fail('EVARIANT', `variants must be a list of tokens (letters, digits, _ or -); got ${JSON.stringify(variants)}`);
@@ -100,7 +96,7 @@ export function listLibrary(wp, themeDir) {
   const lib = fs.existsSync(statePath(themeDir)) ? loadState(themeDir).library : {};
   const own = (slug) => (Object.hasOwn(lib, slug) ? lib[slug] : undefined);
   return [...new Set(registered)]
-    .filter((slug) => SLUG.test(slug))
+    .filter((slug) => isSlug(slug))
     .filter((slug) => fs.existsSync(path.join(themeDir, 'proto-blocks', slug)))
     .sort()
     .map((slug) => {

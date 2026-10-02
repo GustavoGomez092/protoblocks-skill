@@ -4,16 +4,16 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadState, updateState, DEFAULT_QA } from './state.mjs';
 import { artifactsDir } from './intake.mjs';
+import { assertSlug } from './slugs.mjs';
 
 export const STANDARD_WIDTHS = { desktop: 1440, tablet: 834, mobile: 390 };
 
-const SAFE_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const SAFE_ANCHOR = /^[A-Za-z][A-Za-z0-9_-]*$/; // same rule as check-section
 const SAFE_NAME = /^[A-Za-z0-9_-]+$/;
 const fail = (code, message) => Object.assign(new Error(message), { code });
 
 function checkArgs(slug, n) {
-  if (typeof slug !== 'string' || !SAFE_SLUG.test(slug)) throw fail('EINPUT', `Unsafe page slug ${JSON.stringify(slug)} (allowed: A-Z a-z 0-9 _ -, not starting with _ or -)`);
+  assertSlug(slug, 'page slug');
   const num = typeof n === 'string' && /^[0-9]+$/.test(n) ? Number(n) : n;
   if (!Number.isInteger(num) || num <= 0) throw fail('EINPUT', `Section number must be a positive integer, got ${JSON.stringify(n)}`);
   return num;

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadState, updateState, stateDir } from './state.mjs';
+import { assertSlug } from './slugs.mjs';
 
 export const BREAKPOINT_RANGES = { desktop: [1200, 1920], tablet: [700, 1100], mobile: [320, 480] };
 
@@ -44,7 +45,15 @@ export function imageWidth(file) {
 
 export const artifactsDir = (themeDir) => path.join(stateDir(themeDir), 'artifacts');
 
+function assertBreakpoint(breakpoint) {
+  if (typeof breakpoint !== 'string' || !Object.hasOwn(BREAKPOINT_RANGES, breakpoint)) {
+    throw Object.assign(new Error(`Unknown breakpoint ${JSON.stringify(breakpoint ?? null)}; use one of ${Object.keys(BREAKPOINT_RANGES).join(', ')}.`), { code: 'EINPUT' });
+  }
+  return breakpoint;
+}
+
 export function ensurePage(state, slug, title) {
+  assertSlug(slug, 'page slug');
   let page = state.pages.find((p) => p.slug === slug);
   if (!page) {
     page = { slug, title: title ?? slug, status: 'planning', postId: null, contentHash: null, design: { frames: [] }, sections: [] };
@@ -61,6 +70,9 @@ export function ensurePage(state, slug, title) {
  * Records a design frame. The copied file keeps the source extension: downstream code must read `frame.image` and never assume `.png`.
  */
 export function addFrame(themeDir, slug, breakpoint, image, { width, title } = {}) {
+  // Both become path segments of the copied frame: validate before reading or writing anything.
+  assertSlug(slug, 'page slug');
+  assertBreakpoint(breakpoint);
   const pixelWidth = imageWidth(image);
   let fit;
   if (width !== undefined && width !== null && width !== '') {
@@ -99,6 +111,7 @@ function validateRanges(ranges) {
 }
 
 export async function cropSections(themeDir, slug, ranges) {
+  assertSlug(slug, 'page slug');
   validateRanges(ranges);
   const state = loadState(themeDir);
   const page = state.pages.find((p) => p.slug === slug);
@@ -127,6 +140,7 @@ export async function cropSections(themeDir, slug, ranges) {
 }
 
 export async function framesFromUrl(themeDir, slug, url, widths) {
+  assertSlug(slug, 'page slug');
   const valid = (Array.isArray(widths) ? widths : []).filter((w) => Number.isFinite(w) && w > 0);
   if (!valid.length) { const e = new Error('No valid widths given (need positive numbers, e.g. 1440,390).'); e.code = 'EWIDTHS'; throw e; }
   const { shoot } = await import('../qa/shoot.mjs');
