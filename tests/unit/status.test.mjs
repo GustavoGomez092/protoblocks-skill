@@ -104,3 +104,41 @@ test('CLI: existing state prints summary; no arg exits 64', () => {
   assert.deepEqual([out.site.theme, out.next.action], ['acme', 'ask-more-pages']);
   assert.equal(spawnSync('node', [SCRIPT], { encoding: 'utf8' }).status, 64);
 });
+
+test('building page with zero sections → breakdown', () => {
+  const r = nextAction(base([{ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [] }]));
+  assert.deepEqual(r, { action: 'breakdown', page: 'home', why: 'building page has no sections' });
+});
+
+test('planning page with approved plan but zero sections → breakdown', () => {
+  const r = nextAction(base([{ slug: 'home', status: 'planning', plan: { approvedAt: 'x' }, sections: [] }]));
+  assert.deepEqual(r, { action: 'breakdown', page: 'home', why: 'approved plan has no sections' });
+});
+
+test('summarize ignores null / iteration-less qa entries', () => {
+  const s = base([{ slug: 'home', status: 'building', sections: [sec(1, 'building', { qa: [null, { iteration: 1, pass: false }, {}, { iteration: 2, pass: true }, null] })] }]);
+  const [x] = summarize(s).pages[0].sections;
+  assert.deepEqual([x.iterations, x.lastPass], [2, true]);
+});
+
+test('nextAction and summarize do not mutate their input', () => {
+  const s = base([{ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(3, 'planned'), sec(1, 'done', { qa: [{ iteration: 1, pass: true }] })] }]);
+  const before = structuredClone(s);
+  nextAction(s); summarize(s);
+  assert.deepEqual(s, before);
+});
+
+test('CLI: nonexistent themeDir exits 1 with ENOTHEME', () => {
+  const r = spawnSync('node', [SCRIPT, '/nonexistent/theme-dir-xyz'], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^\[ENOTHEME\] \/nonexistent\/theme-dir-xyz is not a directory/);
+});
+
+test('CLI: corrupt build.json exits 1 with EPARSE', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'status-'));
+  fs.mkdirSync(path.join(dir, '.protoblocks'));
+  fs.writeFileSync(path.join(dir, '.protoblocks', 'build.json'), '{not json');
+  const r = spawnSync('node', [SCRIPT, dir], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^\[EPARSE\]/);
+});
