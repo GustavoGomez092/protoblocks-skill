@@ -16,6 +16,7 @@ test('pageSpecFromState orders sections, adds anchors, skips skipped/unbuilt', (
     { n: 1, anchor: 'pb-s1', block: 'hero-split', attrs: {}, inner: ['<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->'], status: 'building' },
     { n: 3, anchor: 'pb-s3', block: 'faq', status: 'skipped' },
     { n: 4, anchor: 'pb-s4', status: 'planned' },
+    { n: 5, anchor: 'pb-s5', block: 'logo-wall', attrs: {}, status: 'planned' },
   ] }] };
   const spec = pageSpecFromState(state, 'home');
   assert.equal(spec.postId, 7);
@@ -25,6 +26,14 @@ test('pageSpecFromState orders sections, adds anchors, skips skipped/unbuilt', (
   assert.deepEqual(spec.blocks[1].attrs, { heading: 'Go', anchor: 'pb-s2' });
   assert.match(spec.blocks[0].innerRaw, /wp:paragraph/);
   assert.throws(() => pageSpecFromState(state, 'nope'), (e) => e.code === 'ENOPAGE' && /No page "nope"/.test(e.message));
+});
+
+test('pageSpecFromState skips planned sections even when the plan already names their block', () => {
+  const state = { pages: [{ slug: 'home', sections: [
+    { n: 1, anchor: 'pb-s1', block: 'hero', status: 'planned' },
+    { n: 2, anchor: 'pb-s2', block: 'cta', status: 'verifying' },
+  ] }] };
+  assert.deepEqual(pageSpecFromState(state, 'home').blocks.map((b) => b.name), ['proto-blocks/cta']);
 });
 
 test('pageSpecFromState skips sections rendered by a template part (inPart)', () => {
@@ -50,7 +59,7 @@ function setup({ pending = false, pageOverrides = {} } = {}) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-pageunit-'));
   initState(theme, { url: 'http://x.test', path: '/x' });
   updateState(theme, (s) => {
-    s.pages.push({ slug: 'home', title: 'Home', status: 'planning', postId: 7, contentHash: 'h-old', sections: [
+    s.pages.push({ slug: 'home', title: 'Home', status: 'planning', postId: 7, contentHash: 'h-old', plan: { approvedAt: '2026-10-01T00:00:00.000Z', by: 'developer' }, sections: [
       { n: 1, anchor: 'pb-s1', block: 'hero', attrs: {}, status: 'building' },
     ], ...pageOverrides });
     if (pending) s.site.navigation = { menus: { primary: { id: 1, spec: { items: [] }, pending: [{ label: 'Home', page: 'home' }] } } };
@@ -75,6 +84,16 @@ function fake(handlers) {
 
 const okWrite = (over = {}) => ({ ok: true, postId: 7, slug: 'home', url: 'http://x.test/home/', contentHash: 'h-new', created: false, backupRevisionId: 31, warnings: [], written: { title: 'Home', slug: 'home', postStatus: 'publish' }, ...over });
 const plan = (over = {}) => ({ target: { postId: 7, hash: 'h-old', built: true, status: 'publish' }, guard: null, needsBackup: false, ...over });
+
+test('buildPage refuses with ENOPLAN when the page has no approved plan, before calling WordPress', () => {
+  for (const p of [undefined, null, {}, { by: 'developer' }, { approvedAt: '' }]) {
+    const theme = setup({ pageOverrides: { plan: p } });
+    const { wp, calls } = fake({ 'page.php:plan': plan(), 'page.php:write': okWrite() });
+    assert.throws(() => buildPage(wp, theme, 'home'), (e) => e.code === 'ENOPLAN' && /approv/i.test(e.message), JSON.stringify(p));
+    assert.throws(() => buildPage(wp, theme, 'home', { force: true }), (e) => e.code === 'ENOPLAN');
+    assert.deepEqual(calls, []);
+  }
+});
 
 test('buildPage writes through, records state, advances planning to building', () => {
   const theme = setup();

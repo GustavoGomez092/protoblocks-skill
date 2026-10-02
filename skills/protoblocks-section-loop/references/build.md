@@ -37,6 +37,8 @@ node "$PB/lib/state.mjs" set "$THEME" "$S.inner" '["<!-- wp:paragraph -->\n<p>In
 node "$PB/lib/state.mjs" set "$THEME" "$S.status" '"building"'
 ```
 
+Setting status `building` matters: `page.mjs build` leaves out sections that are still `planned` (and `skipped` ones, and ones rendered by a template part).
+
 An index of `-1` means the slug or `n` is not in state: stop. `[EINVALID]` or `[EVALUE]` means nothing was written: fix the value and retry (never `restore`). Do not set the anchor: it already exists and `page.mjs` adds it to the attrs.
 
 `section.inner` is a list of raw block-markup strings, joined and placed inside the block for an `inner-blocks` field:
@@ -75,5 +77,6 @@ Re-run the gate after every fix. Pass attrs that exercise the template (all fiel
 | `ESLUGTAKEN` / `EFOREIGN` | a page with this slug exists and the builder did not create it | ask; `--force` only to adopt it |
 | `ENOTPAGE` | the stored post id is not a page | tell the developer; do not force |
 | `ESTALE` | the page changed while the build ran | re-run the build |
+| `ENOPLAN` | the page has no approved plan (`pages[i].plan.approvedAt`) | run the plan gate (`protoblocks-design-breakdown`); never record approval yourself |
 
 Warnings about a kept title, slug or status mean the developer changed them; the message contains the command to hand control back.

@@ -20,7 +20,8 @@ export function pageSpecFromState(state, slug, { force = false } = {}) {
   if (!page) throw fail('ENOPAGE', `No page "${slug}" in state.`);
   const blocks = [...page.sections]
     .sort((a, b) => a.n - b.n)
-    .filter((s) => s.status !== 'skipped' && !s.inPart && s.block)
+    // planned = not built yet (the plan may already name its block); inPart = rendered by a template part.
+    .filter((s) => s.status !== 'skipped' && s.status !== 'planned' && !s.inPart && s.block)
     .map((s) => ({
       name: s.block.includes('/') ? s.block : `proto-blocks/${s.block}`,
       attrs: { ...(s.attrs ?? {}), anchor: s.anchor },
@@ -60,7 +61,13 @@ function backUp(themeDir, wp, slug, postId) {
 }
 
 export function buildPage(wp, themeDir, slug, { force = false } = {}) {
-  const spec = pageSpecFromState(loadState(themeDir), slug, { force });
+  const state = loadState(themeDir);
+  const spec = pageSpecFromState(state, slug, { force });
+  // The plan gate in code: nothing is assembled before the developer approved the section plan (--force does not bypass it).
+  const approved = state.pages.find((p) => p.slug === slug)?.plan?.approvedAt;
+  if (typeof approved !== 'string' || !approved) {
+    throw fail('ENOPLAN', `Page "${slug}" has no approved section plan (pages[].plan.approvedAt). Present the plan to the developer and record it after approval (protoblocks-design-breakdown, plan gate) before building.`);
+  }
   const dir = backupsDir(themeDir);
   const planned = callPayload(wp, 'plan', spec);
   if (planned.guard) {

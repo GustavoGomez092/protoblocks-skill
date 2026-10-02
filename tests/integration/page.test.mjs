@@ -26,7 +26,7 @@ function newTheme(pages) {
   return theme;
 }
 const statePage = (slug, sections = [{ n: 1, anchor: 'pb-s1', block: 'pb-gate-ok', attrs: { heading: 'One' }, status: 'building' }], extra = {}) =>
-  ({ slug, title: 'Itest', status: 'planning', postId: null, contentHash: null, sections, ...extra });
+  ({ slug, title: 'Itest', status: 'planning', postId: null, contentHash: null, plan: { approvedAt: '2026-10-01T00:00:00.000Z', by: 'developer' }, sections, ...extra });
 const mkForeign = (wp, created, slug, { type = 'page', status = 'publish', content = '<p>client original</p>' } = {}) => {
   const id = Number(wp.check(['post', 'create', `--post_type=${type}`, `--post_status=${status}`, `--post_name=${slug}`, '--post_title=Client page', `--post_content=${content}`, '--porcelain']).trim());
   created.push(id);
