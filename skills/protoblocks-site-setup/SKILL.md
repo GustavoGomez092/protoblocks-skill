@@ -63,11 +63,11 @@ node "$PB/lib/tokens.mjs" apply "$THEME" "$THEME/.protoblocks/tokens.json" [--no
 Read `references/navigation.md`. One spec per menu (`primary`, `footer-1`, ...):
 
 ```bash
-node "$PB/lib/navigation.mjs" upsert "$THEME" primary spec.json
+node "$PB/lib/navigation.mjs" upsert "$THEME" primary spec.json [--force]
 node "$PB/lib/navigation.mjs" refresh "$THEME"     # after creating pages
 ```
 
-Links to pages that do not exist yet are normal: they are reported in `pending` and converted by `refresh`.
+Links to pages that do not exist yet are normal: they are reported in `pending` and converted by `refresh`, which patches only those links and keeps Site Editor edits. `[EEDITED]` means the menu was edited in the Site Editor since protoblocks wrote it; nothing changed. Ask the developer; only with their OK re-run `upsert` with `--force` (it saves the current menu to `$THEME/.protoblocks/artifacts/backups/` first).
 
 ## Step 4 - Header/footer parts
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,35 +8,57 @@ import { upsertMenu, refreshMenus } from '../../skills/protoblocks-site-builder/
 import { initState, loadState, updateState, setPath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
-const NAV = path.join(WP_SCRIPTS_DIR, 'navigation.php');
-const ids = (wp, type, name) => wp.check(['post', 'list', `--post_type=${type}`, `--name=${name}`, '--post_status=any', '--format=ids']).trim().split(/\s+/).filter(Boolean);
-const purge = (wp) => {
-  for (const [type, name] of [['page', 'pb-nav-home'], ['page', 'pb-nav-later'], ['page', 'pb-nav-draft'], ['page', 'pb-nav-child'], ['page', 'pb-nav-parent'], ['wp_navigation', 'pb-nav-itest']]) {
-    const found = ids(wp, type, name);
-    if (found.length) wp.check(['post', 'delete', ...found, '--force']);
-  }
-};
+// SAFETY: every post this file creates or deletes has a unique per-test name: menu key "it<hex>"
+// (post slug pb-nav-it<hex>) and pages "pb-itest-nav-<hex>-*". purge() only deletes those exact names.
+function fixture(wp) {
+  const hex = crypto.randomBytes(4).toString('hex');
+  const key = `it${hex}`;
+  const page = (n) => `pb-itest-nav-${hex}-${n}`;
+  const names = [];
+  const ids = (type, name) => wp.check(['post', 'list', `--post_type=${type}`, `--name=${name}`, '--post_status=any', '--format=ids']).trim().split(/\s+/).filter(Boolean);
+  const createPage = (n, extra = []) => {
+    names.push(page(n));
+    return wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_title=PB Itest Nav ${n}`, `--post_name=${page(n)}`, ...extra, '--porcelain']).trim();
+  };
+  const purge = () => {
+    for (const [type, name] of [...names.map((n) => ['page', n]), ['wp_navigation', `pb-nav-${key}`], ['wp_navigation', `pb-nav-${key}__trashed`]]) {
+      assert.match(name, new RegExp(`${hex}`), 'purge only touches this test\'s unique names');
+      const found = ids(type, name);
+      if (found.length) wp.check(['post', 'delete', ...found, '--force']);
+    }
+  };
+  const get = () => wp.evalFilePayload(path.join(WP_SCRIPTS_DIR, 'navigation.php'), 'get', { key });
+  const stateDir = () => {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
+    initState(t, { url: 'http://proto-blocks.local', path: '/x' });
+    return t;
+  };
+  const remember = (t, spec, r) => updateState(t, (s) => { setPath(s, `site.navigation.menus.${key}`, { id: r.id, spec, pending: r.pending, contentHash: r.contentHash }); });
+  return { hex, key, page, createPage, purge, get, stateDir, remember, names };
+}
 
 itest('menus upsert idempotently and pending page links resolve on refresh', () => {
   const wp = testWp();
-  purge(wp);
+  const f = fixture(wp);
   try {
-    const homeId = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', '--post_title=PB Nav Home', '--post_name=pb-nav-home', '--porcelain']).trim();
+    const homeId = f.createPage('home');
     const label = `Q "quoted" & <b>bold</b> it's`;
     const spec = { title: 'Primary', items: [
-      { label: 'Home', page: 'pb-nav-home' },
-      { label: 'Later', page: 'pb-nav-later' },
+      { label: 'Home', page: f.page('home') },
+      { label: 'Later', page: f.page('later') },
       { label, url: 'https://example.com', children: [{ label: 'Docs', url: 'https://example.com/docs', opensInNewTab: true }] },
     ] };
 
-    const a = upsertMenu(wp, 'itest', spec);
-    const b = upsertMenu(wp, 'itest', spec);
+    const a = upsertMenu(wp, f.key, spec);
+    const b = upsertMenu(wp, f.key, spec);
     assert.equal(a.created, true);
     assert.equal(b.created, false);
     assert.equal(a.id, b.id);
-    assert.deepEqual(b.pending, [{ label: 'Later', page: 'pb-nav-later' }]);
-    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--name=pb-nav-itest', '--post_status=any', '--format=count']).trim(), '1');
-    const content = wp.evalFile(NAV, ['get', 'itest']).content;
+    assert.equal(a.contentHash, b.contentHash);
+    assert.deepEqual(b.pending, [{ label: 'Later', page: f.page('later') }]);
+    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', `--name=pb-nav-${f.key}`, '--post_status=any', '--format=count']).trim(), '1');
+    const content = f.get().content;
+    assert.equal(crypto.createHash('sha256').update(content).digest('hex'), b.contentHash, 'contentHash is sha256 of post_content');
     assert.match(content, new RegExp(`"id":${homeId}`));
     assert.match(content, /"kind":"post-type"/);
     assert.match(content, /wp:navigation-submenu/);
@@ -43,7 +66,7 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
 
     // content must parse back (parse_blocks, via wp eval) into the same tree; labels round-trip
     const tree = JSON.parse(wp.check(['eval',
-      '$p = get_posts(["post_type"=>"wp_navigation","name"=>"pb-nav-itest","numberposts"=>1,"post_status"=>"any"])[0];' +
+      `$p = get_posts(["post_type"=>"wp_navigation","name"=>"pb-nav-${f.key}","numberposts"=>1,"post_status"=>"any"])[0];` +
       '$f = function($bs) use (&$f) { $o = []; foreach ($bs as $b) { if ($b["blockName"] === null) continue; $o[] = ["n"=>$b["blockName"],"a"=>$b["attrs"],"c"=>$f($b["innerBlocks"])]; } return $o; };' +
       'echo wp_json_encode($f(parse_blocks($p->post_content)));']).trim().split('\n').at(-1));
     assert.deepEqual(tree.map((t) => t.n), ['core/navigation-link', 'core/navigation-link', 'core/navigation-submenu']);
@@ -54,70 +77,105 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
     assert.equal(tree[2].c[0].n, 'core/navigation-link');
     assert.equal(tree[2].c[0].a.opensInNewTab, true);
 
-    const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
-    initState(theme, { url: 'http://proto-blocks.local', path: '/x' });
-    updateState(theme, (s) => { setPath(s, 'site.navigation.menus.itest', { id: b.id, spec, pending: b.pending }); });
-    wp.check(['post', 'create', '--post_type=page', '--post_status=publish', '--post_title=PB Nav Later', '--post_name=pb-nav-later', '--porcelain']);
-    assert.deepEqual(refreshMenus(wp, theme).refreshed, ['itest']);
-    const menu = loadState(theme).site.navigation.menus.itest;
+    const theme = f.stateDir();
+    f.remember(theme, spec, b);
+    f.createPage('later');
+    assert.deepEqual(refreshMenus(wp, theme).refreshed, [f.key]);
+    const menu = loadState(theme).site.navigation.menus[f.key];
     assert.deepEqual(menu.pending, []);
     assert.equal(menu.id, a.id);
-    const after = wp.evalFile(NAV, ['get', 'itest']).content;
-    assert.equal((after.match(/"kind":"post-type"/g) ?? []).length, 2);
+    const after = f.get();
+    assert.equal(after.contentHash, menu.contentHash);
+    assert.equal((after.content.match(/"kind":"post-type"/g) ?? []).length, 2);
     assert.deepEqual(refreshMenus(wp, theme).refreshed, []);
   } finally {
-    purge(wp);
+    f.purge();
   }
 });
 
 itest('trashed menus are reused (not duplicated) and get uses the same lookup', () => {
   const wp = testWp();
-  purge(wp);
+  const f = fixture(wp);
   try {
     const spec = { title: 'Primary', items: [{ label: 'X', url: 'https://example.com' }] };
-    const a = upsertMenu(wp, 'itest', spec);
+    const a = upsertMenu(wp, f.key, spec);
     wp.check(['eval', `wp_trash_post(${a.id});`]); // wp-cli refuses to trash wp_navigation; WP core trashes it (slug gets __trashed)
     assert.equal(wp.check(['post', 'get', String(a.id), '--field=post_status']).trim(), 'trash');
-    assert.equal(wp.evalFile(NAV, ['get', 'itest']).id, a.id);
-    const b = upsertMenu(wp, 'itest', spec);
+    assert.equal(f.get().id, a.id);
+    const b = upsertMenu(wp, f.key, spec);
     assert.equal(b.id, a.id);
     assert.equal(b.created, false);
     assert.equal(wp.check(['post', 'get', String(b.id), '--field=post_status']).trim(), 'publish');
-    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--name=pb-nav-itest', '--format=count']).trim(), '1');
-    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--name=pb-nav-itest-2', '--format=count']).trim(), '0');
+    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', `--name=pb-nav-${f.key}`, '--format=count']).trim(), '1');
+    assert.equal(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', `--name=pb-nav-${f.key}-2`, '--format=count']).trim(), '0');
   } finally {
-    purge(wp);
+    f.purge();
   }
 });
 
 itest('only published pages resolve; nested slugs resolve', () => {
   const wp = testWp();
-  purge(wp);
-  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navstate-'));
+  const f = fixture(wp);
   try {
-    const draftId = wp.check(['post', 'create', '--post_type=page', '--post_status=draft', '--post_title=PB Nav Draft', '--post_name=pb-nav-draft', '--porcelain']).trim();
-    const parentId = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', '--post_title=PB Nav Parent', '--post_name=pb-nav-parent', '--porcelain']).trim();
-    const childId = wp.check(['post', 'create', '--post_type=page', '--post_status=publish', `--post_parent=${parentId}`, '--post_title=PB Nav Child', '--post_name=pb-nav-child', '--porcelain']).trim();
+    f.names.push(f.page('draft'));
+    const draftId = wp.check(['post', 'create', '--post_type=page', '--post_status=draft', '--post_title=PB Itest Nav Draft', `--post_name=${f.page('draft')}`, '--porcelain']).trim();
+    const parentId = f.createPage('parent');
+    const childId = f.createPage('child', [`--post_parent=${parentId}`]);
     const spec = { title: 'Primary', items: [
-      { label: 'Draft', page: 'pb-nav-draft' },
-      { label: 'Child', page: 'pb-nav-parent/pb-nav-child' },
+      { label: 'Draft', page: f.page('draft') },
+      { label: 'Child', page: `${f.page('parent')}/${f.page('child')}` },
     ] };
-    const a = upsertMenu(wp, 'itest', spec);
-    assert.deepEqual(a.pending, [{ label: 'Draft', page: 'pb-nav-draft' }]);
-    const c1 = wp.evalFile(NAV, ['get', 'itest']).content;
+    const a = upsertMenu(wp, f.key, spec);
+    assert.deepEqual(a.pending, [{ label: 'Draft', page: f.page('draft') }]);
+    const c1 = f.get().content;
     assert.doesNotMatch(c1, new RegExp(`"id":${draftId}`));
     assert.match(c1, new RegExp(`"id":${childId},[^}]*"kind":"post-type"`));
     assert.equal((c1.match(/"kind":"post-type"/g) ?? []).length, 1);
 
-    initState(theme, { url: 'http://proto-blocks.local', path: '/x' });
-    updateState(theme, (s) => { setPath(s, 'site.navigation.menus.itest', { id: a.id, spec, pending: a.pending }); });
+    const theme = f.stateDir();
+    f.remember(theme, spec, a);
     wp.check(['post', 'update', draftId, '--post_status=publish']);
-    assert.deepEqual(refreshMenus(wp, theme).refreshed, ['itest']);
-    assert.deepEqual(loadState(theme).site.navigation.menus.itest.pending, []);
-    const c2 = wp.evalFile(NAV, ['get', 'itest']).content;
+    assert.deepEqual(refreshMenus(wp, theme).refreshed, [f.key]);
+    assert.deepEqual(loadState(theme).site.navigation.menus[f.key].pending, []);
+    const c2 = f.get().content;
     assert.match(c2, new RegExp(`"id":${draftId}`));
     assert.equal((c2.match(/"kind":"post-type"/g) ?? []).length, 2);
   } finally {
-    purge(wp);
+    f.purge();
+  }
+});
+
+itest('Site Editor edits survive: upsert refuses (EEDITED), refresh patches only pending links, force backs up first', () => {
+  const wp = testWp();
+  const f = fixture(wp);
+  try {
+    const spec = { title: 'Primary', items: [{ label: 'Later', page: f.page('later') }, { label: 'Ext', url: 'https://example.com' }] };
+    const a = upsertMenu(wp, f.key, spec);
+    const theme = f.stateDir();
+    f.remember(theme, spec, a);
+
+    // Simulate a Site Editor edit: the user adds a link and renames another.
+    wp.check(['eval', `kses_remove_filters(); $p = get_post(${Number(a.id)}); wp_update_post(wp_slash(['ID' => $p->ID, 'post_content' => str_replace('"label":"Ext"', '"label":"Ext (edited)"', $p->post_content) . '<!-- wp:navigation-link {"label":"Edited","url":"https://edited.example","kind":"custom"} /-->']));`]);
+    const edited = f.get();
+    assert.match(edited.content, /Edited/);
+
+    assert.throws(() => upsertMenu(wp, f.key, spec, { expectHash: a.contentHash }), (e) => e.code === 'EEDITED' && /Site Editor/.test(e.message));
+    assert.equal(f.get().content, edited.content, 'refused upsert changed nothing');
+
+    f.createPage('later');
+    const r = refreshMenus(wp, theme);
+    assert.deepEqual(r.menus[f.key].patched, [{ label: 'Later', page: f.page('later') }]);
+    const patched = f.get().content;
+    assert.match(patched, /"label":"Edited"/, 'added link kept');
+    assert.match(patched, /"label":"Ext \(edited\)"/, 'renamed link kept');
+    assert.match(patched, /"kind":"post-type"/, 'pending link converted');
+    assert.equal(loadState(theme).site.navigation.menus[f.key].contentHash, f.get().contentHash);
+
+    const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navbak-'));
+    const forced = upsertMenu(wp, f.key, spec, { expectHash: 'stale', force: true, backupDir });
+    assert.equal(fs.readFileSync(forced.backup, 'utf8'), patched, 'backup holds the edited menu');
+    assert.doesNotMatch(f.get().content, /Edited/);
+  } finally {
+    f.purge();
   }
 });

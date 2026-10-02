@@ -31,15 +31,19 @@ Footer column:
 ## Commands
 
 ```bash
-node "$PB/lib/navigation.mjs" upsert "$THEME" <key> <spec.json>
+node "$PB/lib/navigation.mjs" upsert "$THEME" <key> <spec.json> [--force]
 node "$PB/lib/navigation.mjs" refresh "$THEME"
 ```
 
-`upsert` prints `{ "id": 12, "key": "primary", "created": true, "pending": [{"label":"Services","page":"services"}] }` and saves `{id, spec, pending}` under `site.navigation.menus.<key>` in the build state (when state exists). Keep the `id`: the header part references it.
+`upsert` prints `{ "id": 12, "key": "primary", "created": true, "pending": [{"label":"Services","page":"services"}], "contentHash": "<sha256>" }` and saves `{id, spec, pending, contentHash}` under `site.navigation.menus.<key>` in the build state (when state exists). Keep the `id`: the header part references it. `contentHash` is the sha256 of the menu's `post_content` as protoblocks last wrote it.
+
+## Site Editor edits
+
+Menus are editable in the Site Editor, and those edits live in the same `wp_navigation` post. `upsert` on an existing menu only overwrites it when its content still matches `contentHash` (or already equals the new content). Otherwise it fails with `[EEDITED]` and changes nothing: the menu was edited in the Site Editor (or elsewhere). Tell the developer and either leave the menu alone (or change the spec to match their edits), or, only with their explicit OK, re-run with `--force`. `--force` first saves the current menu to `$THEME/.protoblocks/artifacts/backups/nav-<key>-<timestamp>.html` (reported as `backup`), then overwrites it.
 
 ## Pending links
 
-A `page` that does not exist or is not published yet is written as a custom link and listed in `pending`. This is normal while pages are still being built. After creating/publishing pages run `refresh`: it re-upserts every menu that still has pending links, converting them to `post-type` page links. Output: `{ "refreshed": ["primary"] }`.
+A `page` that does not exist or is not published yet is written as a custom link to its future URL and listed in `pending`. This is normal while pages are still being built. After creating/publishing pages run `refresh`. It does not rewrite the menu: it parses the saved blocks and converts only the pending placeholder links (custom links whose URL is the future URL of a now-published page) into `post-type` page links, so Site Editor edits elsewhere in the menu are kept. Output: `{ "refreshed": ["primary"], "menus": { "primary": { "id": 12, "patched": [...], "pending": [...], "missing": [...] } } }`. `missing` lists pending links that are no longer in the menu (removed in the Site Editor); they are dropped from `pending`. Errors: `ENOMENU` (the menu post is gone; run `upsert` again).
 
 ## Header/footer parts
 
