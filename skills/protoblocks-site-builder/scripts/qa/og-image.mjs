@@ -9,11 +9,11 @@ import { loadRaw } from './image.mjs';
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
-export async function ogImage({ url, selector, out, browser }) {
+export async function ogImage({ url, selector, out, browser, imageWaitMs }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-og-'));
   try {
     const tmp = path.join(dir, 'shot.png');
-    const shot = await shoot({ url, selector, width: OG_SIZE.width, scale: 1, out: tmp, browser });
+    const shot = await shoot({ url, selector, width: OG_SIZE.width, scale: 1, out: tmp, browser, imageWaitMs });
     let raw = await loadRaw(tmp);
     const source = { width: raw.width, height: raw.height };
     // Padding heuristic: a flat colour sampled from the shot's bottom-left pixel.
@@ -36,7 +36,8 @@ export async function ogImage({ url, selector, out, browser }) {
       const padded = await sharp(buf).extend({ top: 0, bottom: OG_SIZE.height - raw.height, left: 0, right: 0, background }).png().toBuffer();
       await sharp(padded).resize(OG_SIZE.width, OG_SIZE.height, { fit: 'fill' }).png().toFile(out);
     }
-    return { out, width: OG_SIZE.width, height: OG_SIZE.height, source, imageErrors: shot.imageErrors ?? [] };
+    // imageErrors: broken/stalled images inside the shot section; pageImageWarnings: stalled images elsewhere on the page.
+    return { out, width: OG_SIZE.width, height: OG_SIZE.height, source, imageErrors: shot.imageErrors ?? [], pageImageWarnings: shot.pageImageWarnings ?? [] };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

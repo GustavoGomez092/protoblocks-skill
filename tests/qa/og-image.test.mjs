@@ -71,15 +71,27 @@ qtest('ogImage pads a narrow section to 1200 wide, centred, never stretched', as
   } finally { await srv.close(); }
 });
 
-qtest('ogImage reports imageErrors for an image that never loads', { timeout: 60000 }, async () => {
+qtest('ogImage reports imageErrors for an image inside the shot section that never loads', { timeout: 60000 }, async () => {
   const { ogImage } = await load();
   const srv = await serveFixtures();
   const t0 = Date.now();
   try {
-    const r = await ogImage({ url: `${srv.url}/hang.html`, selector: '#pb-s1', out: path.join(tmpDir(), 'e.png') });
+    const r = await ogImage({ url: `${srv.url}/og-hang.html`, selector: '#pb-s1', imageWaitMs: 1500, out: path.join(tmpDir(), 'e.png') });
     const took = `after ${Date.now() - t0}ms`;
     assert.ok(r.imageErrors.length > 0, `imageErrors is non-empty (${took})`);
     assert.match(r.imageErrors[0], /__hang/, `hanging image reported (${took})`);
+    assert.deepEqual(r.pageImageWarnings, []);
+  } finally { await srv.close(); }
+});
+
+qtest('ogImage reports a stalled image outside the shot section as a pageImageWarning, not an imageError', { timeout: 60000 }, async () => {
+  const { ogImage } = await load();
+  const srv = await serveFixtures();
+  try {
+    const r = await ogImage({ url: `${srv.url}/hang.html`, selector: '#pb-s1', imageWaitMs: 1500, out: path.join(tmpDir(), 'w.png') });
+    assert.deepEqual(r.imageErrors, []);
+    assert.equal(r.pageImageWarnings.length, 1);
+    assert.match(r.pageImageWarnings[0], /__hang/);
   } finally { await srv.close(); }
 });
 
