@@ -14,19 +14,29 @@ export async function ogImage({ url, selector, out, browser }) {
   try {
     const tmp = path.join(dir, 'shot.png');
     const shot = await shoot({ url, selector, width: OG_SIZE.width, scale: 1, out: tmp, browser });
-    const raw = await loadRaw(tmp);
-    const img = sharp(tmp);
+    let raw = await loadRaw(tmp);
+    const source = { width: raw.width, height: raw.height };
+    // Padding heuristic: a flat colour sampled from the shot's bottom-left pixel.
+    // It suits solid or near-solid heroes; gradients or full-bleed images can show a seam at the padding edge.
+    const i = (raw.height - 1) * raw.width * 4;
+    const [r, g, b] = raw.data.subarray(i, i + 3);
+    const background = { r, g, b, alpha: 1 };
     fs.mkdirSync(path.dirname(out), { recursive: true });
+    let buf = fs.readFileSync(tmp);
+    // Narrow (boxed) sections: pad to full width first, centred, so the final resize stays a no-op and nothing is stretched.
+    if (raw.width < OG_SIZE.width) {
+      const left = Math.floor((OG_SIZE.width - raw.width) / 2);
+      buf = await sharp(buf).extend({ top: 0, bottom: 0, left, right: OG_SIZE.width - raw.width - left, background }).png().toBuffer();
+      raw = { ...raw, width: OG_SIZE.width };
+    }
     if (raw.height >= OG_SIZE.height) {
-      await img.extract({ left: 0, top: 0, width: Math.min(raw.width, OG_SIZE.width), height: OG_SIZE.height }).resize(OG_SIZE.width, OG_SIZE.height, { fit: 'fill' }).png().toFile(out);
+      await sharp(buf).extract({ left: 0, top: 0, width: Math.min(raw.width, OG_SIZE.width), height: OG_SIZE.height }).resize(OG_SIZE.width, OG_SIZE.height, { fit: 'fill' }).png().toFile(out);
     } else {
-      const i = (raw.height - 1) * raw.width * 4;
-      const [r, g, b] = raw.data.subarray(i, i + 3);
       // sharp runs resize before extend inside one pipeline, so pad first and resize in a second pass.
-      const padded = await img.extend({ top: 0, bottom: OG_SIZE.height - raw.height, left: 0, right: 0, background: { r, g, b, alpha: 1 } }).png().toBuffer();
+      const padded = await sharp(buf).extend({ top: 0, bottom: OG_SIZE.height - raw.height, left: 0, right: 0, background }).png().toBuffer();
       await sharp(padded).resize(OG_SIZE.width, OG_SIZE.height, { fit: 'fill' }).png().toFile(out);
     }
-    return { out, width: OG_SIZE.width, height: OG_SIZE.height, source: { width: raw.width, height: raw.height }, imageErrors: shot.imageErrors ?? [] };
+    return { out, width: OG_SIZE.width, height: OG_SIZE.height, source, imageErrors: shot.imageErrors ?? [] };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
