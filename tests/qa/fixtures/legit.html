@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; font-size: 16px; }
+  section, header { padding: 8px 16px; }
+  .marquee { overflow: hidden; width: 100%; }
+  .track { display: flex; width: max-content; gap: 24px; }
+  .track span { white-space: nowrap; }
+  .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .carousel .slide { flex: 0 0 300px; scroll-snap-align: start; }
+  #fp-offcanvas { position: relative; overflow-x: clip; height: 60px; }
+  #fp-offcanvas nav { position: absolute; top: 0; right: 0; width: 200px; transform: translateX(100%); }
+  .icon { width: 20px; height: 20px; padding: 0; }
+  .vh { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .box { display: inline-block; width: 44px; height: 44px; background: #ccc; }
+  .cap { font-size: 13px; margin: 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); font-size: 10px; }
+  .wrap { width: 200px; }
+  .stack { position: relative; height: 40px; }
+  .slide2 { position: absolute; top: 0; left: 0; }
+</style></head>
+<body>
+  <section id="fp-marquee"><div class="marquee"><div class="track">
+    <span>Alpha item</span><span>Beta item</span><span>Gamma item</span><span>Delta item</span><span>Epsilon item</span>
+    <span aria-hidden="true">Alpha item</span><span aria-hidden="true">Beta item</span><span aria-hidden="true">Gamma item</span><span aria-hidden="true">Delta item</span><span aria-hidden="true">Epsilon item</span>
+  </div></div></section>
+  <section id="fp-carousel"><div class="carousel"><div class="slide">Slide one</div><div class="slide">Slide two</div><div class="slide">Slide three</div><div class="slide">Slide four</div></div></section>
+  <header id="fp-offcanvas"><p>Site header</p><nav><p>Menu panel</p></nav></header>
+  <section id="fp-inline"><p>Read the <a href="#">terms and conditions</a> before you continue, or <a href="#">contact us</a> any time.</p></section>
+  <section id="fp-icon"><button class="icon" type="button">x</button></section>
+  <section id="fp-check"><label><input class="vh" type="checkbox"><span class="box"></span></label></section>
+  <section id="fp-sup"><p>Water is H<sub>2</sub>O and E=mc<sup>2</sup> for 16px copy.</p><span class="sr-only">Skip to content</span><div aria-hidden="true"><p class="cap" style="font-size:10px">decorative</p></div></section>
+  <section id="fp-caption"><p class="cap">A 13px caption</p></section>
+  <section id="fp-wrap"><div class="wrap"><span>This sentence is long enough to wrap onto several lines here</span><em>x</em></div></section>
+  <section id="fp-slides"><div class="stack">
+    <div class="slide2">Slide A headline</div>
+    <div class="slide2" aria-hidden="true">Slide B headline</div>
+    <div class="slide2" aria-hidden="true">Slide C headline</div>
+    <div class="slide2" style="opacity:0">Slide D headline</div>
+  </div></section>
+  <section id="fp-aria"><div aria-hidden="true"><div style="width:900px;height:20px;background:#ccc"></div></div><div inert><div style="width:900px;height:20px;background:#ddd"></div></div></section>
+  <section id="fp-img"><img alt="" width="50" height="50"></section>
+</body></html>
