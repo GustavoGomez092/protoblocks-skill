@@ -183,6 +183,32 @@ qtest('preset error path: element left visible and done', () => withPage('motion
   assert.deepEqual(errors, []);
 }));
 
+qtest('preset error path: stagger-children leaves every child visible', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const kids = await page.$$eval('#e2 > .kid', (els) => els.map((e) => ({ o: getComputedStyle(e).opacity, t: getComputedStyle(e).transform, style: e.getAttribute('style') })));
+  assert.equal(kids.length, 3);
+  for (const k of kids) assert.deepEqual({ o: k.o, t: k.t }, { o: '1', t: 'none' }, JSON.stringify(kids));
+  assert.equal((await state(page, '#e2')).o, '1');
+}));
+
+qtest('preset error path: split-lines restores the original heading markup', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const h = await page.$eval('#e3', (e) => ({ html: e.innerHTML, o: getComputedStyle(e).opacity, wrappers: e.querySelectorAll('div, [aria-hidden]').length, label: e.getAttribute('aria-label') }));
+  assert.equal(h.html, 'Split <em>heading</em> that fails');
+  assert.equal(h.wrappers, 0, 'no split wrappers left');
+  assert.equal(h.label, null, 'SplitText aria-label removed');
+  assert.equal(h.o, '1');
+}));
+
+qtest('preset error path: counter shows its original text and no aria-label', () => withPage('motion-error.html', {}, async (page) => {
+  assert.ok(await allDone(page, 2000));
+  const c = await state(page, '#e4');
+  assert.equal(c.text, '1,250+');
+  assert.equal(c.label, null);
+  assert.equal(c.o, '1');
+  assert.equal(await page.evaluate(() => window.gsap.getTweensOf(document.getElementById('e4')).length + window.gsap.globalTimeline.getChildren(true, true, false).filter((t) => t.vars && t.vars.onUpdate).length), 0, 'counter tween killed');
+}));
+
 (havePhp ? qtest : (n, f) => qtest(`${n} (skipped: php not on PATH)`, () => {}))('pb-motion.php: no-JS fallback shows content; profile is escaped', async () => {
   const dir = tmpDir('pb-motion-php-');
   fs.mkdirSync(path.join(dir, 'inc'));

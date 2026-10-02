@@ -7,15 +7,19 @@
 <script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
 </head><body>
   <h1 id="e1" data-pb-motion="fade-up" data-proto-animate="manual">Preset that fails</h1>
+  <div id="e2" data-pb-motion="stagger-children" data-proto-animate="manual" style="display:flex;gap:8px"><div class="kid">one</div><div class="kid">two</div><div class="kid">three</div></div>
+  <h2 id="e3" data-pb-motion="split-lines" data-proto-animate="manual">Split <em>heading</em> that fails</h2>
+  <p><span id="e4" data-pb-motion="counter" data-proto-animate="manual">1,250+</span></p>
   <script src="/vendor/gsap.min.js"></script>
   <script src="/vendor/ScrollTrigger.min.js"></script>
   <script src="/vendor/SplitText.min.js"></script>
   <script>
-    // Simulate a preset failing after its from-state rendered (the tween is created and paused, then ScrollTrigger throws).
+    // Simulate presets failing after their from-state rendered: the tween is built and paused, then ScrollTrigger throws once per element.
     (function () {
-      var real = window.ScrollTrigger.create, thrown = false;
+      var real = window.ScrollTrigger.create, fail = { e1: 1, e2: 1, e3: 1, e4: 1 };
       window.ScrollTrigger.create = function (vars) {
-        if (!thrown && vars && vars.trigger && vars.trigger.id === 'e1') { thrown = true; throw new Error('forced preset failure'); }
+        var id = vars && vars.trigger && vars.trigger.id;
+        if (id && fail[id]) { delete fail[id]; throw new Error('forced preset failure'); }
         return real.apply(this, arguments);
       };
     })();

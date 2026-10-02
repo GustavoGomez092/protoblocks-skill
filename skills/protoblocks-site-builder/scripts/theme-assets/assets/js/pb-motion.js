@@ -38,6 +38,13 @@
     }
   }
   function own(el, kill) { owned.push({ el: el, kill: kill }); }
+  // Run and drop every cleanup registered for one element, newest first (kill the tween before reverting the
+  // DOM it animates). Used when a preset fails part-way through init.
+  function release(el) {
+    var mine = [];
+    owned = owned.filter(function (o) { if (o.el === el) { mine.push(o); return false; } return true; });
+    for (var i = mine.length - 1; i >= 0; i--) { try { mine[i].kill(); } catch (e) {} }
+  }
 
   function parseCounter(text) {
     var m = String(text).match(/^(\D*?)([\d.,]+)(.*)$/);
@@ -112,6 +119,7 @@
     var tween = revealTween(el, name, o);
     if (!tween) { done(el); return; }
     tween.pause();
+    own(el, function () { tween.kill(); }); // registered before ScrollTrigger.create so a throw there can still clean up
     var st = window.ScrollTrigger.create({
       trigger: el, start: o.start || defaultStart(el), once: true,
       onEnter: function () { tween.eventCallback('onComplete', (function (prev) { return function () { if (prev) prev(); done(el); }; })(tween.eventCallback('onComplete'))); tween.play(); }
@@ -125,7 +133,7 @@
       if (tween.progress() < 1) tween.progress(1);
     });
     mo.observe(el, { attributes: true, attributeFilter: ['data-proto-animate'] });
-    own(el, function () { mo.disconnect(); st.kill(); tween.kill(); });
+    own(el, function () { mo.disconnect(); st.kill(); });
   }
 
   // Duplicate the track's content for a seamless loop. The copy is hidden from assistive tech, made inert,
@@ -174,7 +182,14 @@
         else if (CONTINUOUS.indexOf(name) >= 0) initContinuous(el, name);
         else done(el);
       } catch (e) {
-        if (window.gsap) { try { window.gsap.set(el, { clearProps: 'opacity,transform,clipPath' }); } catch (e2) {} }
+        // Never leave content hidden: undo whatever the preset already did (kill its tween, restore counter text and
+        // aria-label, revert SplitText), then strip GSAP's from-state from the element and everything inside it.
+        release(el);
+        // Only nodes with an inline style can hold GSAP's from-state; skipping the rest avoids leaving style="" behind.
+        var styled = [el].concat(Array.prototype.slice.call(el.querySelectorAll('[style]'))).filter(function (n) { return n.hasAttribute('style'); });
+        if (window.gsap && styled.length) {
+          try { window.gsap.set(styled, { clearProps: 'opacity,transform,clipPath' }); } catch (e2) {}
+        }
         done(el);
         if (window.console) console.warn('[pb-motion] ' + name + ' failed:', e);
       }
