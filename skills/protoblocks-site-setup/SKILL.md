@@ -25,6 +25,8 @@ node "$PB/lib/setup-site.mjs" --name "<Project>" [--slug s] [--site "<Local site
 
 It runs preflight itself, then: installs/activates Proto-Blocks and wordpress-seo, safe-svg, duplicate-post; enables Tailwind; sets `/%postname%/` permalinks only when they are plain (a custom structure is left alone and reported in `plugins.warnings`); forks `proto-blocks-theme` into `wp-content/themes/<slug>` and activates it; installs the managed theme assets; creates the build state. Running it again reuses the fork (`theme.reused: true`) and leaves plugins alone.
 
+Custom JSON-LD is provided by the theme's Yoast extension (`_proto_jsonld`); check support with `node "$PB/lib/jsonld.mjs" check "$THEME"`.
+
 Fork and plugin rules (details: `references/errors.md`): an existing fork is always reused (offline OK); `--force` only replaces a foreign folder, `--refork <slug>` replaces a fork, and both move the old folder to `wp-content/.protoblocks/backups/` - use either only with the developer's explicit OK. Installed plugins are never replaced; report `updateAvailable` and use `--update-plugins` only with their OK.
 
 Result: `{ preflight, plugins, theme: {themeDir, slug, reused, forkedFrom}, assets, stateFile }`. Set `THEME=<theme.themeDir>` for every later command. Every value flag needs a value; an unknown flag or missing `--name` prints usage and exits 64.
