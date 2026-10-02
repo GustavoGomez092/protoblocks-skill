@@ -67,7 +67,7 @@ Procedure, result fields and fix strategies: `references/verify.md`.
 
 ## Animate
 
-When status is `animating`, load the `protoblocks-motion` skill (Stage 5).
+When the section's status is `animating`, load the `protoblocks-motion` skill and follow it for this section. The section is finished only when `motion.mjs record` sets it to `done`.
 
 ## Iron rules
 

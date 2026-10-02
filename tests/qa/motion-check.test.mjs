@@ -90,6 +90,15 @@ qtest('motionCheck fails and reports images inside the anchor that never load', 
   assert.equal(r.pass, false);
 }));
 
+// The stall exists only in the motion page load: shoot's reduced-motion load never adds the image, so
+// shot.imageErrors is empty and the failure can only come from motionCheck's own settled-frame image check.
+qtest('motionCheck fails on an anchor image that stalls only in the motion load', { timeout: 16000 }, () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=hang-motion', { anchor: 'pb-hang', imageWaitMs: 1000 });
+  assert.ok(r.imageErrors.length > 0 && r.imageErrors.every((src) => src.endsWith('/__hang')), JSON.stringify(r.imageErrors));
+  clean(r, 'imageErrors');
+  assert.equal(r.pass, false);
+}));
+
 // Same stalled image, but the anchor is #pb-s1: like shoot, only the anchor's images can fail the check.
 qtest('motionCheck reports a stalled image outside the anchor as a pageImageWarning and still passes', { timeout: 16000 }, () => withChecker(async (check) => {
   const r = await check('motion-faults.html?fault=hang', { imageWaitMs: 1000 });

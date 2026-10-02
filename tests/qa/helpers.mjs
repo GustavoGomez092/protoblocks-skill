@@ -47,10 +47,13 @@ function resolveFixture(root, pathname) {
   return within(p, root) ? p : null;
 }
 
-export function serveFixtures() {
+// `virtual` maps a URL path to { body, type } served instead of a file (tests that generate a script from docs).
+export function serveFixtures(virtual = {}) {
   const root = path.join(HERE, 'fixtures');
   const server = http.createServer((req, res) => {
     if (new URL(req.url, 'http://x').pathname === '/__hang') return; // never responds (stalled request)
+    const v = virtual[new URL(req.url, 'http://x').pathname];
+    if (v) { res.writeHead(200, { 'Content-Type': v.type }); res.end(v.body); return; }
     let pathname;
     try { pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { pathname = null; }
     const p = pathname && resolveFixture(root, pathname);

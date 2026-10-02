@@ -29,6 +29,8 @@ Fork and plugin rules (details: `references/errors.md`): an existing fork is alw
 
 Result: `{ preflight, plugins, theme: {themeDir, slug, reused, forkedFrom}, assets, stateFile }`. Set `THEME=<theme.themeDir>` for every later command. Every value flag needs a value; an unknown flag or missing `--name` prints usage and exits 64.
 
+Install motion (idempotent; adds the default profile): `node "$PB/lib/motion.mjs" install "$THEME"`. Choose the profile later, in `protoblocks-motion`.
+
 Errors: see `references/errors.md` for every code and what to do. Ask the developer before acting on `EFORKEXISTS`, `ERFORK`, `EPLUGINDEV` and `EWRONGSITE`; relay `EPREFLIGHT` checks and change nothing.
 
 ## Step 2 - Tokens
