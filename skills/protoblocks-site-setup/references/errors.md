@@ -29,6 +29,13 @@ Plugins already installed are never replaced. When a newer Proto-Blocks release 
 - `ENOFUNCTIONS` - the theme has no `functions.php`, so the managed assets cannot be wired; check the theme folder.
 
 
+## Motion errors
+
+- `EPROFILE` - unknown profile name or an invalid custom profile (duration 0-10, stagger 0-2, distance 0-400, ease 1-40 chars from `A-Za-z0-9.(), -`); nothing changed.
+- `EMOTION` - `motion.mjs record` was given an unreadable check file, a check of another anchor or page URL (stale: re-run the check), an unknown `--presets` name, or a check that did not pass without `--accepted`; a failed check still prints `{pass, attempts, capReached, status}` on stdout (`capReached` at `site.qa.motionMaxAttempts` failures, default 3: stop and ask the developer). Fix the motion (see `protoblocks-motion`) or get the developer's acceptance.
+- `ESTATUS` - `motion.mjs record` on a section whose status is not `animating` (only `--accepted` may close it from another status).
+- `ENOSECTION` - no section `<n>` on that page slug.
+
 ## Header/footer part errors
 
 `ECONFIRM` (needs developer OK + id), `ESTALE` (the id changed; re-preview), `EAMBIGUOUS` (several copies; resolve in wp-admin), `ETHEMEMISMATCH` (the theme is not the active one, or the saved part does not resolve to this theme), `ESLUG`/`ETHEME` (invalid argument), `ENOTRASH` (Trash is disabled, so removal would delete permanently: tell the developer to use "Clear customizations" on the part in the Site Editor).

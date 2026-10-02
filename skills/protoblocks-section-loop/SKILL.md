@@ -68,7 +68,7 @@ Procedure, result fields and fix strategies: `references/verify.md`.
 
 ## Animate
 
-When status is `animating`, load the `protoblocks-motion` skill (Stage 5). If the `protoblocks-motion` skill is not installed, set the status to `done` (`state.mjs set "$THEME" "pages.$PI.sections.$SI.status" '"done"'`, indexes looked up as in `references/build.md`) and continue with the next section.
+When the section's status is `animating`, load the `protoblocks-motion` skill and follow it for this section. The section is finished only when `motion.mjs record` sets it to `done`. If the `protoblocks-motion` skill is not installed, set the status to `done` (`state.mjs set "$THEME" "pages.$PI.sections.$SI.status" '"done"'`, indexes looked up as in `references/build.md`) and continue with the next section.
 
 ## Iron rules
 

@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion broken</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  section { min-height: 600px; padding: 40px; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+  .spacer { height: 1400px; }
+  .row { display: flex; gap: 16px; }
+  .row > div { width: 120px; height: 80px; background: #2563eb; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <!-- A solid block: a 40px residue on bare text changes too few pixels (~0.4%) to read as broken. -->
+  <section id="pb-s1"><h1 id="t1" data-pb-motion="fade-up" data-proto-animate="manual" style="margin:0;height:240px;background:#1e3a8a;color:#fff">Fade up title</h1></section>
+  <div class="spacer"></div>
+  <section id="pb-s2">
+    <p><span id="c1" data-pb-motion="counter" data-proto-animate="manual">1,250+</span>
+       <span id="c2" data-pb-motion="counter" data-proto-animate="manual">$4.9M</span>
+       <span id="c3" data-pb-motion="counter" data-proto-animate="manual">98%</span></p>
+    <div id="clip" data-pb-motion="clip-reveal" data-proto-animate="manual" style="height:100px;background:#111"></div>
+  </section>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script src="/runtime/pb-motion.js"></script>
+  <script>
+    // Residue: the reveal ends off its resting position, but only when motion is allowed.
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.addEventListener('proto-blocks:reveal', function (e) { if (e.target.id === 't1') e.target.style.transform = 'translateY(40px)'; });
+    }
+  </script>
+</body></html>

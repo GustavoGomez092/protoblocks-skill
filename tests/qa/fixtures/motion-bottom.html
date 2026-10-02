@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <!-- Short document: the CTA and counter sit in the last ~100px, below the 85% line even at max scroll. -->
+  <div style="height:1000px"></div>
+  <a id="cta" href="#contact" data-pb-motion="fade-up" data-proto-animate="manual" style="display:block">Contact us</a>
+  <span id="cn" data-pb-motion="counter" data-proto-animate="manual">250+</span>
+  <footer style="height:40px">footer</footer>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script src="/runtime/pb-motion.js"></script>
+</body></html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion fixed header</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  /* Site chrome: a fixed header and a sticky sub-nav, both outside the anchor. */
+  #pb-header { position: fixed; top: 0; left: 0; right: 0; height: 80px; background: rgb(220, 38, 38); z-index: 10; }
+  #subnav { position: sticky; top: 80px; height: 40px; background: rgb(22, 163, 74); z-index: 9; }
+  .intro { height: 600px; }
+  /* Taller than the 900px viewport, so the element screenshot is stitched under the fixed header. */
+  #pb-s1 { min-height: 1400px; padding: 40px; box-sizing: border-box; background: rgb(30, 58, 138); color: #fff; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+  .row { display: flex; gap: 16px; }
+  .row > div { width: 120px; height: 80px; background: #f59e0b; }
+  .after { height: 1400px; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <header id="pb-header"></header>
+  <div class="intro"></div>
+  <nav id="subnav"></nav>
+  <section id="pb-s1">
+    <h1 id="t1" data-pb-motion="fade-up" data-proto-animate="manual">Fade up title</h1>
+    <div id="row" class="row" data-pb-motion="stagger-children" data-proto-animate="manual"><div></div><div></div><div></div></div>
+  </section>
+  <div class="after"></div>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script src="/runtime/pb-motion.js"></script>
+</body></html>
