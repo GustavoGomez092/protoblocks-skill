@@ -29,9 +29,17 @@ $host_is = function (string $host, string $domain): bool { $host = strtolower($h
 if ($cmd === 'site') {
     // What %%sitename%% and %%sep%% render to on this site, so the title length can be checked for real.
     if (count($args) !== 1) { $fail('EUSAGE', 'Usage: yoast.php site'); }
-    $seps = WPSEO_Option_Titles::get_instance()->get_separator_options();
+    // Yoast's own map when available; otherwise (or if its API changed) a built-in copy of it.
+    $seps = [];
+    if (class_exists('WPSEO_Option_Titles') && method_exists('WPSEO_Option_Titles', 'get_instance')) {
+        $inst = WPSEO_Option_Titles::get_instance();
+        if (is_object($inst) && method_exists($inst, 'get_separator_options')) { $seps = $inst->get_separator_options(); }
+    }
+    if (!is_array($seps) || !$seps) {
+        $seps = ['sc-dash' => '-', 'sc-ndash' => '–', 'sc-mdash' => '—', 'sc-colon' => ':', 'sc-middot' => '·', 'sc-bull' => '•', 'sc-star' => '*', 'sc-smstar' => '⋆', 'sc-pipe' => '|', 'sc-tilde' => '~', 'sc-laquo' => '«', 'sc-raquo' => '»', 'sc-lt' => '>', 'sc-gt' => '<'];  // Yoast really maps sc-lt to '>' and sc-gt to '<'
+    }
     $key = (string) WPSEO_Options::get('separator', 'sc-dash');
-    $out(['siteName' => html_entity_decode((string) get_bloginfo('name'), ENT_QUOTES, 'UTF-8'), 'sep' => html_entity_decode((string) ($seps[$key] ?? '-'), ENT_QUOTES, 'UTF-8')]);
+    $out(['siteName' => html_entity_decode((string) get_bloginfo('name'), ENT_QUOTES, 'UTF-8'), 'sep' => html_entity_decode(is_string($seps[$key] ?? null) ? $seps[$key] : '-', ENT_QUOTES, 'UTF-8')]);
     return;
 }
 if ($cmd === 'get') {

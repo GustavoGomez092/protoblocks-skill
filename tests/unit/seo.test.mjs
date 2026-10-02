@@ -79,7 +79,7 @@ test('buildYoastSpec maps fields and falls back for social titles', () => {
 });
 
 // ---- applySeo with a scripted WP-CLI ----
-function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Acme Plumbing', sep: '-' }, applyReply = null } = {}) {
+function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Acme Plumbing', sep: '-' }, applyReply = null, siteFails = null } = {}) {
   const calls = [];
   const specs = [];
   const exec = (cmd, args) => {
@@ -87,6 +87,8 @@ function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Ac
     if (args[0] === 'eval') return { code: 0, stdout: jsonldSupported ? '1' : '0', stderr: '' };
     if (args[0] === 'yoast') return { code: indexCode, stdout: '', stderr: indexCode ? 'boom' : '' };
     if (args[0] === 'eval-file' && args[1].endsWith('media.php')) return { code: 0, stdout: '{"id":77,"url":"u","alt":"a","mime":"image/png","reused":true}\n', stderr: '' };
+    if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site' && siteFails === 'untyped') return { code: 1, stdout: '', stderr: 'Fatal: no WPSEO_Option_Titles' };
+    if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site' && siteFails === 'typed') return { code: 0, stdout: '{"error":{"code":"EYOAST","message":"Yoast SEO is not active."}}\n', stderr: '' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site') return { code: 0, stdout: `${JSON.stringify(site)}\n`, stderr: '' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php')) {
       if (applyReply) return { code: 0, stdout: `${JSON.stringify(applyReply)}\n`, stderr: '' };
@@ -325,4 +327,32 @@ test('applySeo: an {error} reply from yoast.php becomes a typed throw and state 
   const b = harness({ applyReply: { error: { message: 'odd' } } });
   assert.throws(() => applySeo(b.wp, theme, 'home', seo, { index: false }), code('EYOAST'));
   assert.ok(!a.calls.some((c) => c[0] === 'yoast'), 'no index after a failed write');
+});
+
+// ---- fix round 2 ----
+for (const kind of ['untyped', 'typed']) {
+  test(`applySeo: a ${kind} failure of the site lookup degrades to the context-free title check with a warning`, () => {
+    const h = harness({ siteFails: kind });
+    const r = applySeo(h.wp, project(), 'home', seo, { index: false });
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /^site context unavailable: .+/);
+    assert.equal(h.specs.length, 1, 'the SEO is still applied');
+    const tooLong = { ...seo, title: { value: 'An extremely long title that goes well beyond sixty characters %%sep%% Site', inferred: false } };
+    assert.throws(() => applySeo(harness({ siteFails: kind }).wp, project(), 'home', tooLong, { index: false }), code('ESEO'), 'the context-free check still runs');
+  });
+}
+
+test('applySeo: no warnings key when the site context was available', () => {
+  assert.equal('warnings' in applySeo(harness().wp, project(), 'home', seo, { index: false }), false);
+});
+
+test('applySeo: stale schema is cleared only when the theme supports JSON-LD', () => {
+  const { schema: _s, ...noSchema } = seo;
+  const prior = () => project([{ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [], seo: { schema: seo.schema } }]);
+  const off = harness({ jsonldSupported: false });
+  assert.equal(applySeo(off.wp, prior(), 'home', noSchema, { index: false }).jsonld, 'unsupported');
+  assert.equal('jsonld' in off.specs[0], false, 'unsupported theme: meta left alone');
+  const on = harness({ jsonldSupported: true });
+  assert.equal(applySeo(on.wp, prior(), 'home', noSchema, { index: false }).jsonld, 'cleared');
+  assert.deepEqual(on.specs[0].jsonld, []);
 });

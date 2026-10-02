@@ -264,3 +264,13 @@ itest('a Person site keeps its Organization, an unconfigured Company keeps exist
     }
   });
 });
+
+itest('the built-in separator fallback map in yoast.php matches Yoast\'s own separators', () => {
+  const wp = testWp();
+  const src = fs.readFileSync(YOAST_PHP, 'utf8');
+  const literal = src.match(/\$seps = \[('sc-dash'[^;]*)\];/);
+  assert.ok(literal, 'built-in map present');
+  const builtin = Object.fromEntries([...literal[1].matchAll(/'([^']+)' => '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const yoastMap = JSON.parse(wp.check(['eval', 'echo json_encode(array_map(fn($v) => html_entity_decode($v, ENT_QUOTES, "UTF-8"), WPSEO_Option_Titles::get_instance()->get_separator_options()), JSON_UNESCAPED_UNICODE);']).trim().split('\n').at(-1));
+  assert.deepEqual(builtin, yoastMap);
+});

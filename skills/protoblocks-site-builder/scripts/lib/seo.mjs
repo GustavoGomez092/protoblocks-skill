@@ -105,8 +105,16 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   const org = val(seo.organization);
   if (org?.logo?.file !== undefined) requireFile(org.logo.file, 'organization.logo.file');
   // The rendered <title> must be <= 60, so check it with this site's real name and separator before any import.
-  const site = yoastError(wp, ['site']);
-  const siteErrors = validateSeo(seo, { siteName: String(site.siteName ?? ''), sep: String(site.sep ?? '-') });
+  const warnings = [];
+  let ctx;
+  try {
+    const site = yoastError(wp, ['site']);
+    ctx = { siteName: String(site.siteName ?? ''), sep: String(site.sep ?? '-') };
+  } catch (e) {
+    // The lookup is an extra check; losing it must not block the SEO. The context-free title check already passed.
+    warnings.push(`site context unavailable: ${String(e.message).split('\n')[0].slice(0, 300)}`);
+  }
+  const siteErrors = ctx ? validateSeo(seo, ctx) : [];
   if (siteErrors.length) throw fail('ESEO', `Invalid SEO:\n- ${siteErrors.join('\n- ')}`);
   const media = [];
   let ogImageId = val(seo.ogImage)?.id ?? null;
@@ -126,7 +134,10 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   let jsonld = 'none';
   if (!spec.jsonld) {
     // A schema the skill applied earlier would otherwise linger on the page after it was dropped from the SEO.
-    if (page.seo?.schema) { spec.jsonld = []; jsonld = 'cleared'; } else delete spec.jsonld;
+    // Only when the theme supports JSON-LD; otherwise the meta is not ours to touch.
+    if (page.seo?.schema) {
+      if (jsonldSupported(wp)) { spec.jsonld = []; jsonld = 'cleared'; } else { delete spec.jsonld; jsonld = 'unsupported'; }
+    } else delete spec.jsonld;
   } else if (spec.jsonld.length > 0) {
     jsonld = jsonldSupported(wp) ? 'written' : 'unsupported';
     if (jsonld === 'unsupported') delete spec.jsonld;
@@ -142,6 +153,7 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   } else result.index = 'skipped';
   result.jsonld = jsonld;
   result.media = media;
+  if (warnings.length) result.warnings = warnings;
   updateState(themeDir, (s) => {
     const p = s.pages.find((x) => x.slug === slug);
     if (!p) return;
