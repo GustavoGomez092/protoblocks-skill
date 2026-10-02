@@ -27,8 +27,9 @@ The script exports `PB_SITE_LOCK=1`. Without it, `itest` (`tests/integration/hel
 The lock is the directory `/private/tmp/claude-501/pb-site-lock` (`PB_SITE_LOCK_DIR` overrides). Other worktrees run
 the shared copy `/private/tmp/claude-501/pb-site-test.sh`: keep it identical to `tests/pb-site-test.sh` (copy it after
 every change; `tests/unit/site-run.test.mjs` checks). A watchdog stops a run after `PB_SITE_TIMEOUT` seconds (default
-1800): it sends one SIGTERM to the run's process group, waits up to `PB_SITE_GRACE` seconds (default 120) for the tests
-to clean up, then sends SIGKILL; the lock is released only after that. If the script itself was killed with `SIGKILL`
+1800): it sends one SIGTERM to the run's process group (Ctrl-C on the script does the same), waits up to
+`PB_SITE_GRACE` seconds (default 120) for every process of the run to exit, then sends SIGKILL. Still holding the lock,
+it then runs `tests/recover.mjs` on the manifests the stopped run left, and only then releases the lock. If the script itself was killed with `SIGKILL`
 (its trap cannot run), check that no test is running, then remove the lock directory by hand.
 
 ## Run manifests and recovery
@@ -40,9 +41,11 @@ setting), the Proto-Blocks Tailwind cache (a byte copy in `tests/.tmp/site-run-<
 snapshot, and every page, menu, attachment, template part, term and throwaway theme folder it creates (by id, or by
 its unique name before the id exists). Cleanup removes entries as it goes; an empty manifest is deleted.
 
-On SIGTERM or SIGINT (the watchdog, Ctrl-C) a test runs the same restore synchronously from its manifest and exits.
-A manifest that is still there afterwards (SIGKILL, a cleanup that failed) makes every site test refuse to start, with
-the recover command. `tests/pb-site-test.sh <worktree> test:recover` (`tests/recover.mjs`) restores exactly what each
+On SIGTERM or SIGINT a test process runs the same restore synchronously from its manifest and exits. That handler is
+not enough on its own: when the whole process group is signalled, the `node --test` runner takes its test-file
+processes down before their handlers run, so the lock script restores from the manifests itself after a stopped run
+(above). A manifest that is still there afterwards (a recovery problem, the lock script itself killed) makes every
+site test refuse to start, with the recover command. `tests/pb-site-test.sh <worktree> test:recover` (`tests/recover.mjs`) restores exactly what each
 manifest lists, with the same guards as the tests: it re-activates the original theme only away from a test theme,
 deletes posts only when id, type and name match, deletes only throwaway theme folders (directly in the themes dir,
 unique name, fork marker or build state, not active) and their `theme_mods_` rows, then puts the options, the Tailwind

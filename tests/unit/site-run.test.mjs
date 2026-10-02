@@ -206,6 +206,10 @@ test('the lock script is committed, gives cleanup 120s before SIGKILL, and match
   const src = fs.readFileSync(path.join(REPO, 'tests', 'pb-site-test.sh'), 'utf8');
   assert.match(src, /GRACE="\$\{PB_SITE_GRACE:-120\}"/);
   assert.match(src, /export PB_SITE_LOCK=1/);
+  // The node test runner takes its test-file processes down on SIGTERM, so the lock script restores from the manifests
+  // itself once a stopped run has exited, still holding the lock.
+  assert.match(src, /cleanup\(\) \{\n[^}]*stop_run\n {2}recover_run\n {2}rmdir "\$LOCK"/);
+  assert.match(src, /PB_SITE_LOCK=1 node tests\/recover\.mjs/);
   assert.ok(fs.statSync(path.join(REPO, 'tests', 'pb-site-test.sh')).mode & 0o100, 'executable');
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts['test:recover'], 'node tests/recover.mjs');
