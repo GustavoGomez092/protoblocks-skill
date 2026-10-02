@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { inferScale, imageWidth, addFrame, ensurePage } from '../../skills/protoblocks-site-builder/scripts/lib/intake.mjs';
+import { inferScale, imageWidth, addFrame, ensurePage, cropSections, framesFromUrl } from '../../skills/protoblocks-site-builder/scripts/lib/intake.mjs';
 import { initState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 function png(width, height, file) {
@@ -58,4 +58,63 @@ test('ensurePage creates a planning page once', () => {
   ensurePage(s, 'about');
   assert.equal(s.pages.length, 1);
   assert.equal(s.pages[0].status, 'planning');
+});
+
+test('addFrame rejects non-integer/non-positive --width with ESCALE and writes nothing', () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-in-'));
+  initState(theme, { url: 'http://a.local', path: '/x' });
+  const src = png(780, 10, path.join(theme, 'm.png'));
+  for (const w of ['abc', 0, -5, 390.5, '390.5', Infinity]) {
+    assert.throws(() => addFrame(theme, 'home', 'mobile', src, { width: w }), (e) => e.code === 'ESCALE', String(w));
+  }
+  assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts')), false, 'nothing copied');
+  assert.equal(loadState(theme).pages.length, 0);
+  assert.equal(addFrame(theme, 'home', 'mobile', src, { width: '390' }).scale, 2);
+});
+
+test('imageWidth throws EIMAGE on truncated or corrupt images', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-in-'));
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const short = path.join(dir, 'short.png');
+  fs.writeFileSync(short, Buffer.concat([sig, Buffer.alloc(12)]));
+  assert.equal(Buffer.concat([sig, Buffer.alloc(12)]).length, 20);
+  assert.throws(() => imageWidth(short), (e) => e.code === 'EIMAGE');
+  const w20 = path.join(dir, 'w20.png');
+  fs.writeFileSync(w20, Buffer.concat([sig, Buffer.from([0, 0, 0, 13]), Buffer.from('IHDR'), Buffer.from([0, 0, 5, 160])]));
+  assert.throws(() => imageWidth(w20), (e) => e.code === 'EIMAGE', '20-byte header-only PNG');
+  const notIhdr = path.join(dir, 'noihdr.png');
+  fs.writeFileSync(notIhdr, Buffer.concat([sig, Buffer.from([0, 0, 0, 13]), Buffer.from('IDAT'), Buffer.alloc(20)]));
+  assert.throws(() => imageWidth(notIhdr), (e) => e.code === 'EIMAGE');
+  const midSeg = path.join(dir, 'mid.jpg');
+  fs.writeFileSync(midSeg, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x40, 0x00, 0x01]));
+  assert.throws(() => imageWidth(midSeg), (e) => e.code === 'EIMAGE');
+  const truncSof = path.join(dir, 'sof.jpg');
+  fs.writeFileSync(truncSof, Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00]));
+  assert.throws(() => imageWidth(truncSof), (e) => e.code === 'EIMAGE');
+});
+
+test('cropSections validates ranges with ERANGES before cropping anything', async () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-in-'));
+  initState(theme, { url: 'http://a.local', path: '/x' });
+  addFrame(theme, 'home', 'desktop', png(1440, 10, path.join(theme, 'd.png')));
+  const bad = [
+    { desktop: [{ n: 0, y0: 0, y1: 5 }] },
+    { desktop: [{ n: 1.5, y0: 0, y1: 5 }] },
+    { desktop: [{ n: 1, y0: -1, y1: 5 }] },
+    { desktop: [{ n: 1, y0: 5, y1: 5 }] },
+    { desktop: [{ n: 1, y0: 0, y1: NaN }] },
+    { desktop: [{ n: 1, y0: 0.5, y1: 5 }] },
+    { watch: [{ n: 1, y0: 0, y1: 5 }] },
+    { desktop: [{ n: 1, y0: 0, y1: 5 }, { n: 2, y0: 9, y1: 3 }] },
+  ];
+  for (const r of bad) await assert.rejects(() => cropSections(theme, 'home', r), (e) => e.code === 'ERANGES', JSON.stringify(r));
+  assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts', 'home', 'crops')), false);
+  assert.equal(loadState(theme).pages[0].sections.length, 0);
+});
+
+test('framesFromUrl rejects empty/invalid widths with EWIDTHS', async () => {
+  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-in-'));
+  initState(theme, { url: 'http://a.local', path: '/x' });
+  await assert.rejects(() => framesFromUrl(theme, 'home', 'http://a.local', [NaN, 0, -3]), (e) => e.code === 'EWIDTHS');
+  await assert.rejects(() => framesFromUrl(theme, 'home', 'http://a.local', []), (e) => e.code === 'EWIDTHS');
 });

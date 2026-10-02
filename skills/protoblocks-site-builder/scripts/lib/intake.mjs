@@ -18,15 +18,24 @@ export function inferScale(pixelWidth, breakpoint) {
 
 export function imageWidth(file) {
   const buf = fs.readFileSync(file);
-  if (buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return buf.readUInt32BE(16);
+  const bad = (msg) => { const e = new Error(`${msg}: ${file}`); e.code = 'EIMAGE'; return e; };
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    if (buf.length < 24) throw bad('Truncated or corrupt image');
+    if (buf.toString('latin1', 12, 16) !== 'IHDR') throw bad('Truncated or corrupt image (no IHDR chunk)');
+    return buf.readUInt32BE(16);
+  }
   if (buf[0] === 0xff && buf[1] === 0xd8) {
     let i = 2;
-    while (i < buf.length) {
+    while (i + 3 < buf.length) {
       if (buf[i] !== 0xff) { i++; continue; }
       const marker = buf[i + 1];
-      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return buf.readUInt16BE(i + 7);
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        if (i + 9 > buf.length) throw bad('Truncated or corrupt image');
+        return buf.readUInt16BE(i + 7);
+      }
       i += 2 + buf.readUInt16BE(i + 2);
     }
+    throw bad('Truncated or corrupt image');
   }
   const e = new Error(`Unsupported image format (convert to PNG): ${file}`);
   e.code = 'EIMAGE';
@@ -48,9 +57,18 @@ export function ensurePage(state, slug, title) {
   return page;
 }
 
+/**
+ * Records a design frame. The copied file keeps the source extension: downstream code must read `frame.image` and never assume `.png`.
+ */
 export function addFrame(themeDir, slug, breakpoint, image, { width, title } = {}) {
   const pixelWidth = imageWidth(image);
-  let fit = width ? { cssWidth: Number(width), scale: pixelWidth / Number(width) } : inferScale(pixelWidth, breakpoint);
+  let fit;
+  if (width !== undefined && width !== null && width !== '') {
+    const w = Number(width);
+    fit = Number.isFinite(w) && Number.isInteger(w) && w > 0 ? { cssWidth: w, scale: pixelWidth / w } : null;
+  } else {
+    fit = inferScale(pixelWidth, breakpoint);
+  }
   if (!fit) {
     const e = new Error(`Can't infer the design width of a ${pixelWidth}px ${breakpoint} export. Ask the developer for the frame's CSS width and pass --width.`);
     e.code = 'ESCALE';
@@ -67,11 +85,25 @@ export function addFrame(themeDir, slug, breakpoint, image, { width, title } = {
   return frame;
 }
 
+function validateRanges(ranges) {
+  const bad = (msg) => { const e = new Error(`Invalid crop ranges: ${msg}`); e.code = 'ERANGES'; return e; };
+  if (!ranges || typeof ranges !== 'object') throw bad('expected { breakpoint: [{n, y0, y1}] }');
+  for (const [bp, list] of Object.entries(ranges)) {
+    if (!BREAKPOINT_RANGES[bp]) throw bad(`unknown breakpoint "${bp}"`);
+    if (!Array.isArray(list)) throw bad(`${bp} must be an array`);
+    for (const r of list) {
+      if (!r || !Number.isInteger(r.n) || r.n <= 0) throw bad(`${bp}: n must be a positive integer (${JSON.stringify(r)})`);
+      if (!Number.isInteger(r.y0) || !Number.isInteger(r.y1) || r.y0 < 0 || r.y0 >= r.y1) throw bad(`${bp}: need integers 0 <= y0 < y1 (${JSON.stringify(r)})`);
+    }
+  }
+}
+
 export async function cropSections(themeDir, slug, ranges) {
-  const { cropRanges } = await import('../qa/segment.mjs');
+  validateRanges(ranges);
   const state = loadState(themeDir);
   const page = state.pages.find((p) => p.slug === slug);
   if (!page) throw new Error(`No page "${slug}" in state; add a frame first.`);
+  const { cropRanges } = await import('../qa/segment.mjs');
   const out = [];
   for (const [bp, list] of Object.entries(ranges)) {
     const frame = page.design.frames.find((f) => f.breakpoint === bp);
@@ -82,6 +114,7 @@ export async function cropSections(themeDir, slug, ranges) {
   }
   updateState(themeDir, (s) => {
     const page = s.pages.find((p) => p.slug === slug);
+    if (!page) throw new Error(`No page "${slug}" in state; add a frame first.`);
     for (const c of out) {
       let sec = page.sections.find((x) => x.n === c.n);
       if (!sec) { sec = { n: c.n, anchor: `pb-s${c.n}`, status: 'planned', crops: {} }; page.sections.push(sec); }
@@ -94,14 +127,19 @@ export async function cropSections(themeDir, slug, ranges) {
 }
 
 export async function framesFromUrl(themeDir, slug, url, widths) {
+  const valid = (Array.isArray(widths) ? widths : []).filter((w) => Number.isFinite(w) && w > 0);
+  if (!valid.length) { const e = new Error('No valid widths given (need positive numbers, e.g. 1440,390).'); e.code = 'EWIDTHS'; throw e; }
   const { shoot } = await import('../qa/shoot.mjs');
   const frames = [];
-  for (const w of widths) {
+  for (const w of valid) {
     const bp = w >= 1200 ? 'desktop' : w >= 700 ? 'tablet' : 'mobile';
     const tmp = path.join(artifactsDir(themeDir), slug, 'design', `${bp}.source.png`);
-    await shoot({ url, width: w, fullPage: true, out: tmp });
-    frames.push(addFrame(themeDir, slug, bp, tmp, { width: w }));
-    fs.rmSync(tmp, { force: true });
+    try {
+      await shoot({ url, width: w, fullPage: true, out: tmp });
+      frames.push(addFrame(themeDir, slug, bp, tmp, { width: w }));
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
   }
   return frames;
 }
