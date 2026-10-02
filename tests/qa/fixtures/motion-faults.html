@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion faults</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  section { min-height: 600px; padding: 40px; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+  .spacer { height: 1400px; }
+  .row { display: flex; gap: 16px; }
+  .row > div { width: 120px; height: 80px; background: #2563eb; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <!-- One fault per run, picked by ?fault=. Each fault breaks exactly one motion-check rule and leaves the
+       rest clean, so a test can prove that rule alone fails the check.
+       cls    a block above the section grows then collapses once the title reveals (motion only)
+       error  an uncaught exception
+       stuck  an empty (invisible) reveal element whose tween is delayed 30s, so it never reports done
+       hang   a lazy image far down the page whose request never answers -->
+  <div id="shim"></div>
+  <section id="pb-s1">
+    <span id="stuck" data-pb-motion="fade-in" data-proto-animate="manual"></span>
+    <h1 id="t1" data-pb-motion="fade-up" data-proto-animate="manual">Fade up title</h1>
+    <h2 id="t2" data-pb-motion="split-lines" data-proto-animate="manual">Split lines heading that wraps</h2>
+    <div id="row" class="row" data-pb-motion="stagger-children" data-proto-animate="manual"><div></div><div></div><div></div></div>
+  </section>
+  <div class="spacer"></div>
+  <script>
+    (function () {
+      var fault = new URLSearchParams(location.search).get('fault');
+      var motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (fault === 'stuck') document.getElementById('stuck').setAttribute('data-pb-delay', '30');
+      if (fault === 'error') setTimeout(function () { throw new Error('motion-fault-boom'); }, 0);
+      if (fault === 'hang') {
+        var pad = document.createElement('div'); pad.style.height = '8000px'; document.body.appendChild(pad);
+        var img = document.createElement('img'); img.loading = 'lazy'; img.width = 10; img.height = 10; img.alt = 'stalled'; img.src = '/__hang';
+        document.body.appendChild(img);
+      }
+      if (fault === 'cls' && motion) {
+        document.addEventListener('proto-blocks:reveal', function (e) {
+          if (e.target.id !== 't1') return;
+          var shim = document.getElementById('shim');
+          shim.style.height = '300px';
+          setTimeout(function () { shim.style.height = '0'; }, 150);
+        });
+      }
+    })();
+  </script>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script src="/runtime/pb-motion.js"></script>
+</body></html>

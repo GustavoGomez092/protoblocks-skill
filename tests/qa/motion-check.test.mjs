@@ -1,0 +1,132 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { qtest, tmpDir, serveFixtures, QA_DIR } from './helpers.mjs';
+
+qtest('motionCheck passes clean motion, fails residue, and checks Taxi re-init', async () => {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const srv = await serveFixtures();
+  try {
+    const good = await motionCheck({ url: `${srv.url}/motion.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.equal(good.pass, true, JSON.stringify(good, null, 2));
+    assert.equal(good.taxi.checked, false);
+
+    const bad = await motionCheck({ url: `${srv.url}/motion-broken.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.equal(bad.pass, false);
+    assert.ok(bad.settledMismatch > 0.02, `mismatch ${bad.settledMismatch}`);
+
+    const taxi = await motionCheck({ url: `${srv.url}/motion-taxi.html`, anchor: 'pb-s1', width: 1280, outDir: tmpDir() });
+    assert.equal(taxi.taxi.checked, true);
+    assert.equal(taxi.taxi.before, taxi.taxi.after, JSON.stringify(taxi.taxi));
+    assert.equal(taxi.pass, true, JSON.stringify(taxi, null, 2));
+  } finally { await srv.close(); }
+});
+
+// Each fault below breaks exactly one rule. The "everything else is clean" asserts make sure the failing
+// rule is the only reason pass is false, so dropping that rule from motionCheck turns the test red.
+async function withChecker(fn) {
+  const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
+  const { launchBrowser } = await import(path.join(QA_DIR, 'browser.mjs'));
+  const srv = await serveFixtures();
+  const browser = await launchBrowser();
+  try {
+    await fn((page, extra = {}) => motionCheck({ url: `${srv.url}/${page}`, anchor: 'pb-s1', width: 1280, outDir: tmpDir(), browser, ...extra }));
+  } finally { await browser.close(); await srv.close(); }
+}
+
+const clean = (r, except) => {
+  const dump = JSON.stringify(r, null, 2);
+  if (except !== 'mismatch') assert.ok(r.settledMismatch <= 0.02, `settledMismatch clean: ${dump}`);
+  if (except !== 'cls') assert.ok(r.cls <= 0.01, `cls clean: ${dump}`);
+  if (except !== 'pageErrors') assert.deepEqual(r.pageErrors, [], `pageErrors clean: ${dump}`);
+  if (except !== 'unsettled') assert.deepEqual(r.unsettled, [], `unsettled clean: ${dump}`);
+  if (except !== 'imageErrors') assert.deepEqual(r.imageErrors, [], `imageErrors clean: ${dump}`);
+  if (except !== 'taxi' && r.taxi.checked) {
+    assert.equal(r.taxi.before, r.taxi.after, `taxi counts clean: ${dump}`);
+    assert.deepEqual(r.taxi.unsettled, [], `taxi re-settle clean: ${dump}`);
+  }
+};
+
+qtest('motionCheck: the fault fixture with no fault passes (control)', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html');
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+qtest('motionCheck fails on layout shift during motion (CLS)', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=cls');
+  assert.ok(r.cls > 0.01, `cls ${r.cls}`);
+  clean(r, 'cls');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck fails on uncaught page errors', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=error');
+  assert.ok(r.pageErrors.some((e) => e.includes('motion-fault-boom')), JSON.stringify(r.pageErrors));
+  clean(r, 'pageErrors');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck fails and names reveal elements that never settle', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=stuck');
+  assert.deepEqual(r.unsettled, ['stuck']);
+  clean(r, 'unsettled');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck fails and reports images that never load', { timeout: 120000 }, () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=hang');
+  assert.ok(r.imageErrors.length > 0 && r.imageErrors.every((src) => src.endsWith('/__hang')), JSON.stringify(r.imageErrors));
+  clean(r, 'imageErrors');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck fails when Taxi navigation leaks ScrollTriggers', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?leak=1');
+  assert.equal(r.taxi.checked, true);
+  assert.ok(r.taxi.after > r.taxi.before, JSON.stringify(r.taxi));
+  assert.deepEqual(r.taxi.unsettled, [], JSON.stringify(r.taxi));
+  clean(r, 'taxi');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck fails when motion is not re-initialised after Taxi navigation', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?noinit=1');
+  assert.equal(r.taxi.checked, true);
+  assert.deepEqual(r.taxi.unsettled.sort(), ['row', 't1', 't2'], JSON.stringify(r.taxi));
+  clean(r, 'taxi');
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck writes reduced.png, settled.png and motion-check.json', () => withChecker(async (check) => {
+  const outDir = tmpDir();
+  const r = await check('motion.html', { outDir });
+  for (const f of ['reduced.png', 'settled.png', 'motion-check.json']) assert.ok(fs.existsSync(path.join(outDir, f)), f);
+  assert.equal(r.reduced, path.join(outDir, 'reduced.png'));
+  assert.equal(r.settled, path.join(outDir, 'settled.png'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, 'motion-check.json'), 'utf8')), r);
+}));
+
+const runCli = (args) => new Promise((resolve) => {
+  const c = spawn(process.execPath, [path.join(QA_DIR, 'motion-check.mjs'), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  let err = '';
+  c.stdout.on('data', (d) => { out += d; });
+  c.stderr.on('data', (d) => { err += d; });
+  c.on('close', (code) => resolve({ code, out, err }));
+});
+
+qtest('motion-check CLI: usage exit 64, exit 1 when the check fails', async () => {
+  const usage = await runCli([]);
+  assert.equal(usage.code, 64);
+  assert.match(usage.err, /Usage: node motion-check\.mjs/);
+  const srv = await serveFixtures();
+  try {
+    const outDir = tmpDir();
+    const r = await runCli(['--url', `${srv.url}/motion-broken.html`, '--anchor', 'pb-s1', '--out', outDir, '--width', '1280']);
+    assert.equal(r.code, 1, r.err);
+    assert.equal(JSON.parse(r.out).pass, false);
+    assert.ok(fs.existsSync(path.join(outDir, 'motion-check.json')));
+  } finally { await srv.close(); }
+});

@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>motion taxi</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  section { min-height: 600px; padding: 40px; }
+  [data-pb-motion][data-proto-animate="manual"] { opacity: 0; }
+  .spacer { height: 1400px; }
+  .row { display: flex; gap: 16px; }
+  .row > div { width: 120px; height: 80px; background: #2563eb; }
+</style>
+<script>window.pbMotionProfile = { duration: 0.3, ease: 'power2.out', stagger: 0.05, distance: 24 };</script>
+</head><body>
+  <div data-taxi><div data-taxi-view>
+  <section id="pb-s1">
+    <h1 id="t1" data-pb-motion="fade-up" data-proto-animate="manual">Fade up title</h1>
+    <h2 id="t2" data-pb-motion="split-lines" data-proto-animate="manual">Split lines heading that wraps</h2>
+    <div id="row" class="row" data-pb-motion="stagger-children" data-proto-animate="manual"><div></div><div></div><div></div></div>
+  </section>
+  <div class="spacer"></div>
+  <section id="pb-s2">
+    <p><span id="c1" data-pb-motion="counter" data-proto-animate="manual">1,250+</span>
+       <span id="c2" data-pb-motion="counter" data-proto-animate="manual">$4.9M</span>
+       <span id="c3" data-pb-motion="counter" data-proto-animate="manual">98%</span></p>
+    <div id="clip" data-pb-motion="clip-reveal" data-proto-animate="manual" style="height:100px;background:#111"></div>
+  </section>
+  </div></div>
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/vendor/ScrollTrigger.min.js"></script>
+  <script src="/vendor/SplitText.min.js"></script>
+  <script src="/runtime/pb-motion.js"></script>
+  <script>
+    // Fake Taxi, same event order as the theme: leave, kill triggers in the leaving container, swap, refresh, ready.
+    // ?leak=1  a theme script adds a global ScrollTrigger on every page-ready and never kills it.
+    // ?noinit=1  page-ready names the wrong container, so the new view is never initialised.
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var view = document.querySelector('[data-taxi-view]');
+      var original = view.innerHTML;
+      function fire(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail: detail })); }
+      if (q.has('leak')) document.addEventListener('proto:page-ready', function () { window.ScrollTrigger.create({ trigger: document.body, start: 'top top' }); });
+      window.protoTaxi = { core: { navigateTo: function (u) {
+        fire('proto:page-leave', { container: view });
+        window.ScrollTrigger.getAll().forEach(function (t) { if (view.contains(t.trigger)) t.kill(); });
+        view.innerHTML = new URL(u, location.href).pathname === '/' ? '<p>home</p>' : original;
+        window.ScrollTrigger.refresh();
+        setTimeout(function () { fire('proto:page-ready', { container: q.has('noinit') ? document.createElement('div') : view, url: u }); }, 50);
+        return Promise.resolve();
+      } } };
+    })();
+  </script>
+</body></html>

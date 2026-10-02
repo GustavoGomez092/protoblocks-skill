@@ -2,18 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { qtest, serveFixtures, QA_DIR, tmpDir } from './helpers.mjs';
 
 const PHP_FILE = fileURLToPath(new URL('../../skills/protoblocks-site-builder/scripts/theme-assets/inc/pb-motion.php', import.meta.url));
 const havePhp = spawnSync('php', ['-v']).status === 0;
 
-// scripts/qa/browser.mjs does not exist yet; launch Chromium straight from the QA package.
-async function launchBrowser() {
-  const { chromium } = createRequire(path.join(QA_DIR, 'package.json'))('playwright');
-  return chromium.launch();
-}
+// Imported lazily so the file still loads (and qtest skips) when the QA deps are not installed.
+const launchBrowser = async () => (await import(path.join(QA_DIR, 'browser.mjs'))).launchBrowser();
 
 async function open(browser, url, { reducedMotion = false, block = [] } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
