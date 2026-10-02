@@ -30,22 +30,50 @@
   <script src="/runtime/pb-motion.js"></script>
   <script>
     // Fake Taxi, same event order as the theme: leave, kill triggers in the leaving container, swap, refresh, ready.
-    // ?leak=1  a theme script adds a global ScrollTrigger on every page-ready and never kills it.
+    // The "away" page is any URL carrying pb-motion-away=1; any other URL must be this page, else navigateTo rejects
+    // (a real Taxi would leave the site or 404).
+    // ?leak=1    a theme script adds a global ScrollTrigger on every page-ready and never kills it.
     // ?noinit=1  page-ready names the wrong container, so the new view is never initialised.
+    // ?dup=1     a second init path binds its own ScrollTrigger to every motion element on each ready; leave kills
+    //            both, so counts stay stable but every element has two triggers.
+    // ?noready=1 page-ready is never dispatched.
+    // ?lock=1    like allowInterruption:false, navigateTo rejects for 900ms after each ready (no flag exposed).
+    // ?lock=flag same lock, and core.isTransitioning is true while it lasts.
     (function () {
       var q = new URLSearchParams(location.search);
       var view = document.querySelector('[data-taxi-view]');
       var original = view.innerHTML;
+      var lockedUntil = 0;
+      var extras = [];
       function fire(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail: detail })); }
       if (q.has('leak')) document.addEventListener('proto:page-ready', function () { window.ScrollTrigger.create({ trigger: document.body, start: 'top top' }); });
-      window.protoTaxi = { core: { navigateTo: function (u) {
+      if (q.has('dup')) {
+        document.addEventListener('proto:page-ready', function () {
+          view.querySelectorAll('[data-pb-motion]').forEach(function (el) { extras.push(window.ScrollTrigger.create({ trigger: el, start: 'top 85%' })); });
+        });
+        document.addEventListener('proto:page-leave', function () { extras.forEach(function (t) { t.kill(); }); extras = []; });
+      }
+      var core = { navigateTo: function (u) {
+        if (Date.now() < lockedUntil) return Promise.reject(new Error('A transition is currently in progress'));
+        var away = /[?&]pb-motion-away=1(&|#|$)/.test(u);
+        if (!away && new URL(u, location.href).pathname !== location.pathname) return Promise.reject(new Error('fake taxi: unknown page ' + u));
         fire('proto:page-leave', { container: view });
         window.ScrollTrigger.getAll().forEach(function (t) { if (view.contains(t.trigger)) t.kill(); });
-        view.innerHTML = new URL(u, location.href).pathname === '/' ? '<p>home</p>' : original;
+        view.innerHTML = away ? '<p>away</p>' : original;
         window.ScrollTrigger.refresh();
-        setTimeout(function () { fire('proto:page-ready', { container: q.has('noinit') ? document.createElement('div') : view, url: u }); }, 50);
-        return Promise.resolve();
-      } } };
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            if (!q.has('noready')) fire('proto:page-ready', { container: q.has('noinit') ? document.createElement('div') : view, url: u });
+            if (q.has('lock')) {
+              lockedUntil = Date.now() + 900;
+              if (q.get('lock') === 'flag') { core.isTransitioning = true; setTimeout(function () { core.isTransitioning = false; }, 900); }
+            }
+            resolve();
+          }, 50);
+        });
+      } };
+      if (q.get('lock') === 'flag') core.isTransitioning = false;
+      window.protoTaxi = { core: core };
     })();
   </script>
 </body></html>

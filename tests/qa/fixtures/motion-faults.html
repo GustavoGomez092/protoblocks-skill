@@ -13,6 +13,7 @@
   <!-- One fault per run, picked by ?fault=. Each fault breaks exactly one motion-check rule and leaves the
        rest clean, so a test can prove that rule alone fails the check.
        cls    a block above the section grows then collapses once the title reveals (motion only)
+       cls-outside  same, but the block sits below the section, so only content outside the anchor shifts
        error  an uncaught exception
        stuck  an empty (invisible) reveal element whose tween is delayed 30s, so it never reports done
        hang   a lazy image far down the page whose request never answers -->
@@ -23,6 +24,8 @@
     <h2 id="t2" data-pb-motion="split-lines" data-proto-animate="manual">Split lines heading that wraps</h2>
     <div id="row" class="row" data-pb-motion="stagger-children" data-proto-animate="manual"><div></div><div></div><div></div></div>
   </section>
+  <div id="shim2"></div>
+  <div id="below" style="height:200px;background:#16a34a"></div>
   <div class="spacer"></div>
   <script>
     (function () {
@@ -35,10 +38,10 @@
         var img = document.createElement('img'); img.loading = 'lazy'; img.width = 10; img.height = 10; img.alt = 'stalled'; img.src = '/__hang';
         document.body.appendChild(img);
       }
-      if (fault === 'cls' && motion) {
+      if ((fault === 'cls' || fault === 'cls-outside') && motion) {
         document.addEventListener('proto-blocks:reveal', function (e) {
           if (e.target.id !== 't1') return;
-          var shim = document.getElementById('shim');
+          var shim = document.getElementById(fault === 'cls' ? 'shim' : 'shim2');
           shim.style.height = '300px';
           setTimeout(function () { shim.style.height = '0'; }, 150);
         });

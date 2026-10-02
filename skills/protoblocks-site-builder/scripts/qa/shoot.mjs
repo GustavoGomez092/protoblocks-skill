@@ -4,11 +4,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchBrowser, openPage } from './browser.mjs';
 
-export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser }) {
+export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser, imageWaitMs }) {
   const own = !browser;
   const b = browser ?? await launchBrowser();
   try {
-    const { page, context, errors } = await openPage(b, { url, width, height, scale, reducedMotion });
+    const { page, context, errors } = await openPage(b, { url, width, height, scale, reducedMotion, imageWaitMs });
     try {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       let box = null;

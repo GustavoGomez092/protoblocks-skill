@@ -20,7 +20,7 @@ qtest('motionCheck passes clean motion, fails residue, and checks Taxi re-init',
     assert.equal(taxi.taxi.checked, true);
     assert.equal(taxi.taxi.before, taxi.taxi.after, JSON.stringify(taxi.taxi));
     assert.equal(taxi.pass, true, JSON.stringify(taxi, null, 2));
-  } finally { await srv.close(); }
+  } finally { await srv.close().catch(() => {}); }
 });
 
 // Each fault below breaks exactly one rule. The "everything else is clean" asserts make sure the failing
@@ -29,10 +29,14 @@ async function withChecker(fn) {
   const { motionCheck } = await import(path.join(QA_DIR, 'motion-check.mjs'));
   const { launchBrowser } = await import(path.join(QA_DIR, 'browser.mjs'));
   const srv = await serveFixtures();
-  const browser = await launchBrowser();
+  let browser;
   try {
+    browser = await launchBrowser();
     await fn((page, extra = {}) => motionCheck({ url: `${srv.url}/${page}`, anchor: 'pb-s1', width: 1280, outDir: tmpDir(), browser, ...extra }));
-  } finally { await browser.close(); await srv.close(); }
+  } finally {
+    await browser?.close().catch(() => {});
+    await srv.close().catch(() => {});
+  }
 }
 
 const clean = (r, except) => {
@@ -43,8 +47,10 @@ const clean = (r, except) => {
   if (except !== 'unsettled') assert.deepEqual(r.unsettled, [], `unsettled clean: ${dump}`);
   if (except !== 'imageErrors') assert.deepEqual(r.imageErrors, [], `imageErrors clean: ${dump}`);
   if (except !== 'taxi' && r.taxi.checked) {
+    assert.equal(r.taxi.error, undefined, `taxi error clean: ${dump}`);
     assert.equal(r.taxi.before, r.taxi.after, `taxi counts clean: ${dump}`);
     assert.deepEqual(r.taxi.unsettled, [], `taxi re-settle clean: ${dump}`);
+    assert.deepEqual(r.taxi.duplicates, [], `taxi duplicates clean: ${dump}`);
   }
 };
 
@@ -75,8 +81,9 @@ qtest('motionCheck fails and names reveal elements that never settle', () => wit
   assert.equal(r.pass, false);
 }));
 
-qtest('motionCheck fails and reports images that never load', { timeout: 120000 }, () => withChecker(async (check) => {
-  const r = await check('motion-faults.html?fault=hang');
+// imageWaitMs must reach both page loads: at the default 10s per load this cannot finish inside the timeout.
+qtest('motionCheck fails and reports images that never load', { timeout: 16000 }, () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=hang', { imageWaitMs: 1000 });
   assert.ok(r.imageErrors.length > 0 && r.imageErrors.every((src) => src.endsWith('/__hang')), JSON.stringify(r.imageErrors));
   clean(r, 'imageErrors');
   assert.equal(r.pass, false);
@@ -97,6 +104,52 @@ qtest('motionCheck fails when motion is not re-initialised after Taxi navigation
   assert.deepEqual(r.taxi.unsettled.sort(), ['row', 't1', 't2'], JSON.stringify(r.taxi));
   clean(r, 'taxi');
   assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck: CLS counts only shifts inside the anchor; page-wide CLS is informational', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=cls-outside');
+  assert.ok(r.clsPage > 0.01, `clsPage ${r.clsPage}`);
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+qtest('motionCheck: CLS fault inside the anchor is also reported page-wide', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=cls');
+  assert.ok(r.clsPage >= r.cls && r.cls > 0.01, JSON.stringify({ cls: r.cls, clsPage: r.clsPage }));
+}));
+
+qtest('motionCheck fails on duplicate ScrollTriggers per motion element even when counts are stable', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?dup=1');
+  assert.equal(r.taxi.before, r.taxi.after, `leak check passes: ${JSON.stringify(r.taxi)}`);
+  assert.deepEqual([...r.taxi.duplicates].sort(), ['c1', 'c2', 'c3', 'clip'], JSON.stringify(r.taxi));
+  clean(r, 'taxi');
+  assert.deepEqual(r.taxi.unsettled, []);
+  assert.equal(r.taxi.error, undefined);
+  assert.equal(r.pass, false);
+}));
+
+qtest('motionCheck retries navigateTo while Taxi refuses interruption, without page errors', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?lock=1');
+  assert.ok(r.taxi.retries > 0, `rejections were retried: ${JSON.stringify(r.taxi)}`);
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+qtest('motionCheck waits for core.isTransitioning to clear instead of hitting the lock', () => withChecker(async (check) => {
+  const r = await check('motion-taxi.html?lock=flag');
+  assert.equal(r.taxi.retries, 0, JSON.stringify(r.taxi));
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
+qtest('motionCheck records ETAXI when page-ready never fires, and still reports everything else', () => withChecker(async (check) => {
+  const outDir = tmpDir();
+  const r = await check('motion-taxi.html?noready=1', { outDir });
+  assert.match(r.taxi.error ?? '', /^ETAXI: proto:page-ready/, JSON.stringify(r.taxi));
+  assert.equal(r.taxi.checked, true);
+  clean(r, 'taxi');
+  assert.equal(r.pass, false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, 'motion-check.json'), 'utf8')), r);
 }));
 
 qtest('motionCheck writes reduced.png, settled.png and motion-check.json', () => withChecker(async (check) => {
@@ -128,5 +181,5 @@ qtest('motion-check CLI: usage exit 64, exit 1 when the check fails', async () =
     assert.equal(r.code, 1, r.err);
     assert.equal(JSON.parse(r.out).pass, false);
     assert.ok(fs.existsSync(path.join(outDir, 'motion-check.json')));
-  } finally { await srv.close(); }
+  } finally { await srv.close().catch(() => {}); }
 });

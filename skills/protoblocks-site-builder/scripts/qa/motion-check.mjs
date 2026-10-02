@@ -6,12 +6,17 @@ import { launchBrowser, openPage } from './browser.mjs';
 import { shoot } from './shoot.mjs';
 import { diffImages } from './diff.mjs';
 
-export const MOTION_THRESHOLDS = { settledMismatchMax: 0.02, clsMax: 0.01, settleTimeoutMs: 6000, settleMs: 500, taxiReadyTimeoutMs: 8000, taxiSettleMs: 300 };
+export const MOTION_THRESHOLDS = {
+  settledMismatchMax: 0.02, clsMax: 0.01, settleTimeoutMs: 6000, settleMs: 500,
+  taxiReadyTimeoutMs: 8000, taxiSettleTimeoutMs: 3000, taxiBusyMs: 3000, taxiRetryDelayMs: 150,
+};
 
 const revealSelector = (sel) => `${sel} [data-pb-motion][data-proto-animate], ${sel}[data-pb-motion][data-proto-animate]`;
 const uniq = (...lists) => [...new Set(lists.flat())];
 
 // Scroll from one viewport above the anchor slowly down through it, then centre it (ScrollTrigger sees every step).
+// openPage's lazy-image scroll has usually fired the once-triggers already, so on first load this confirms the
+// settled state rather than exercising the motion itself.
 const scrollThrough = (page, sel) => page.evaluate(async (s) => {
   const el = document.querySelector(s);
   if (!el) return;
@@ -29,36 +34,88 @@ async function waitSettled(page, sel) {
   return page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.getAttribute('data-proto-animate') !== 'done').map((e) => e.id || e.getAttribute('data-pb-motion')), rs);
 }
 
+const taxiError = (msg) => { const e = new Error(msg); e.code = 'ETAXI'; return e; };
+
+// One Taxi navigation. Waits for core.isTransitioning to clear (the theme runs ~0.9s transitions with
+// allowInterruption:false), awaits navigateTo's own promise in the page so a rejection never becomes an unhandled
+// page error, retries rejections for up to taxiBusyMs (for a Taxi that exposes no flag), then waits for page-ready.
+async function navigate(page, target) {
+  const T = MOTION_THRESHOLDS;
+  const deadline = Date.now() + T.taxiBusyMs;
+  let retries = 0;
+  for (;;) {
+    await page.waitForFunction(() => window.protoTaxi.core.isTransitioning !== true, null, { timeout: T.taxiBusyMs, polling: 50 })
+      .catch((e) => { if (e.name !== 'TimeoutError') throw e; }); // still busy: try anyway, the rejection is handled below
+    const r = await page.evaluate(async ({ t, ms }) => {
+      const n = window.__pbReady;
+      let timer;
+      try {
+        await Promise.race([
+          Promise.resolve(window.protoTaxi.core.navigateTo(t)),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`navigateTo did not settle within ${ms}ms`)), ms); }),
+        ]);
+        return { ok: true, n };
+      } catch (e) {
+        return { ok: false, n, error: String((e && e.message) || e) };
+      } finally { clearTimeout(timer); }
+    }, { t: target, ms: T.taxiReadyTimeoutMs });
+    if (r.ok) {
+      await page.waitForFunction((k) => window.__pbReady > k, r.n, { timeout: T.taxiReadyTimeoutMs }).catch((e) => {
+        if (e.name !== 'TimeoutError') throw e;
+        throw taxiError(`proto:page-ready was not dispatched within ${T.taxiReadyTimeoutMs}ms of navigateTo(${target})`);
+      });
+      // New triggers already past their start fire on ScrollTrigger's next internal update (~0.3s after init here),
+      // then kill themselves (once). Count only after none is pending, or the count depends on timing.
+      await page.waitForFunction(() => window.ScrollTrigger.getAll().every((t) => !t.vars.once || t.start >= t.scroll()), null, { timeout: T.taxiSettleTimeoutMs, polling: 50 })
+        .catch((e) => { if (e.name !== 'TimeoutError') throw e; });
+      return retries;
+    }
+    if (Date.now() >= deadline) throw taxiError(`navigateTo(${target}) kept rejecting for ${T.taxiBusyMs}ms: ${r.error}`);
+    retries += 1;
+    await page.waitForTimeout(T.taxiRetryDelayMs);
+  }
+}
+
 // Taxi re-init. The count before any navigation is not comparable: openPage already scrolled the whole page, so
-// every once-trigger fired and died. Instead, from scroll 0, do two identical home -> page round trips: the trigger
-// count after each must match (a leak or duplicate init grows it), and the anchor must reveal again afterwards.
+// every once-trigger fired and died. Instead, from scroll 0, do two identical away -> page round trips: the trigger
+// count after each must match (a leak grows it), no motion element may own two triggers (duplicate init), and the
+// anchor must reveal again afterwards. "Away" is the page itself with a marker query, so it works for home-page
+// anchors and subdirectory installs. A navigation failure is recorded as taxi.error, never thrown.
 async function taxiCheck(page, url, sel) {
+  const away = `${url}${url.includes('?') ? '&' : '?'}pb-motion-away=1`;
   await page.evaluate(() => {
     window.__pbReady = 0;
     document.addEventListener('proto:page-ready', () => { window.__pbReady += 1; });
     window.scrollTo(0, 0);
   });
-  const roundTrip = async () => {
-    for (const target of [new URL('/', url).href, url]) {
-      const n = await page.evaluate((t) => { const n = window.__pbReady; window.protoTaxi.core.navigateTo(t); return n; }, target);
-      await page.waitForFunction((k) => window.__pbReady > k, n, { timeout: MOTION_THRESHOLDS.taxiReadyTimeoutMs }).catch((e) => {
-        if (e.name !== 'TimeoutError') throw e;
-        const err = new Error(`proto:page-ready was not dispatched within ${MOTION_THRESHOLDS.taxiReadyTimeoutMs}ms of navigateTo(${target})`);
-        err.code = 'ETAXI';
-        throw err;
-      });
-      await page.waitForTimeout(MOTION_THRESHOLDS.taxiSettleMs); // let in-view triggers fire (once-triggers then kill themselves)
+  const taxi = { checked: true, retries: 0 };
+  try {
+    const roundTrip = async () => {
+      for (const target of [away, url]) taxi.retries += await navigate(page, target);
+      return page.evaluate(() => window.ScrollTrigger.getAll().length);
+    };
+    taxi.before = await roundTrip();
+    taxi.after = await roundTrip();
+  } catch (e) {
+    if (e.code !== 'ETAXI') throw e;
+    taxi.error = `ETAXI: ${e.message}`;
+    return taxi;
+  }
+  taxi.duplicates = await page.evaluate(() => {
+    const root = document.querySelector('[data-taxi-view]') || document.body;
+    const counts = new Map();
+    for (const t of window.ScrollTrigger.getAll()) {
+      const el = t.trigger;
+      if (el && el.nodeType === 1 && el.matches('[data-pb-motion]') && root.contains(el)) counts.set(el, (counts.get(el) || 0) + 1);
     }
-    return page.evaluate(() => window.ScrollTrigger.getAll().length);
-  };
-  const before = await roundTrip();
-  const after = await roundTrip();
+    return [...counts].filter(([, c]) => c > 1).map(([el]) => el.id || el.getAttribute('data-pb-motion'));
+  });
   await scrollThrough(page, sel);
-  const unsettled = await waitSettled(page, sel);
-  return { checked: true, before, after, unsettled };
+  taxi.unsettled = await waitSettled(page, sel);
+  return taxi;
 }
 
-export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir, browser }) {
+export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir, browser, imageWaitMs }) {
   fs.mkdirSync(outDir, { recursive: true });
   const own = !browser;
   const b = browser ?? await launchBrowser();
@@ -66,19 +123,27 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
   const reduced = path.join(outDir, 'reduced.png');
   const settled = path.join(outDir, 'settled.png');
   try {
-    const shot = await shoot({ url, selector, width, scale, out: reduced, browser: b });
-    const { page, context, errors } = await openPage(b, { url, width, scale, reducedMotion: false });
+    const shot = await shoot({ url, selector, width, scale, out: reduced, browser: b, imageWaitMs });
+    const { page, context, errors } = await openPage(b, { url, width, scale, reducedMotion: false, imageWaitMs });
     try {
-      await page.evaluate(() => {
+      // cls: shifts with a source node in the anchor (pass/fail). clsPage: every shift on the page (information only).
+      await page.evaluate((sel) => {
+        const anchorEl = document.querySelector(sel);
         window.__pbCls = 0;
-        new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!e.hadRecentInput) window.__pbCls += e.value; })
-          .observe({ type: 'layout-shift', buffered: true });
-      });
+        window.__pbClsPage = 0;
+        new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (e.hadRecentInput) continue;
+            window.__pbClsPage += e.value;
+            if (anchorEl && (e.sources || []).some((s) => s.node && anchorEl.contains(s.node))) window.__pbCls += e.value;
+          }
+        }).observe({ type: 'layout-shift', buffered: true });
+      }, selector);
       await scrollThrough(page, selector);
       const unsettled = await waitSettled(page, selector);
       await page.waitForTimeout(MOTION_THRESHOLDS.settleMs);
       await page.locator(selector).first().screenshot({ path: settled });
-      const cls = await page.evaluate(() => Math.round((window.__pbCls ?? 0) * 10000) / 10000);
+      const { cls, clsPage } = await page.evaluate(() => ({ cls: Math.round(window.__pbCls * 10000) / 10000, clsPage: Math.round(window.__pbClsPage * 10000) / 10000 }));
 
       const hasTaxi = await page.evaluate(() => !!(window.protoTaxi && window.protoTaxi.core && window.ScrollTrigger));
       const taxi = hasTaxi ? await taxiCheck(page, url, selector) : { checked: false };
@@ -92,6 +157,7 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
         settledMismatch: d.mismatch,
         settledHeightDelta: d.heightDelta,
         cls,
+        clsPage,
         pageErrors,
         imageErrors,
         unsettled,
@@ -100,11 +166,11 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       };
       result.pass = !d.fullyMasked && d.mismatch <= MOTION_THRESHOLDS.settledMismatchMax && d.heightDelta === 0
         && cls <= MOTION_THRESHOLDS.clsMax && pageErrors.length === 0 && imageErrors.length === 0 && unsettled.length === 0
-        && (!taxi.checked || (taxi.before === taxi.after && taxi.unsettled.length === 0));
+        && (!taxi.checked || (!taxi.error && taxi.before === taxi.after && taxi.duplicates.length === 0 && taxi.unsettled.length === 0));
       fs.writeFileSync(path.join(outDir, 'motion-check.json'), `${JSON.stringify(result, null, 2)}\n`);
       return result;
-    } finally { await context.close(); }
-  } finally { if (own) await b.close(); }
+    } finally { await context.close().catch(() => {}); }
+  } finally { if (own) await b.close().catch(() => {}); }
 }
 
 async function main(argv) {
