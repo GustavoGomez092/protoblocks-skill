@@ -115,7 +115,10 @@ itest('a parse error in a template fails the gates without throwing', async () =
     let r;
     assert.doesNotThrow(() => { r = runGates(wp, { block: 'pb-gate-parse' }); });
     assert.equal(r.ok, false);
-    assert.equal(r.steps.at(-1).ok, false);
+    const last = r.steps.at(-1);
+    assert.equal(last.id, 'render', JSON.stringify(r));
+    assert.equal(last.ok, false);
+    assert.match(last.detail.errors[0].message, /syntax/i, JSON.stringify(last.detail));
   } finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }); restoreTheme(wp); }
 });
 
@@ -124,14 +127,16 @@ itest('an uncatchable fatal in a template fails the render step with fatal detai
   const wp = testWp();
   let dir;
   try {
-    dir = await installVariant(wp, 'pb-gate-fatal', "<?php ini_set('memory_limit', '48M'); $a = str_repeat('x', 200000000); echo strlen($a); ?>\n");
+    dir = await installVariant(wp, 'pb-gate-fatal', "<?php ini_set('memory_limit', '48M'); $a = []; while (true) { $a[] = str_repeat('x', 10 * 1024 * 1024); } ?>\n");
     let r;
     assert.doesNotThrow(() => { r = runGates(wp, { block: 'pb-gate-fatal' }); });
     assert.equal(r.ok, false);
     const last = r.steps.at(-1);
     assert.equal(last.id, 'render', JSON.stringify(r));
     assert.equal(last.ok, false);
-    assert.ok(last.detail.fatal && /critical error|memory|fatal/i.test(last.detail.fatal), JSON.stringify(last.detail));
+    assert.match(last.detail.fatal.message, /Allowed memory size/, JSON.stringify(last.detail));
+    assert.ok(last.detail.fatal.file.endsWith('pb-gate-fatal/template.php'), JSON.stringify(last.detail));
+    assert.ok(typeof last.detail.raw === 'string');
   } finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }); restoreTheme(wp); }
 });
 

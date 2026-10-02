@@ -49,9 +49,16 @@ export function runGates(wp, { block, attrs = {} }) {
   try {
     render = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'render-block.php'), [block, JSON.stringify(attrs)]);
   } catch (e) {
-    // An uncatchable PHP fatal (E_ERROR, out of memory) kills the wp process before any JSON is printed.
+    // An uncatchable PHP fatal (E_ERROR, out of memory) kills the wp process before the normal JSON is printed.
     const r = e.result ?? {};
-    step('render', false, { fatal: String(r.stderr || r.stdout || e.message).slice(0, 2000) });
+    const stdout = String(r.stdout ?? '');
+    // WP's fatal handler exits before any script-level handler can print JSON, but PHP itself writes
+    // "Fatal error: <message> in <file> on line <n>" to stdout (render-block.php enables display_errors).
+    const m = stdout.match(/(?:PHP )?(?:Fatal|Parse) error:\s+([\s\S]+?) in (\S[^\n]*?) on line (\d+)/);
+    const parsed = m ? { message: m[1], file: m[2], line: Number(m[3]) } : null;
+    step('render', false, parsed
+      ? { fatal: parsed, raw: stdout.slice(0, 2000) }
+      : { fatal: String(r.stderr || stdout || e.message).slice(0, 2000), raw: stdout.slice(0, 2000) });
     return done();
   }
   if (render.environment) { step('render', false, { environment: render.environment }); return done(); }

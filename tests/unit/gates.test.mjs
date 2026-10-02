@@ -110,3 +110,39 @@ test('validate parsing skips an earlier "[" that is not the JSON array', () => {
   const { wp } = setup({ validate: { code: 0, stdout: 'Notice: [deprecated] something\n[{"block":"b","status":"valid"}]Success\n', stderr: '' } });
   assert.equal(runGates(wp, { block: 'b' }).ok, true);
 });
+
+function fatalWp(result) {
+  const { wp } = setup();
+  const orig = wp.evalFile;
+  wp.evalFile = (file, args) => {
+    if (path.basename(file) === 'render-block.php') throw new WpError(['eval-file'], result);
+    return orig(file, args);
+  };
+  return wp;
+}
+
+test('PHP fatal text in the failed process stdout becomes detail.fatal {message,file,line} with raw kept', () => {
+  const raw = '\nFatal error: Allowed memory size of 50331648 bytes exhausted (tried to allocate 10485792 bytes) in /x y/pb-gate-fatal/template.php on line 3\nThere has been a critical error\n';
+  const r = runGates(fatalWp({ code: 255, stdout: raw, stderr: 'Error: critical' }), { block: 'b' });
+  const last = r.steps.at(-1);
+  assert.equal(last.id, 'render');
+  assert.equal(last.ok, false);
+  assert.deepEqual(last.detail.fatal, { message: 'Allowed memory size of 50331648 bytes exhausted (tried to allocate 10485792 bytes)', file: '/x y/pb-gate-fatal/template.php', line: 3 });
+  assert.equal(last.detail.raw, raw);
+});
+
+test('a PHP parse error fatal line is parsed the same way', () => {
+  const raw = 'PHP Parse error:  syntax error, unexpected token ";" in /t/template.php on line 1\n';
+  const last = runGates(fatalWp({ code: 255, stdout: raw, stderr: '' }), { block: 'b' }).steps.at(-1);
+  assert.equal(last.detail.fatal.file, '/t/template.php');
+  assert.match(last.detail.fatal.message, /syntax error/);
+});
+
+test('a WpError for non-JSON output keeps the first 2000 chars of stdout as detail.raw', () => {
+  const stdout = 'x'.repeat(3000);
+  const r = runGates(fatalWp({ code: 0, stdout, stderr: 'eval-file did not print JSON on its last line' }), { block: 'b' });
+  const last = r.steps.at(-1);
+  assert.equal(last.ok, false);
+  assert.equal(last.detail.raw, stdout.slice(0, 2000));
+  assert.match(last.detail.fatal, /did not print JSON/);
+});

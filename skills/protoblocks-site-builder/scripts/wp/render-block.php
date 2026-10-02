@@ -30,6 +30,12 @@ set_error_handler(function ($no, $str, $file, $line) use (&$errors, &$other, $bl
     return true;
 });
 
+// An uncatchable fatal (E_ERROR, OOM) kills the process, and WP's own fatal handler then replaces the cause with a
+// generic "critical error" page via wp_die(). No shutdown function or output-buffer callback of ours runs after
+// that exit, so let PHP write the real "Fatal error: <message> in <file> on line <n>" to stdout; gates.mjs parses it.
+ini_set('display_errors', '1');
+ini_set('html_errors', '0');
+
 $html = '';
 try {
     $html = do_blocks(serialize_block(['blockName' => 'proto-blocks/' . $slug, 'attrs' => $attrs, 'innerBlocks' => [], 'innerHTML' => '', 'innerContent' => []]));
