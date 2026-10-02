@@ -46,6 +46,8 @@ itest('theme JSON-LD extension merges _proto_jsonld into the Yoast graph', async
     assert.ok(![].concat(webPage(badGraph)['@type']).includes('FAQPage'));
     assert.ok(!badGraph.some((p) => p['@type'] === 'Question'));
   } finally {
-    for (const id of ids) wp.check(['post', 'delete', id, '--force']);
+    for (const id of ids) {
+      try { wp.check(['post', 'delete', id, '--force']); } catch (err) { console.error(`cleanup failed for page ${id}: ${err.message}`); }
+    }
   }
 });

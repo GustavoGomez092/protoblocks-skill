@@ -54,3 +54,14 @@ test('normalizeJsonld rejects nodes missing @type', () => {
     assert.throws(() => normalizeJsonld(bad), (e) => e.code === 'EJSONLD', JSON.stringify(bad));
   }
 });
+
+test('normalizeJsonld rejects malformed @type values', () => {
+  for (const t of [[], true, [''], {}, 5, [1], ['A', '']]) {
+    assert.throws(() => normalizeJsonld([{ '@type': t }]), (e) => e.code === 'EJSONLD', JSON.stringify(t));
+  }
+});
+
+test('normalizeJsonld accepts string and string-array @type', () => {
+  assert.deepEqual(normalizeJsonld({ '@type': ['Service', 'Thing'] }), [{ '@type': ['Service', 'Thing'] }]);
+  assert.deepEqual(normalizeJsonld({ '@type': 'Service' }), [{ '@type': 'Service' }]);
+});

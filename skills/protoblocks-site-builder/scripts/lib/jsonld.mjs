@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime } from './wp.mjs';
 
 export const JSONLD_META_KEY = '_proto_jsonld';
+const validType = (t) => (typeof t === 'string' && t !== '') || (Array.isArray(t) && t.length > 0 && t.every((x) => typeof x === 'string' && x !== ''));
 const bad = (m) => { const e = new Error(m); e.code = 'EJSONLD'; return e; };
 
 export function normalizeJsonld(value) {
@@ -12,7 +13,7 @@ export function normalizeJsonld(value) {
   else if (value && typeof value === 'object') nodes = Array.isArray(value['@graph']) ? value['@graph'] : [value];
   else throw bad('JSON-LD must be a node object, an array of nodes, or an object with @graph');
   return nodes.map((n, i) => {
-    if (!n || typeof n !== 'object' || Array.isArray(n) || !n['@type']) throw bad(`JSON-LD node ${i} needs an object with @type`);
+    if (!n || typeof n !== 'object' || Array.isArray(n) || !validType(n['@type'])) throw bad(`JSON-LD node ${i} needs an object with a non-empty string or string-array @type`);
     const { '@context': _ctx, ...rest } = n;
     return rest;
   });
