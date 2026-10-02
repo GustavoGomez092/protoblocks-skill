@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec as realExec } from './exec.mjs';
 import { findWpRoot } from './preflight.mjs';
+import { loadState, statePath } from './state.mjs';
 
 export const WP_SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'wp');
 
@@ -86,4 +87,27 @@ export function loadRuntime(dir) {
     throw e;
   }
   return { wp: r.wp, mode: r.mode, publicPath: r.publicPath, url: r.url, localSite: r.localSite ?? null };
+}
+
+const normUrl = (u) => String(u ?? '').trim().replace(/\/+$/, '');
+
+/**
+ * Build state records the site it was made for (`site.url`). Refuse (EWRONGSITE) to mutate state or the
+ * theme when that differs from the site WP-CLI is talking to now: the state belongs to another site.
+ */
+export function assertStateSite(themeDir, { url }) {
+  if (!fs.existsSync(statePath(themeDir))) return;
+  const stateUrl = loadState(themeDir).site.url;
+  if (normUrl(stateUrl) !== normUrl(url)) {
+    const e = new Error(`The build state in ${statePath(themeDir)} belongs to ${stateUrl}, but this site is ${url}; refusing to change it. Use the theme of this site, or, if this site was renamed, fix the state first: node state.mjs set "${themeDir}" site.url '${JSON.stringify(url)}'`);
+    e.code = 'EWRONGSITE';
+    throw e;
+  }
+}
+
+// loadRuntime for CLIs that write into a theme fork and its build state.
+export function loadThemeRuntime(themeDir) {
+  const rt = loadRuntime(themeDir);
+  assertStateSite(themeDir, rt);
+  return rt;
 }

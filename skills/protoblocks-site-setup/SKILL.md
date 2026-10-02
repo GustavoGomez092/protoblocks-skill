@@ -44,9 +44,14 @@ Errors:
 - `ESYMLINK` - the theme folder is a symlink (a development checkout); it is never replaced. Pick another `--slug`.
 - `ESLUG` - bad or underivable slug; pick another with `--slug`.
 - `ENOTHEME` - the downloaded zip had no theme.
-- `ERELEASE` - release lookup failed and Proto-Blocks is not installed.
+- `ERELEASE` - a GitHub release lookup failed (offline, rate-limited, or no `vX.Y.Z` release with a zip): either Proto-Blocks is not installed yet, or the theme had to be downloaded (no existing fork to reuse). An installed Proto-Blocks and an existing fork need no network; retry when online.
+- `EDOWNLOAD` - downloading the theme zip failed; retry when online.
+- `EUNZIP` - the theme zip could not be extracted (corrupt download, or `unzip` missing); retry, or install `unzip`.
+- `EPLUGINDEV` - `--update-plugins` refused because the plugin folder is a symlink or git checkout; the developer updates it themselves.
+- `EWRONGSITE` - the fork's build state (`site.url`) belongs to another site than the one preflight resolved; nothing changed. Use the theme of this site, or, if the site was renamed, fix `site.url` with `state.mjs set` first (the message prints the command).
 - `EWP` - a WP-CLI call failed; the message has its output.
 - `EMANAGEDBLOCK` - the managed block in the theme's functions.php is broken; ask the developer to fix it by hand.
+- `ENOFUNCTIONS` - the theme has no `functions.php`, so the managed assets cannot be wired; check the theme folder.
 
 ## Step 2 - Tokens
 
@@ -56,7 +61,7 @@ Read `references/tokens.md`, extract tokens from the design, write them to `$THE
 node "$PB/lib/tokens.mjs" apply "$THEME" "$THEME/.protoblocks/tokens.json" [--no-compile]
 ```
 
-`[ETOKENS]` lists every validation problem: fix the JSON and re-run. `[ECOMPILE]` means Tailwind compile failed. Never hand-edit `tailwind-theme.css`; `apply` regenerates it.
+`[ETOKENS]` lists every validation problem: fix the JSON and re-run. `[ECOMPILE]` means Tailwind compile failed. Never hand-edit `tailwind-theme.css`; `apply` regenerates it. `apply` also sets the body font (`theme.json` and the fork's `style.css` body rule); relay any `warnings`.
 
 ## Step 3 - Navigation
 
@@ -75,11 +80,21 @@ Links to pages that do not exist yet are normal: they are reported in `pending` 
 2. If a `header`/`footer` copy exists, show the developer what would be discarded and ask. Only after their explicit OK run `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`, where `<n>` is the id previewed by the `[ECONFIRM]` error (run it once without `--confirm` to get the preview). The copy goes to Trash; the printed recovery command restores it.
 3. Write markup (see `references/navigation.md` for the `partMarkup` shape): `node "$PB/lib/parts.mjs" write "$THEME" header header.html` (writes `$THEME/parts/header.html`).
 
+The printed recovery command uses the same WP-CLI command preflight resolved (Local's wrapper at `wp-content/.protoblocks/wp`, or `wp --path=...`), never a bare `wp` that may target another install.
+
 Part errors: `ECONFIRM` (needs developer OK + id), `ESTALE` (the id changed; re-preview), `EAMBIGUOUS` (several copies; resolve in wp-admin), `ETHEMEMISMATCH` (the theme is not the active one, or the saved part does not resolve to this theme), `ESLUG`/`ETHEME` (invalid argument), `ENOTRASH` (Trash is disabled, so removal would delete permanently: tell the developer to use "Clear customizations" on the part in the Site Editor).
+
+## Errors shared by every step
+
+- `ENOTFORK` - the folder passed as `$THEME` is not a protoblocks fork (no `Proto Fork:` marker in `style.css`, no `.protoblocks/build.json`). `tokens apply`, `parts write` and the theme assets refuse it, so the developer's own `proto-blocks-theme` checkout is never rewritten. Pass `theme.themeDir` from setup.
+- `EWRONGSITE` - see Step 1; tokens, navigation and parts check it too.
+- `EARGV` - an internal WP-CLI `eval-file` argument started with `-` (WP-CLI would read it as a flag that runs PHP); report it as a bug, do not work around it.
+- `ENAVKEY` - invalid menu key (start with a lowercase letter or digit; then lowercase letters, digits, `-`, `_`).
+- `ENORUNTIME` - run preflight first.
 
 ## Iron rules
 
-- Never pass `--force` or `--confirm` without the developer's explicit OK for that exact action.
+- Never pass `--force`, `--refork`, `--update-plugins` or `--confirm` without the developer's explicit OK for that exact action.
 - Never edit the vendored theme `scripts/`.
 - Managed files (`inc/pb-*.php`, `assets/js/pb-*.js`, the functions.php managed block) are overwritten by `theme-assets.mjs install` (also run by `setup-site.mjs`); keep custom code elsewhere.
 - Never use `register_nav_menus` or classic menus.

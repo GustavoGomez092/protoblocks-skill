@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runPreflight } from './preflight.mjs';
-import { createWp } from './wp.mjs';
+import { createWp, assertStateSite } from './wp.mjs';
 import { ensurePlugins } from './setup-plugins.mjs';
 import { fetchThemeZip, forkTheme, inspectThemeDir, slugify, ForkError } from './theme-fork.mjs';
 import { installThemeAssets } from './theme-assets.mjs';
@@ -27,6 +27,8 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
     throw new ForkError(`--refork must repeat the theme slug exactly ("${themeSlug}"), got ${JSON.stringify(refork)}; nothing was changed.`, 'ERFORK');
   }
   const themesDir = path.join(preflight.publicPath, 'wp-content', 'themes');
+  // Refuse before touching anything when the fork's build state was made for another site.
+  assertStateSite(path.join(themesDir, themeSlug), preflight);
   // An existing fork is reused as-is, so it needs no download (re-runs work offline).
   const reusable = refork === undefined && Boolean(inspectThemeDir(path.join(themesDir, themeSlug)).marker);
 
@@ -56,7 +58,11 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
     ...(preflight.localSite ? { localSiteId: preflight.localSite.id } : {}),
   };
   if (fs.existsSync(statePath(theme.themeDir))) {
-    updateState(theme.themeDir, (s) => { setPath(s, 'site.theme', siteState.theme); setPath(s, 'site.url', siteState.url); });
+    assertStateSite(theme.themeDir, preflight);
+    updateState(theme.themeDir, (s) => {
+      for (const k of ['theme', 'path', 'wp']) setPath(s, `site.${k}`, siteState[k]);
+      if (siteState.localSiteId) setPath(s, 'site.localSiteId', siteState.localSiteId);
+    });
   } else {
     initState(theme.themeDir, siteState);
   }

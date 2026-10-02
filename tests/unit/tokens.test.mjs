@@ -122,7 +122,7 @@ test('rewriteFontImport collapses several existing Google imports into exactly o
 
 test('applyTokens writes three files, and writes nothing when invalid', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
   fs.writeFileSync(path.join(theme, 'theme.json'), JSON.stringify({ version: 3, settings: {} }));
   fs.writeFileSync(path.join(theme, 'tailwind-theme.css'), '@theme {}');
   assert.throws(() => applyTokens(theme, { colors: { BAD: 'x' } }), (e) => e.code === 'ETOKENS');
@@ -134,7 +134,7 @@ test('applyTokens writes three files, and writes nothing when invalid', () => {
 
 test('applyTokens on invalid tokens leaves all three files byte-identical and lists every error', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  const files = { 'style.css': '/*\nTheme Name: X\n*/\nbody{}', 'theme.json': '{"version":3,"settings":{}}', 'tailwind-theme.css': '@theme {}' };
+  const files = { 'style.css': '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}', 'theme.json': '{"version":3,"settings":{}}', 'tailwind-theme.css': '@theme {}' };
   for (const [f, c] of Object.entries(files)) fs.writeFileSync(path.join(theme, f), c);
   let err;
   try { applyTokens(theme, { colors: { BAD: 'x', ok: '#fff' }, radii: { r: 'nope' } }); } catch (e) { err = e; }
@@ -193,10 +193,11 @@ test('validateTokens(null) reports a clear error', () => {
 test('applyTokens throws before writing anything when style.css or theme.json is missing', () => {
   for (const missing of ['style.css', 'theme.json']) {
     const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
     fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
     fs.writeFileSync(path.join(theme, 'tailwind-theme.css'), '@theme {}');
     fs.rmSync(path.join(theme, missing));
+    initState(theme, { url: 'http://x.test', path: '/x' }); // fork guard: build state marks it as a fork
     assert.throws(() => applyTokens(theme, tokens), /ENOENT/);
     assert.equal(fs.readFileSync(path.join(theme, 'tailwind-theme.css'), 'utf8'), '@theme {}', missing);
     assert.deepEqual(fs.readdirSync(theme).filter((f) => f.endsWith('.tmp')), []);
@@ -205,7 +206,7 @@ test('applyTokens throws before writing anything when style.css or theme.json is
 
 test('applyTokens leaves no .tmp files after success', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
   fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
   applyTokens(theme, tokens);
   assert.deepEqual(fs.readdirSync(theme).filter((f) => f.endsWith('.tmp')), []);
@@ -214,7 +215,7 @@ test('applyTokens leaves no .tmp files after success', () => {
 test('runApply saves state only after a successful compile', () => {
   const mk = () => {
     const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\n*/\nbody{}');
+    fs.writeFileSync(path.join(theme, 'style.css'), '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}');
     fs.writeFileSync(path.join(theme, 'theme.json'), '{"version":3}');
     initState(theme, { url: 'http://x.test', path: '/x' });
     return theme;
@@ -239,7 +240,7 @@ test('runApply saves state only after a successful compile', () => {
 
 test('applyTokens stages via .tmp files: a failing staged write leaves every target untouched', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-tok-'));
-  const files = { 'style.css': '/*\nTheme Name: X\n*/\nbody{}', 'theme.json': '{"version":3}', 'tailwind-theme.css': '@theme {}' };
+  const files = { 'style.css': '/*\nTheme Name: X\nProto Fork: p@1\n*/\nbody{}', 'theme.json': '{"version":3}', 'tailwind-theme.css': '@theme {}' };
   for (const [f, c] of Object.entries(files)) fs.writeFileSync(path.join(theme, f), c);
   fs.mkdirSync(path.join(theme, 'style.css.tmp')); // makes staging the last file fail
   assert.throws(() => applyTokens(theme, tokens));

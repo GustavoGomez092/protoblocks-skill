@@ -139,3 +139,16 @@ test('CLI upsert without a spec file prints usage and exits 64', () => {
   assert.equal(r.status, 64);
   assert.match(r.stderr, /Usage/);
 });
+
+test('menu keys must start with a letter or digit, and prototype-like keys are refused (ENAVKEY)', () => {
+  for (const bad of ['-x', '_x', '__proto__', 'constructor', 'prototype', '-', '_']) {
+    const wp = fakeWp();
+    assert.throws(() => upsertMenu(wp, bad, { items: [] }), (e) => e.code === 'ENAVKEY', `key ${JSON.stringify(bad)}`);
+    assert.equal(wp.calls.length, 0);
+  }
+  const t = theme();
+  updateState(t, (s) => { s.site.navigation = { menus: { _x: { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }] } } }; });
+  const wp = fakeWp();
+  assert.throws(() => refreshMenus(wp, t), (e) => e.code === 'ENAVKEY');
+  assert.equal(wp.calls.length, 0);
+});

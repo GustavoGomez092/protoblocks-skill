@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { assertFork } from './guards.mjs';
 import { statePath, updateState, setPath } from './state.mjs';
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -192,6 +193,7 @@ export function rewriteFontImport(css, t) {
 }
 
 export function applyTokens(themeDir, t) {
+  assertFork(themeDir);
   const errors = validateTokens(t);
   if (errors.length) {
     const e = new Error(`Invalid tokens:\n- ${errors.join('\n- ')}`);
@@ -238,8 +240,9 @@ export function runApply(themeDir, t, { compile } = {}) {
 function main(argv) {
   const [cmd, themeDir, file] = argv;
   if (cmd !== 'apply' || !themeDir || !file) { process.stderr.write('Usage: node tokens.mjs apply <themeDir> <tokens.json> [--no-compile]\n'); process.exit(64); }
+  const rt = loadThemeRuntime(themeDir);
   const t = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const compile = argv.includes('--no-compile') ? null : () => createWp(loadRuntime(themeDir)).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
+  const compile = argv.includes('--no-compile') ? null : () => createWp(rt).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
   process.stdout.write(`${JSON.stringify(runApply(themeDir, t, { compile }), null, 2)}\n`);
 }
 

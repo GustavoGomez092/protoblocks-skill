@@ -2,12 +2,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, updateState, setPath, getPath, statePath } from './state.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'navigation.php');
 
-const KEY_RE = /^[a-z0-9_-]+$/;
+// Keys become state paths (site.navigation.menus.<key>) and post slugs (pb-nav-<key>).
+const KEY_RE = /^[a-z0-9][a-z0-9_-]*$/;
+const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 export const NAV_BACKUP_DIR = (themeDir) => path.join(themeDir, '.protoblocks', 'artifacts', 'backups');
 
@@ -16,8 +18,8 @@ function codeError(code, message, extra = {}) {
 }
 
 function checkKey(key) {
-  if (typeof key !== 'string' || !KEY_RE.test(key)) {
-    throw codeError('ENAVKEY', `Invalid menu key ${JSON.stringify(key ?? null)}: use lowercase letters, digits, "-" or "_".`);
+  if (typeof key !== 'string' || !KEY_RE.test(key) || RESERVED_KEYS.has(key)) {
+    throw codeError('ENAVKEY', `Invalid menu key ${JSON.stringify(key ?? null)}: start with a lowercase letter or digit, then lowercase letters, digits, "-" or "_".`);
   }
 }
 
@@ -99,7 +101,7 @@ function main(argv) {
     process.stderr.write(USAGE);
     process.exit(64);
   }
-  const wp = createWp(loadRuntime(themeDir));
+  const wp = createWp(loadThemeRuntime(themeDir));
   if (cmd === 'refresh') { process.stdout.write(`${JSON.stringify(refreshMenus(wp, themeDir), null, 2)}\n`); return; }
   const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
   const hasState = fs.existsSync(statePath(themeDir));

@@ -22,6 +22,7 @@ test('partMarkup requires navRef to be a positive integer when given', () => {
 
 test('writePart writes parts/<slug>.html and rejects bad slugs', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-parts-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), '/*\nProto Fork: proto-blocks-theme@1.1.3\n*/');
   const p = writePart(theme, 'header', 'X');
   assert.equal(fs.readFileSync(p, 'utf8'), 'X');
   assert.equal(p, path.join(theme, 'parts/header.html'));
@@ -155,4 +156,15 @@ test('JS refuses a row whose theme (from real terms) differs, via real createWp'
   assert.equal(calls.length, 1, 'only the preview ran');
   const two = execReturning([ok([{ ...ROW, theme: 'pb-itest,twentytwentyfive' }])]);
   assert.throws(() => removeOverride(createWp(rt, { exec: two.exec }), 'pb-itest', 'header', { confirm: true, expectId: 5 }), (e) => e.code === 'ETHEMEMISMATCH');
+});
+
+test('recovery commands use the preflight WP-CLI path, shell-quoted', async () => {
+  const { recoveryCommand, wpShellCommand } = await import('../../skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  const wrapper = wpShellCommand({ wp: '/Users/me/Local Sites/acme/app/public/wp-content/.protoblocks/wp', mode: 'local-wrapper', publicPath: '/p' });
+  assert.equal(wrapper, "'/Users/me/Local Sites/acme/app/public/wp-content/.protoblocks/wp'");
+  assert.equal(wpShellCommand({ wp: 'wp', mode: 'native', publicPath: "/s/it's" }), "wp --path='/s/it'\\''s'");
+  assert.equal(recoveryCommand(7, wrapper), `${wrapper} eval 'wp_untrash_post(7);' && ${wrapper} post update 7 --post_status=publish`);
+  const wp = fakeWp();
+  assert.throws(() => removeOverride(wp, 'pb-itest', 'header', { wpCmd: wrapper }), (e) => e.code === 'ECONFIRM' && e.message.includes(`${wrapper} eval 'wp_untrash_post(5);'`));
+  assert.deepEqual(removeOverride(fakeWp(), 'pb-itest', 'header', { confirm: true, expectId: 5, wpCmd: wrapper }).recovery, [recoveryCommand(5, wrapper)]);
 });

@@ -26,7 +26,7 @@ Footer column:
 
 - `items` (required array); `title` optional (defaults to the capitalized key).
 - Item: `label`, plus `page` (page slug/path, e.g. `services/design`) or `url`; optional `opensInNewTab` (for `url` links); optional `children` (turns the item into a submenu).
-- Key: `primary`, `footer-1`, `footer-2`, `utility`, ... Allowed characters `[a-z0-9_-]` (`[ENAVKEY]` otherwise). The key is the upsert identity (post slug `pb-nav-<key>`): the same key updates the menu, never duplicates it.
+- Key: `primary`, `footer-1`, `footer-2`, `utility`, ... A lowercase letter or digit first, then `[a-z0-9_-]` (`[ENAVKEY]` otherwise). The key is the upsert identity (post slug `pb-nav-<key>`): the same key updates the menu, never duplicates it.
 
 ## Commands
 
@@ -71,7 +71,7 @@ node "$PB/lib/parts.mjs" remove-override "$THEME" header          # preview only
 node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>
 ```
 
-Flow: list overrides, ask the developer (their Site Editor edits are discarded), then run with `--confirm --id <n>` using the id from the `[ECONFIRM]` preview. The copy is moved to Trash, not deleted; the result lists `removed`, `records` and a `recovery` command per id (`wp eval 'wp_untrash_post(<id>);' && wp post update <id> --post_status=publish`).
+Flow: list overrides, ask the developer (their Site Editor edits are discarded), then run with `--confirm --id <n>` using the id from the `[ECONFIRM]` preview. The copy is moved to Trash, not deleted; the result lists `removed`, `records` and a `recovery` command per id (`<wp> eval 'wp_untrash_post(<id>);' && <wp> post update <id> --post_status=publish`, where `<wp>` is the WP-CLI command preflight resolved: Local's wrapper `'<site>/app/public/wp-content/.protoblocks/wp'`, or `wp --path='<root>'`).
 
 Errors: `ECONFIRM` (missing `--confirm` or `--id`), `ESTALE` (id differs from the live copy; preview again), `EAMBIGUOUS` (several matches; nothing removed, resolve in wp-admin), `ETHEMEMISMATCH` (`<themeDir>` is not the active theme, or the part does not resolve to it), `ESLUG`/`ETHEME` (invalid slug/theme), `ENOTRASH` (Trash disabled, so removal would be permanent: ask the developer to use "Clear customizations" on the part in the Site Editor).
 
