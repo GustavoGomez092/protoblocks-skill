@@ -7,11 +7,13 @@ import { itest, testWp, restoreTheme, ORIGINAL_THEME, PUBLIC, TEST_SITE } from '
 import { setupSite } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
 import { MANAGED_START } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 import { loadState, statePath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
+import { forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 
 // SAFETY: runs against the developer's real Local site. It creates exactly ONE theme folder with a unique
 // slug (pb-itest-setup-<hex>), restores the original active theme in `finally`, and only then deletes that
-// exact folder after asserting it is directly inside the themes dir, has the unique slug as its name, and
-// holds .protoblocks/build.json. It never touches the developer's own theme checkout.
+// exact folder if it sits directly inside the themes dir under the unique slug and carries the fork marker;
+// otherwise it logs the path and leaves it. A failure mid-way is rethrown unchanged (cleanup never masks it).
+// It never touches the developer's own theme checkout, and setupSite never reinstalls installed plugins.
 const THEMES = path.join(PUBLIC, 'wp-content', 'themes');
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const gitStatus = (dir) => spawnSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }).stdout;
@@ -28,7 +30,8 @@ itest('setupSite forks, activates and records state; a second run reuses the for
   // Crash recovery file used by helpers.mjs (read when a previous run died on a pb-* theme).
   fs.mkdirSync(path.join(REPO, 'tests', '.tmp'), { recursive: true });
   fs.writeFileSync(path.join(REPO, 'tests', '.tmp', 'original-theme.txt'), before);
-  let restored = false;
+  let err;
+  const problems = [];
   try {
     const opts = { cwd: PUBLIC, site: TEST_SITE, name: 'PB Itest Setup', slug };
     const first = await setupSite(opts);
@@ -38,41 +41,47 @@ itest('setupSite forks, activates and records state; a second run reuses the for
     assert.equal(fs.realpathSync(first.theme.themeDir), fs.realpathSync(themeDir));
     assert.equal(first.stateFile, statePath(themeDir));
     assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), slug);
-    for (const p of first.plugins.plugins) assert.ok(['ok', 'installed', 'activated', 'updated'].includes(p.action), p.slug);
+    for (const p of first.plugins.plugins) assert.ok(['ok', 'installed', 'activated'].includes(p.action), `${p.slug} ${p.action}`);
     assert.equal(first.plugins.plugins.length, 4);
     assert.ok(first.assets.copied.length > 0);
     const s1 = loadState(themeDir);
     assert.equal(s1.site.theme.slug, slug);
     assert.equal(s1.site.url, first.preflight.url);
 
-    const second = await setupSite(opts);
-    assert.equal(second.theme.reused, true);
+    const second = await setupSite({ ...opts, force: true });
+    assert.equal(second.theme.reused, true, 'force never replaces an existing fork');
     assert.equal(second.stateFile, first.stateFile);
     const fn = fs.readFileSync(path.join(themeDir, 'functions.php'), 'utf8');
     assert.equal(fn.split(MANAGED_START).length - 1, 1, 'managed block must appear exactly once');
     assert.equal(loadState(themeDir).site.theme.slug, slug);
     assert.ok(second.plugins.plugins.every((p) => p.action === 'ok'), 'second run leaves plugins alone');
+  } catch (e) {
+    err = e;
   } finally {
-    restoreTheme(wp);
-    restored = true;
-    const after = wp.check(['option', 'get', 'stylesheet']).trim();
+    try { restoreTheme(wp); } catch (e) { problems.push(`restoreTheme failed: ${e.message}`); }
+    const after = wp.run(['option', 'get', 'stylesheet']).stdout.trim();
     t.diagnostic(`stylesheet after: ${after}`);
     if (fs.existsSync(themeDir)) {
-      assert.equal(after, before, 'original theme must be active before deleting the test theme');
       const real = fs.realpathSync(themeDir);
-      assert.equal(path.dirname(real), fs.realpathSync(THEMES), 'theme must sit directly inside the themes dir');
-      assert.equal(path.basename(real), slug);
-      assert.match(slug, /^pb-itest-setup-[0-9a-f]{8}$/);
-      assert.ok(fs.existsSync(path.join(real, '.protoblocks', 'build.json')), 'refusing to delete a folder without build state');
-      fs.rmSync(real, { recursive: true, force: true });
+      const style = path.join(real, 'style.css');
+      const deletable = after === before
+        && !fs.lstatSync(themeDir).isSymbolicLink()
+        && path.dirname(real) === fs.realpathSync(THEMES)
+        && path.basename(real) === slug && /^pb-itest-setup-[0-9a-f]{8}$/.test(slug)
+        && fs.existsSync(style) && forkMarker(fs.readFileSync(style, 'utf8'));
+      if (deletable) fs.rmSync(real, { recursive: true, force: true });
+      else problems.push(`left in place for inspection (not provably this test's fork, or the original theme is not active): ${themeDir}`);
     }
     t.diagnostic(`themes: ${fs.readdirSync(THEMES).join(', ')}`);
     t.diagnostic(`plugins before: ${pluginsBefore.trim()}`);
-    t.diagnostic(`plugins after: ${wp.check(['plugin', 'list', '--fields=name,status,version', '--format=json']).trim()}`);
+    t.diagnostic(`plugins after: ${wp.run(['plugin', 'list', '--fields=name,status,version', '--format=json']).stdout.trim()}`);
+    for (const p of problems) t.diagnostic(p);
   }
-  assert.ok(restored);
+  if (err) throw err;
+  assert.deepEqual(problems, []);
   assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), before);
   assert.equal(fs.existsSync(themeDir), false);
   assert.deepEqual(fs.readdirSync(THEMES).filter((n) => n.startsWith('pb-itest-setup-')), []);
+  assert.equal(wp.check(['plugin', 'list', '--fields=name,status,version', '--format=json']), pluginsBefore, 'plugins unchanged');
   if (origGitBefore !== null) assert.equal(gitStatus(origDir), origGitBefore, 'developer theme checkout must be unmodified');
 });

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ensurePlugins, WPORG_PLUGINS } from '../../skills/protoblocks-site-builder/scripts/lib/setup-plugins.mjs';
 
 class FakeExec {
@@ -15,7 +18,7 @@ class FakeExec {
 
   exec(cmd, args, opts = {}) {
     const argsStr = args.join(' ');
-    this.calls.push({ cmd, args, argsStr });
+    this.calls.push({ cmd, args, argsStr, opts });
 
     // Try exact match first
     if (this.responses.has(argsStr)) {
@@ -120,7 +123,7 @@ test('(a) Proto-Blocks missing: install from GitHub', async () => {
   const zipUrl = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
 
   fake.record('plugin get proto-blocks --field=status', { code: 1, stdout: '', stderr: 'not found' });
-  fake.record(`plugin install ${zipUrl} --force --activate`, { code: 0, stdout: '', stderr: '' });
+  fake.record(`plugin install ${zipUrl} --activate`, { code: 0, stdout: '', stderr: '' });
   setupCommonResponses(fake);
 
   const result = await ensurePlugins(fakeWp(fake), {
@@ -133,7 +136,7 @@ test('(a) Proto-Blocks missing: install from GitHub', async () => {
   fake.assertCalled('plugin install');
 });
 
-test('(b) Proto-Blocks installed but older: update', async () => {
+test('(b) Proto-Blocks installed but older: reports updateAvailable and never reinstalls', async () => {
   const fake = new FakeExec();
   const zipUrl = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
 
@@ -146,8 +149,11 @@ test('(b) Proto-Blocks installed but older: update', async () => {
     fetchRelease: async () => ({ version: '3.0.0', zipUrl }),
   });
 
-  assert.equal(result.plugins[0].action, 'updated');
-  fake.assertCalled('plugin install');
+  assert.equal(result.plugins[0].action, 'ok');
+  assert.equal(result.plugins[0].version, '2.10.1');
+  assert.equal(result.plugins[0].updateAvailable, '3.0.0');
+  fake.assertNotCalled('plugin install');
+  fake.assertNotCalled('--force');
 });
 
 test('(c) Proto-Blocks installed current but inactive: activate', async () => {
@@ -209,7 +215,7 @@ test('(f) plugin install fails: reject with WpError', async () => {
   const zipUrl = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
 
   fake.record('plugin get proto-blocks --field=status', { code: 1, stdout: '', stderr: 'not found' });
-  fake.record(`plugin install ${zipUrl} --force --activate`, { code: 1, stdout: '', stderr: 'Download failed' });
+  fake.record(`plugin install ${zipUrl} --activate`, { code: 1, stdout: '', stderr: 'Download failed' });
 
   await assert.rejects(
     () => ensurePlugins(fakeWp(fake), {
@@ -334,4 +340,170 @@ test('offline tolerance: not installed, rethrow', async () => {
     }),
     (e) => e.code === 'ERELEASE'
   );
+});
+
+// ---- C1: never overwrite an installed plugin automatically ----
+const ZIP = 'https://github.com/GustavoGomez092/Proto-Blocks/releases/download/v3.0.0/proto-blocks.zip';
+const rel = async () => ({ version: '3.0.0', zipUrl: ZIP });
+const olderInstalled = (fake, status = 'active') => {
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: `${status}\n`, stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '2.10.1\n', stderr: '' });
+  setupCommonResponses(fake, true);
+};
+const pluginDir = (fake, dir) => fake.record('plugin path proto-blocks --dir', { code: 0, stdout: `${dir}\n`, stderr: '' });
+// realpath: macOS tmpdir (/var) is itself a symlink to /private/var.
+const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-plugdir-')));
+const noRepo = () => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' });
+
+test('older + inactive without opt-in: activates in place, reports updateAvailable, no install', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake, 'inactive');
+  fake.record('plugin activate proto-blocks', { code: 0, stdout: '', stderr: '' });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel });
+  assert.deepEqual(r.plugins[0], { slug: 'proto-blocks', action: 'activated', version: '2.10.1', updateAvailable: '3.0.0' });
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in on a plain plugin folder: force-installs with a long timeout', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const dir = tmp();
+  pluginDir(fake, dir);
+  fake.record(`plugin install ${ZIP} --force --activate`, { code: 0, stdout: '', stderr: '' });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: noRepo });
+  assert.equal(r.plugins[0].action, 'updated');
+  assert.equal(r.plugins[0].version, '3.0.0');
+  const call = fake.calls.find((c) => c.argsStr.startsWith('plugin install'));
+  assert.ok(call.opts?.timeout >= 600000, `timeout ${call.opts?.timeout}`);
+});
+
+test('updatePlugins opt-in refuses a symlinked plugin folder (EPLUGINDEV) and installs nothing', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const real = tmp();
+  const link = path.join(tmp(), 'proto-blocks');
+  fs.symlinkSync(real, link);
+  pluginDir(fake, link);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true }), (e) => e.code === 'EPLUGINDEV' && e.message.includes(link));
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in refuses a plugin folder that is a git checkout (EPLUGINDEV)', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, '.git'));
+  pluginDir(fake, dir);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true }), (e) => e.code === 'EPLUGINDEV');
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in with a current plugin does nothing', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true);
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true });
+  assert.deepEqual(r.plugins[0], { slug: 'proto-blocks', action: 'ok', version: '3.0.0' });
+  fake.assertNotCalled('plugin install');
+  fake.assertNotCalled('plugin path');
+});
+
+test('fresh installs never pass --force and use a long timeout', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 1, stdout: '', stderr: 'not found' });
+  fake.record(`plugin install ${ZIP} --activate`, { code: 0, stdout: '', stderr: '' });
+  setupCommonResponses(fake, true);
+  fake.record('plugin get safe-svg --field=status', { code: 1, stdout: '', stderr: 'not found' });
+  fake.record('plugin install safe-svg --activate', { code: 0, stdout: '', stderr: '' });
+  await ensurePlugins(fakeWp(fake), { fetchRelease: rel });
+  fake.assertNotCalled('--force');
+  const installs = fake.calls.filter((c) => c.argsStr.startsWith('plugin install'));
+  assert.equal(installs.length, 2);
+  for (const c of installs) assert.ok(c.opts?.timeout >= 600000, `${c.argsStr} timeout ${c.opts?.timeout}`);
+});
+
+test('active-network counts as active: no re-activation, reported ok', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active-network\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true);
+  fake.record('plugin get wordpress-seo --field=status', { code: 0, stdout: 'active-network\n', stderr: '' });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel });
+  assert.equal(r.plugins.find((p) => p.slug === 'proto-blocks').action, 'ok');
+  assert.equal(r.plugins.find((p) => p.slug === 'wordpress-seo').action, 'ok');
+  fake.assertNotCalled('plugin activate');
+});
+
+test('active-network counts as active offline too', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active-network\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true);
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: async () => { throw Object.assign(new Error('offline'), { code: 'ERELEASE' }); } });
+  assert.equal(r.plugins[0].action, 'ok');
+  fake.assertNotCalled('plugin activate');
+});
+
+test('plain (empty) permalinks are set to /%postname%/', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true);
+  fake.record('option get permalink_structure', { code: 0, stdout: '\n', stderr: '' });
+  fake.record('rewrite structure /%postname%/', { code: 0, stdout: '', stderr: '' });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel });
+  fake.assertCalled('rewrite structure /%postname%/');
+  assert.deepEqual(r.options, ['permalink_structure']);
+});
+
+test('a custom permalink structure is left alone and reported as a warning', async () => {
+  const fake = new FakeExec();
+  fake.record('plugin get proto-blocks --field=status', { code: 0, stdout: 'active\n', stderr: '' });
+  fake.record('plugin get proto-blocks --field=version', { code: 0, stdout: '3.0.0\n', stderr: '' });
+  setupCommonResponses(fake, true);
+  fake.record('option get permalink_structure', { code: 0, stdout: '/blog/%year%/%postname%/\n', stderr: '' });
+  const r = await ensurePlugins(fakeWp(fake), { fetchRelease: rel });
+  fake.assertNotCalled('rewrite structure');
+  assert.deepEqual(r.options, []);
+  assert.ok(r.warnings.some((w) => w.includes('/blog/%year%/%postname%/')), JSON.stringify(r.warnings));
+});
+
+test('updatePlugins opt-in refuses a plugin folder inside a git work tree (EPLUGINDEV)', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const dir = tmp();
+  pluginDir(fake, dir);
+  const seen = [];
+  const exec = (cmd, args, opts) => { seen.push({ cmd, args, cwd: opts?.cwd }); return { code: 0, stdout: 'true\n', stderr: '' }; };
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec }), (e) => e.code === 'EPLUGINDEV' && /git work tree/.test(e.message));
+  assert.deepEqual(seen[0], { cmd: 'git', args: ['rev-parse', '--is-inside-work-tree'], cwd: dir });
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in detects a real enclosing repo (temp dir, real git)', async () => {
+  const { exec: realExec } = await import('../../skills/protoblocks-site-builder/scripts/lib/exec.mjs');
+  if (realExec('git', ['--version']).code !== 0) return;
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const repo = tmp();
+  realExec('git', ['init', '-q'], { cwd: repo });
+  const dir = path.join(repo, 'wp-content', 'plugins', 'proto-blocks');
+  fs.mkdirSync(dir, { recursive: true });
+  pluginDir(fake, dir);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: realExec }), (e) => e.code === 'EPLUGINDEV');
+  fake.assertNotCalled('plugin install');
+});
+
+test('updatePlugins opt-in refuses a plugin folder reached through a symlinked parent (realpath differs)', async () => {
+  const fake = new FakeExec();
+  olderInstalled(fake);
+  const realPlugins = tmp();
+  fs.mkdirSync(path.join(realPlugins, 'proto-blocks'));
+  const linkParent = path.join(tmp(), 'plugins');
+  fs.symlinkSync(realPlugins, linkParent);
+  const dir = path.join(linkParent, 'proto-blocks');
+  pluginDir(fake, dir);
+  await assert.rejects(ensurePlugins(fakeWp(fake), { fetchRelease: rel, updatePlugins: true, exec: noRepo }), (e) => e.code === 'EPLUGINDEV' && e.message.includes(fs.realpathSync(dir)));
+  fake.assertNotCalled('plugin install');
 });

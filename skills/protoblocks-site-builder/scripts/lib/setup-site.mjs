@@ -3,17 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runPreflight } from './preflight.mjs';
-import { createWp } from './wp.mjs';
+import { createWp, assertStateSite } from './wp.mjs';
 import { ensurePlugins } from './setup-plugins.mjs';
-import { fetchThemeZip, forkTheme } from './theme-fork.mjs';
+import { fetchThemeZip, forkTheme, inspectThemeDir, slugify, ForkError } from './theme-fork.mjs';
 import { installThemeAssets } from './theme-assets.mjs';
 import { initState, updateState, setPath, statePath } from './state.mjs';
 
 const DEFAULT_DEPS = { runPreflight, createWp, ensurePlugins, fetchThemeZip, forkTheme, installThemeAssets };
-const USAGE = 'Usage: node setup-site.mjs --name "<Project>" [--slug s] [--site "<Local site>"] [--force] [--cwd D]\n';
+const USAGE = 'Usage: node setup-site.mjs --name "<Project>" [--slug s] [--site "<Local site>"] [--force] [--refork <slug>] [--update-plugins] [--cwd D]\n';
 
 // `deps` lets tests inject fakes; production callers omit it.
-export async function setupSite({ cwd = process.cwd(), site, name, slug, force = false }, deps = {}) {
+export async function setupSite({ cwd = process.cwd(), site, name, slug, force = false, refork, updatePlugins = false }, deps = {}) {
   const d = { ...DEFAULT_DEPS, ...deps };
   const preflight = d.runPreflight({ cwd, site });
   const fatal = preflight.checks.filter((c) => c.status === 'fail');
@@ -22,16 +22,32 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
     e.code = 'EPREFLIGHT';
     throw e;
   }
+  const themeSlug = slug ?? slugify(name);
+  if (refork !== undefined && refork !== themeSlug) {
+    throw new ForkError(`--refork must repeat the theme slug exactly ("${themeSlug}"), got ${JSON.stringify(refork)}; nothing was changed.`, 'ERFORK');
+  }
+  const themesDir = path.join(preflight.publicPath, 'wp-content', 'themes');
+  // Refuse before touching anything when the fork's build state was made for another site.
+  assertStateSite(path.join(themesDir, themeSlug), preflight);
+  // An existing fork is reused as-is, so it needs no download (re-runs work offline).
+  const reusable = refork === undefined && Boolean(inspectThemeDir(path.join(themesDir, themeSlug)).marker);
+
   const wp = d.createWp(preflight);
-  const plugins = await d.ensurePlugins(wp);
-  const { zipFile, forkedFrom, cleanup } = await d.fetchThemeZip();
+  const plugins = await d.ensurePlugins(wp, { updatePlugins });
+  const forkOpts = { wp, themesDir, name, slug, force, ...(refork !== undefined ? { refork } : {}) };
   let theme;
   let assets;
-  try {
-    theme = d.forkTheme({ wp, themesDir: path.join(preflight.publicPath, 'wp-content', 'themes'), name, slug, force, zipFile, forkedFrom });
+  if (reusable) {
+    theme = d.forkTheme(forkOpts);
     assets = d.installThemeAssets(theme.themeDir);
-  } finally {
-    cleanup();
+  } else {
+    const { zipFile, forkedFrom, cleanup } = await d.fetchThemeZip();
+    try {
+      theme = d.forkTheme({ ...forkOpts, zipFile, forkedFrom });
+      assets = d.installThemeAssets(theme.themeDir);
+    } finally {
+      cleanup();
+    }
   }
 
   const siteState = {
@@ -42,21 +58,26 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
     ...(preflight.localSite ? { localSiteId: preflight.localSite.id } : {}),
   };
   if (fs.existsSync(statePath(theme.themeDir))) {
-    updateState(theme.themeDir, (s) => { setPath(s, 'site.theme', siteState.theme); setPath(s, 'site.url', siteState.url); });
+    assertStateSite(theme.themeDir, preflight);
+    updateState(theme.themeDir, (s) => {
+      for (const k of ['theme', 'path', 'wp']) setPath(s, `site.${k}`, siteState[k]);
+      if (siteState.localSiteId) setPath(s, 'site.localSiteId', siteState.localSiteId);
+    });
   } else {
     initState(theme.themeDir, siteState);
   }
   return { preflight: { mode: preflight.mode, url: preflight.url, checks: preflight.checks }, plugins, theme, assets, stateFile: statePath(theme.themeDir) };
 }
 
-const VALUE_FLAGS = new Set(['name', 'slug', 'site', 'cwd']);
+const VALUE_FLAGS = new Set(['name', 'slug', 'site', 'cwd', 'refork']);
 
 export function parseArgs(argv) {
   const usage = (msg) => Object.assign(new Error(msg), { code: 'EUSAGE' });
-  const a = { force: false };
+  const a = { force: false, updatePlugins: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--force') a.force = true;
+    else if (arg === '--update-plugins') a.updatePlugins = true;
     else if (arg.startsWith('--') && VALUE_FLAGS.has(arg.slice(2))) {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith('--')) throw usage(`${arg} needs a value`);
@@ -74,7 +95,7 @@ async function main(argv) {
     process.stderr.write(`${e.message}\n${USAGE}`);
     process.exit(64);
   }
-  const r = await setupSite({ cwd: a.cwd ?? process.cwd(), site: a.site, name: a.name, slug: a.slug, force: a.force });
+  const r = await setupSite({ cwd: a.cwd ?? process.cwd(), site: a.site, name: a.name, slug: a.slug, force: a.force, refork: a.refork, updatePlugins: a.updatePlugins });
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
 }
 

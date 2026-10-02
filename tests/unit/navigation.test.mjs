@@ -3,85 +3,149 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { upsertMenu, refreshMenus } from '../../skills/protoblocks-site-builder/scripts/lib/navigation.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { upsertMenu, refreshMenus, NAV_BACKUP_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/navigation.mjs';
 import { initState, loadState, updateState, setPath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
+import { createWp, WpError } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 
-function fakeWp(results) {
+// Fake wp: records (cmd, payload) for evalFilePayload and answers from a per-command queue.
+function fakeWp(results = {}) {
   const calls = [];
   return {
     calls,
-    evalFile(script, args) {
-      const spec = JSON.parse(fs.readFileSync(args[2], 'utf8'));
-      calls.push({ script, args: [...args], spec });
-      return results.shift();
+    evalFile() { throw new Error('navigation must pass data through evalFilePayload'); },
+    evalFilePayload(script, cmd, data) {
+      calls.push({ script, cmd, data: structuredClone(data) });
+      const q = results[cmd] ?? [];
+      const r = q.shift();
+      if (r instanceof Error) throw r;
+      return r;
     },
   };
 }
+const theme = () => {
+  const t = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navunit-'));
+  initState(t, { url: 'http://x.local', path: '/x' });
+  return t;
+};
+const phpFail = (code, msg) => new WpError(['eval-file'], { code: 1, stdout: '', stderr: `[${code}] ${msg}\n` });
 
-test('upsertMenu passes upsert/key/spec file and removes the temp file', () => {
-  const wp = fakeWp([{ id: 5, key: 'primary', created: true, pending: [] }]);
+test('upsertMenu sends key, spec, expectHash and force through a payload (never argv)', () => {
+  const wp = fakeWp({ upsert: [{ id: 5, key: 'primary', created: true, pending: [], contentHash: 'h1' }] });
   const spec = { title: 'P', items: [{ label: 'He said "hi" <b>', url: 'https://x' }] };
-  const r = upsertMenu(wp, 'primary', spec);
+  const r = upsertMenu(wp, 'primary', spec, { expectHash: 'h0' });
   assert.equal(r.id, 5);
   assert.match(wp.calls[0].script, /navigation\.php$/);
-  assert.deepEqual(wp.calls[0].args.slice(0, 2), ['upsert', 'primary']);
-  assert.deepEqual(wp.calls[0].spec, spec);
-  assert.ok(!fs.existsSync(wp.calls[0].args[2]));
+  assert.equal(wp.calls[0].cmd, 'upsert');
+  assert.deepEqual(wp.calls[0].data, { key: 'primary', spec, expectHash: 'h0', force: false });
 });
 
-test('upsertMenu removes the temp file when wp throws', () => {
-  const wp = { evalFile(_s, args) { wp.file = args[2]; throw new Error('boom'); } };
-  assert.throws(() => upsertMenu(wp, 'k', { items: [] }), /boom/);
-  assert.ok(!fs.existsSync(wp.file));
-});
-
-test('refreshMenus re-upserts only menus with pending links and records the result', () => {
-  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navunit-'));
-  initState(theme, { url: 'http://x.local', path: '/x' });
-  const specA = { items: [{ label: 'A', page: 'a' }] };
-  const specB = { items: [{ label: 'B', page: 'b' }] };
-  updateState(theme, (s) => {
-    setPath(s, 'site.navigation.menus.a', { id: 1, spec: specA, pending: [{ label: 'A', page: 'a' }] });
-    setPath(s, 'site.navigation.menus.b', { id: 2, spec: specB, pending: [] });
+test('upsertMenu maps PHP [EEDITED] to an EEDITED error explaining the Site Editor edit and --force', () => {
+  const wp = fakeWp({ upsert: [phpFail('EEDITED', 'Menu "primary" (wp_navigation 5) changed since protoblocks last wrote it.')] });
+  assert.throws(() => upsertMenu(wp, 'primary', { items: [] }, { expectHash: 'old' }), (e) => {
+    assert.equal(e.code, 'EEDITED');
+    assert.match(e.message, /Site Editor/);
+    assert.match(e.message, /--force/);
+    assert.match(e.message, /backups/);
+    return true;
   });
-  const still = [{ label: 'A', page: 'a' }];
-  const wp = fakeWp([{ id: 9, key: 'a', created: false, pending: still }]);
-  assert.deepEqual(refreshMenus(wp, theme), { refreshed: ['a'] });
-  assert.equal(wp.calls.length, 1);
-  assert.deepEqual(wp.calls[0].spec, specA);
-  const menus = loadState(theme).site.navigation.menus;
-  assert.equal(menus.a.id, 9);
-  assert.deepEqual(menus.a.pending, still);
-  assert.deepEqual(menus.a.spec, specA);
-  assert.deepEqual(menus.b.pending, []);
+});
+
+test('upsertMenu with force saves the current menu content to a backup file first', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navbak-'));
+  const wp = fakeWp({ get: [{ id: 5, content: '<!-- wp:navigation-link {"label":"Edited"} /-->', contentHash: 'x' }], upsert: [{ id: 5, key: 'primary', created: false, pending: [], contentHash: 'h2' }] });
+  const r = upsertMenu(wp, 'primary', { items: [] }, { force: true, backupDir: dir });
+  assert.deepEqual(wp.calls.map((c) => c.cmd), ['get', 'upsert']);
+  assert.equal(wp.calls[1].data.force, true);
+  assert.match(path.basename(r.backup), /^nav-primary-\d{4}-\d{2}-\d{2}T.*\.html$/);
+  assert.equal(path.dirname(r.backup), dir);
+  assert.equal(fs.readFileSync(r.backup, 'utf8'), '<!-- wp:navigation-link {"label":"Edited"} /-->');
+});
+
+test('upsertMenu force without a backup dir is refused before touching WP', () => {
+  const wp = fakeWp();
+  assert.throws(() => upsertMenu(wp, 'primary', { items: [] }, { force: true }), (e) => e.code === 'EUSAGE');
+  assert.equal(wp.calls.length, 0);
+});
+
+test('upsertMenu force with no existing menu writes no backup', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navbak-'));
+  const wp = fakeWp({ get: [{ id: null, content: '', contentHash: null }], upsert: [{ id: 7, key: 'k', created: true, pending: [], contentHash: 'h' }] });
+  const r = upsertMenu(wp, 'k', { items: [] }, { force: true, backupDir: dir });
+  assert.equal(r.backup, undefined);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('refreshMenus only patches pending links (refresh command), records the new hash and keeps the spec', () => {
+  const t = theme();
+  const specA = { items: [{ label: 'A', page: 'a' }, { label: 'B', page: 'b' }] };
+  const specB = { items: [{ label: 'C', page: 'c' }] };
+  updateState(t, (s) => {
+    setPath(s, 'site.navigation.menus.a', { id: 1, spec: specA, pending: [{ label: 'A', page: 'a' }, { label: 'B', page: 'b' }], contentHash: 'old' });
+    setPath(s, 'site.navigation.menus.b', { id: 2, spec: specB, pending: [], contentHash: 'hb' });
+  });
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [{ label: 'A', page: 'a' }], pending: [{ label: 'B', page: 'b' }], missing: [], previousHash: 'old', contentHash: 'new' }] });
+  const r = refreshMenus(wp, t);
+  assert.deepEqual(r.refreshed, ['a']);
+  assert.deepEqual(r.menus.a.patched, [{ label: 'A', page: 'a' }]);
+  assert.deepEqual(wp.calls.map((c) => c.cmd), ['refresh']);
+  assert.deepEqual(wp.calls[0].data, { key: 'a', pending: [{ label: 'A', page: 'a' }, { label: 'B', page: 'b' }] });
+  const menus = loadState(t).site.navigation.menus;
+  assert.deepEqual(menus.a, { id: 1, spec: specA, pending: [{ label: 'B', page: 'b' }], contentHash: 'new' });
+  assert.deepEqual(menus.b, { id: 2, spec: specB, pending: [], contentHash: 'hb' });
+});
+
+test('refresh of a menu edited in the Site Editor keeps the old stored hash, so the EEDITED guard survives', () => {
+  const t = theme();
+  updateState(t, (s) => { setPath(s, 'site.navigation.menus.a', { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }], contentHash: 'written' }); });
+  // The live menu hashed to 'edited' before the patch (someone changed it), 'patched' after.
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [{ label: 'A', page: 'a' }], pending: [], missing: [], previousHash: 'edited', contentHash: 'patched' }] });
+  refreshMenus(wp, t);
+  const m = loadState(t).site.navigation.menus.a;
+  assert.equal(m.contentHash, 'written', 'hash not advanced over Site Editor edits');
+  assert.deepEqual(m.pending, [], 'the safe pending-link patch is still recorded');
+  // A later plain upsert therefore still sends the old hash, which PHP will reject with EEDITED.
+  const up = fakeWp({ upsert: [Object.assign(new WpError(['eval-file'], { code: 1, stdout: '', stderr: '[EEDITED] changed\n' }))] });
+  assert.throws(() => upsertMenu(up, 'a', { items: [] }, { expectHash: m.contentHash }), (e) => e.code === 'EEDITED');
+  assert.equal(up.calls[0].data.expectHash, 'written');
+});
+
+test('refreshMenus drops pending links that were removed in the Site Editor and reports them', () => {
+  const t = theme();
+  updateState(t, (s) => { setPath(s, 'site.navigation.menus.a', { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }], contentHash: 'h' }); });
+  const wp = fakeWp({ refresh: [{ id: 1, key: 'a', patched: [], pending: [], missing: [{ label: 'A', page: 'a' }], previousHash: 'h', contentHash: 'h' }] });
+  const r = refreshMenus(wp, t);
+  assert.deepEqual(r.menus.a.missing, [{ label: 'A', page: 'a' }]);
+  assert.deepEqual(loadState(t).site.navigation.menus.a.pending, []);
 });
 
 test('refreshMenus with no navigation state refreshes nothing', () => {
-  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navunit-'));
-  initState(theme, { url: 'http://x.local', path: '/x' });
-  assert.deepEqual(refreshMenus(fakeWp([]), theme), { refreshed: [] });
+  assert.deepEqual(refreshMenus(fakeWp(), theme()).refreshed, []);
 });
 
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
 test('upsertMenu rejects invalid keys with ENAVKEY before calling WP', () => {
-  for (const bad of ['', 'Has Space', 'UPPER', '../x', 'a/b', 'a.b']) {
-    const wp = fakeWp([]);
+  for (const bad of ['', 'Has Space', 'UPPER', '../x', 'a/b', 'a.b', '--exec=1', undefined, 5]) {
+    const wp = fakeWp();
     assert.throws(() => upsertMenu(wp, bad, { items: [] }), (e) => e.code === 'ENAVKEY', `key ${JSON.stringify(bad)}`);
     assert.equal(wp.calls.length, 0);
   }
-  const ok = fakeWp([{ id: 1, key: 'a_b-1', created: true, pending: [] }]);
+  const ok = fakeWp({ upsert: [{ id: 1, key: 'a_b-1', created: true, pending: [], contentHash: 'h' }] });
   assert.equal(upsertMenu(ok, 'a_b-1', { items: [] }).id, 1);
 });
 
-test('refreshMenus stores state under the key WP returned', () => {
-  const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-navunit-'));
-  initState(theme, { url: 'http://x.local', path: '/x' });
-  updateState(theme, (s) => { setPath(s, 'site.navigation.menus.a', { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }] }); });
-  const wp = fakeWp([{ id: 1, key: 'a', created: false, pending: [] }]);
-  refreshMenus(wp, theme);
-  assert.deepEqual(Object.keys(loadState(theme).site.navigation.menus), ['a']);
+test('NAV_BACKUP_DIR lives under the theme .protoblocks/artifacts/backups', () => {
+  assert.equal(NAV_BACKUP_DIR('/t'), path.join('/t', '.protoblocks', 'artifacts', 'backups'));
+});
+
+test('upsertMenu goes through the real createWp payload path (no positional data)', () => {
+  let args;
+  const exec = (cmd, a) => { args = a; return { code: 0, stdout: '{"id":3,"key":"k","created":true,"pending":[],"contentHash":"h"}\n', stderr: '' }; };
+  const wp = createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec });
+  upsertMenu(wp, 'k', { items: [{ label: '--exec=boom', url: '--require=x' }] });
+  assert.equal(args.length, 4);
+  assert.equal(args[2], 'upsert');
+  assert.ok(!args.some((a) => a.startsWith('-')));
 });
 
 test('CLI upsert without a spec file prints usage and exits 64', () => {
@@ -89,4 +153,17 @@ test('CLI upsert without a spec file prints usage and exits 64', () => {
   const r = spawnSync(process.execPath, [script, 'upsert', os.tmpdir(), 'primary'], { encoding: 'utf8' });
   assert.equal(r.status, 64);
   assert.match(r.stderr, /Usage/);
+});
+
+test('menu keys must start with a letter or digit, and prototype-like keys are refused (ENAVKEY)', () => {
+  for (const bad of ['-x', '_x', '__proto__', 'constructor', 'prototype', '-', '_']) {
+    const wp = fakeWp();
+    assert.throws(() => upsertMenu(wp, bad, { items: [] }), (e) => e.code === 'ENAVKEY', `key ${JSON.stringify(bad)}`);
+    assert.equal(wp.calls.length, 0);
+  }
+  const t = theme();
+  updateState(t, (s) => { s.site.navigation = { menus: { _x: { id: 1, spec: { items: [] }, pending: [{ label: 'A', page: 'a' }] } } }; });
+  const wp = fakeWp();
+  assert.throws(() => refreshMenus(wp, t), (e) => e.code === 'ENAVKEY');
+  assert.equal(wp.calls.length, 0);
 });

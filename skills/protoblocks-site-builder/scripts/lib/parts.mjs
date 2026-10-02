@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { assertFork } from './guards.mjs';
 import { blockComment } from './blocks.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'parts.php');
@@ -17,14 +18,20 @@ export function partMarkup({ block, attrs = {}, navRef }) {
 
 export function writePart(themeDir, slug, markup) {
   if (typeof slug !== 'string' || !SLUG_RE.test(slug)) throw new Error(`Invalid part slug "${slug}"`);
+  assertFork(themeDir);
   const file = path.join(themeDir, 'parts', `${slug}.html`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, markup);
   return file;
 }
 
+const shq = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
+
+// The WP-CLI command preflight resolved (Local's wrapper, or `wp --path=...`), quoted for a shell.
+export const wpShellCommand = (rt) => (rt.mode === 'native' ? `wp --path=${shq(rt.publicPath)}` : shq(rt.wp));
+
 // WP-CLI has no `post untrash`; wp_untrash_post restores to draft, so republish to make the override live again.
-export const recoveryCommand = (id) => `wp eval 'wp_untrash_post(${id});' && wp post update ${id} --post_status=publish`;
+export const recoveryCommand = (id, wpCmd = 'wp') => `${wpCmd} eval 'wp_untrash_post(${id});' && ${wpCmd} post update ${id} --post_status=publish`;
 
 function fail(code, message, extra = {}) {
   const e = new Error(message);
@@ -55,7 +62,7 @@ export function listOverrides(wp, theme) {
   return callParts(wp, ['overrides', theme]);
 }
 
-export function removeOverride(wp, theme, slug, { confirm, expectId } = {}) {
+export function removeOverride(wp, theme, slug, { confirm, expectId, wpCmd = 'wp' } = {}) {
   checkTheme(theme);
   checkSlug(slug);
   const rows = callParts(wp, ['preview', theme, slug]);
@@ -65,11 +72,11 @@ export function removeOverride(wp, theme, slug, { confirm, expectId } = {}) {
   if (rows.length === 0) return { removed: [], records: [], recovery: [] };
   const [row] = rows;
   if (confirm !== true || !Number.isInteger(expectId) || expectId <= 0) {
-    fail('ECONFIRM', `The Site Editor has a saved copy of the "${slug}" part. Removing it (to Trash) discards edits made there. Would remove: ${JSON.stringify(rows)}. Ask the developer, then re-run with --confirm --id ${row.id}. Recover later with: ${recoveryCommand(row.id)}`, { rows });
+    fail('ECONFIRM', `The Site Editor has a saved copy of the "${slug}" part. Removing it (to Trash) discards edits made there. Would remove: ${JSON.stringify(rows)}. Ask the developer, then re-run with --confirm --id ${row.id}. Recover later with: ${recoveryCommand(row.id, wpCmd)}`, { rows });
   }
   if (expectId !== row.id) fail('ESTALE', `The saved "${slug}" part is now ID ${row.id}, not the previewed ${expectId}. Re-run the preview and confirm again; nothing was removed.`, { rows });
   const res = callParts(wp, ['remove-override', theme, slug, 'confirm', String(expectId)]);
-  return { ...res, recovery: res.removed.map(recoveryCommand) };
+  return { ...res, recovery: res.removed.map((id) => recoveryCommand(id, wpCmd)) };
 }
 
 function idArg(argv) {
@@ -77,16 +84,21 @@ function idArg(argv) {
   return i >= 0 ? Number(argv[i + 1]) : undefined;
 }
 
+const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>]\n';
+
 function main(argv) {
   const [cmd, themeDir, slug, file] = argv;
   const theme = themeDir ? path.basename(path.resolve(themeDir)) : '';
   const out = (v) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
+  if (!['write', 'overrides', 'remove-override'].includes(cmd) || !themeDir) {
+    process.stderr.write(USAGE);
+    process.exit(64);
+  }
+  const rt = loadThemeRuntime(themeDir);
   if (cmd === 'write') return out({ written: writePart(themeDir, slug, fs.readFileSync(file, 'utf8')) });
-  const wp = createWp(loadRuntime(themeDir));
+  const wp = createWp(rt);
   if (cmd === 'overrides') return out(listOverrides(wp, theme));
-  if (cmd === 'remove-override') return out(removeOverride(wp, theme, slug, { confirm: argv.includes('--confirm'), expectId: idArg(argv) }));
-  process.stderr.write('Usage: node parts.mjs write <themeDir> <slug> <markupFile> | overrides <themeDir> | remove-override <themeDir> <slug> [--confirm --id <n>]\n');
-  process.exit(64);
+  return out(removeOverride(wp, theme, slug, { confirm: argv.includes('--confirm'), expectId: idArg(argv), wpCmd: wpShellCommand(rt) }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
