@@ -209,6 +209,9 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
     imageErrors: bp({ imageErrors: ['http://a.local/x.png'] }),
     missingBreakpoint: { breakpoints: [] },
     nothingFailed: bp({ pass: true }),
+    // Warnings that mean the comparison itself is not trustworthy: a truncated screenshot, masks not where the content is.
+    truncated: { warnings: [`desktop: ${fitScale(20000, 1).warning}`] },
+    maskAnchorMissing: { warnings: ['desktop: #pb-s3 is not on the page; its masks are applied at the design position only.'] },
   };
   for (const [name, extra] of Object.entries(cases)) {
     const dir = stateWith([qaPage()]);
@@ -216,6 +219,9 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
     assert.deepEqual([loadState(dir).pages[0].status, loadState(dir).pages[0].pageQa], ['building', undefined], name);
   }
   assert.deepEqual(acceptBlockers(designFail(), [{ breakpoint: 'desktop' }]), []);
+  assert.deepEqual(acceptBlockers(designFail({ warnings: ['seeded note', 'desktop: section 2 (#pb-s2) has masks but no crop range in state; they are not applied to page QA (re-run intake.mjs crop to record ranges).'] }), [{ breakpoint: 'desktop' }]), [], 'other warnings do not block');
+  assert.match(acceptBlockers(designFail({ warnings: [`desktop: ${fitScale(20000, 1).warning}`] }), [{ breakpoint: 'desktop' }]).join(), /truncated/);
+  assert.match(acceptBlockers(designFail({ warnings: ['mobile: #pb-s9 is not on the page; its masks are applied at the design position only.'] }), [{ breakpoint: 'desktop' }]).join(), /#pb-s9/);
   assert.match(acceptBlockers(designFail(), [{ breakpoint: 'desktop' }, { breakpoint: 'mobile' }]).join(), /mobile was not checked/);
 });
 

@@ -170,7 +170,7 @@ node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json" --accepted "<what they accepted>"
 ```
 
-   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
 
 ### `seo`
 

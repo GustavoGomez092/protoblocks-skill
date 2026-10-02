@@ -35,6 +35,10 @@ export function fitScale(cssHeight, scale) {
   if (fit >= 1) return { scaleUsed: Math.min(fit, Math.floor(scale) || 1), warning: null };
   return { scaleUsed: 1, warning: `Page is ${cssHeight}px tall: even at scale 1 it exceeds the ${MAX_SURFACE_PX}px surface limit; the screenshot may be truncated.` };
 }
+const missingAnchorWarning = (bp, anchor) => `${bp}: #${anchor} is not on the page; its masks are applied at the design position only.`;
+// pageQa warnings that make a failing comparison untrustworthy, so its differences cannot be accepted.
+const TRUNCATED_WARNING = /the screenshot may be truncated/;
+const MISSING_ANCHOR_WARNING = /: #([A-Za-z0-9_-]+) is not on the page; its masks are applied at the design position only\.$/;
 
 function validateInput({ url, frames, outDir }) {
   if (typeof url !== 'string' || !url.trim()) throw inputError('pageQa needs a non-empty url.');
@@ -54,20 +58,25 @@ function validateInput({ url, frames, outDir }) {
   });
 }
 
-// Document height and the document-top (CSS px) of each anchor, measured in one page load (null: anchor not found).
+// Document height and the top of each anchor relative to the top of body (CSS px; the page shot is of body), measured in
+// one page load (null: anchor not found).
 async function measurePage(browser, openPage, url, width, anchors = []) {
   const { page, context } = await openPage(browser, { url, width, scale: 1 });
   try {
-    return await page.evaluate((ids) => ({
-      height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0),
-      tops: Object.fromEntries(ids.map((id) => { const el = document.getElementById(id); return [id, el ? el.getBoundingClientRect().top + window.scrollY : null]; })),
-    }), anchors);
+    return await page.evaluate((ids) => {
+      const bodyTop = document.body ? document.body.getBoundingClientRect().top : 0;
+      return {
+        height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0),
+        tops: Object.fromEntries(ids.map((id) => { const el = document.getElementById(id); return [id, el ? el.getBoundingClientRect().top - bodyTop : null]; })),
+      };
+    }, anchors);
   } finally { await context.close().catch(() => {}); }
 }
 
 /**
- * Section masks at the position the section actually renders: `tops` are the anchors' document tops in CSS px and
- * `pxPerCss` the frame's design pixels per CSS px (the render is resized to the design width before the diff).
+ * Section masks at the position the section actually renders: `tops` are the anchors' tops below the top of body (the
+ * page shot) in CSS px and `pxPerCss` the frame's design pixels per CSS px (the render is resized to the design width
+ * before the diff).
  */
 export function renderMasks(sectionMasks = [], tops = {}, pxPerCss = 1) {
   const masks = [];
@@ -99,7 +108,7 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
       const sectionMasks = f.sectionMasks ?? [];
       const { height: documentHeightPx, tops } = await measurePage(b, openPage, url, f.width, sectionMasks.map((x) => x.anchor));
       const atRender = renderMasks(sectionMasks, tops, f.pxPerCss ?? 1);
-      for (const a of atRender.missing) result.warnings.push(`${f.breakpoint}: #${a} is not on the page; its masks are applied at the design position only.`);
+      for (const a of atRender.missing) result.warnings.push(missingAnchorWarning(f.breakpoint, a));
       // Union: the design position (where the design has the masked content) and the render position (where the page has it).
       const masks = [...(f.masks ?? []), ...atRender.masks];
       const { scaleUsed, warning } = fitScale(documentHeightPx, requested);
@@ -160,7 +169,8 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
 
 /**
  * Why a failing page-QA result cannot be accepted by the developer: only design differences (a breakpoint over the
- * mismatch or height threshold) can be; errors, a11y, broken media, HTTP errors, full masks and missing breakpoints cannot.
+ * mismatch or height threshold) can be; errors, a11y, broken media, HTTP errors, full masks, missing breakpoints, a
+ * truncated screenshot and masks whose anchor is not on the page cannot.
  */
 export function acceptBlockers(r, frames = []) {
   const out = [];
@@ -168,6 +178,11 @@ export function acceptBlockers(r, frames = []) {
   if (r.a11y?.error !== undefined) out.push(`axe did not run: ${r.a11y.error}`);
   if ((r.a11y?.blocking ?? []).length) out.push(`blocking a11y violations: ${r.a11y.blocking.map((v) => v.id).join(', ')}`);
   if ((r.pageErrors ?? []).length) out.push(`page errors: ${r.pageErrors.length}`);
+  for (const w of r.warnings ?? []) {
+    if (TRUNCATED_WARNING.test(w)) out.push(`the screenshot may be truncated (${w}): shorten the page or compare it in parts`);
+    const m = String(w).match(MISSING_ANCHOR_WARNING);
+    if (m) out.push(`masks of #${m[1]} could not be placed (the anchor is not on the page): fix the anchor, then re-run page QA`);
+  }
   const bps = Array.isArray(r.breakpoints) ? r.breakpoints : [];
   for (const f of frames) if (!bps.some((b) => b?.name === f.breakpoint)) out.push(`breakpoint ${f.breakpoint} was not checked`);
   for (const b of bps) {

@@ -37,7 +37,7 @@ Draft or private page: QA loads the page as an anonymous visitor, so a draft, pe
 
 ### Error-shaped verdicts
 
-`{"pass":false,"error":"..."}` means the check itself failed (missing dependencies, `[EINPUT]`, `[EANCHOR]`, timeout). `record` keeps the status `verifying` and does not count it as an iteration. Fix the environment (install the QA deps in `scripts/qa`, check the URL, retry the page) and re-run from `prepare`. Do not edit the block for it.
+`{"pass":false,"error":"..."}` means the check itself failed (missing dependencies, `[EINPUT]`, `[EANCHOR]`, timeout, `[ELOADTIMEOUT]`: the page never finished loading because a stylesheet stalled; the error lists the pending URLs, often an unreachable third-party font: self-host it). `record` keeps the status `verifying` and does not count it as an iteration. Fix the environment (install the QA deps in `scripts/qa`, check the URL, retry the page) and re-run from `prepare`. Do not edit the block for it.
 
 ## Fix by discrepancy type
 

@@ -250,3 +250,18 @@ qtest('pageQa unions design-position masks with masks at the measured render pos
     assert.ok(r.warnings.some((w) => /#pb-nowhere is not on the page/.test(w)), JSON.stringify(r.warnings));
   } finally { await srv.close(); }
 });
+
+qtest('render-position masks are measured from the top of body (the shot), not of the document', async () => {
+  const { pageQa, shoot } = await load();
+  const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>offset</title><style>body{margin:48px 0 0;font-family:Arial,sans-serif} section{height:400px} #pb-s1{background:#1e3a8a} #pb-s2{background:#f1f5f9}</style></head><body><main><section id="pb-s1"></section><section id="pb-s2"></section></main></body></html>';
+  const srv = await serveFixtures({ '/offset.html': { type: 'text/html', body: page } });
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/offset.html`;
+    const design = (await shoot({ url, selector: 'body', width: 1000, out: path.join(d, 'design.png') })).out;
+    const frame = { breakpoint: 'desktop', width: 1000, scale: 1, image: design, sectionMasks: [{ anchor: 'pb-s2', masks: [{ x: 0, y: 10, w: 100, h: 20 }] }], pxPerCss: 1 };
+    const r = await pageQa({ url, frames: [frame], outDir: path.join(d, 'out') });
+    // #pb-s2 starts 400 px into body (48 px further down the document); the shot is of body.
+    assert.deepEqual(r.breakpoints[0].masks, [{ x: 0, y: 410, w: 100, h: 20 }]);
+  } finally { await srv.close(); }
+});
