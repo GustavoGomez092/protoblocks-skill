@@ -6,13 +6,18 @@ import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { statePath, updateState, setPath } from './state.mjs';
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([^;{}]+\)|transparent|currentColor)$/;
-const LENGTH = /^(0|-?\d*\.?\d+(px|rem|em|%|vw|vh|ch)|(clamp|calc|min|max)\([^;{}]+\))$/;
+const COLOR = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|color)\([\w\s.,%+\-*\/()#]+\)|transparent|currentColor)$/;
+const LENGTH = /^(0|-?\d*\.?\d+(px|rem|em|%|vw|vh|ch)|(clamp|calc|min|max)\([\w\s.,%+\-*\/()#]+\))$/;
 const UNITLESS = /^-?\d*\.?\d+$/;
-const SAFE = (v) => typeof v === 'string' && v.trim() !== '' && !/[;{}]/.test(v);
+const UNSAFE = /[;{}\\]|\/\*|\*\/|[\r\n]|@|url\(/i;
+const SAFE = (v) => typeof v === 'string' && v.trim() !== '' && !UNSAFE.test(v);
+const FAMILY = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,60}$/;
+const FALLBACK_ITEM = /^[A-Za-z0-9 \-"']+$/;
+const fallbackOk = (v) => SAFE(v) && v.split(',').every((i) => FALLBACK_ITEM.test(i.trim()));
 const DEFAULT_FALLBACK = 'ui-sans-serif, system-ui, sans-serif';
 
 export function validateTokens(t) {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return ['tokens: must be an object'];
   const errors = [];
   const group = (key, check) => {
     if (t[key] === undefined) return;
@@ -26,8 +31,8 @@ export function validateTokens(t) {
   if (!t.colors || typeof t.colors !== 'object' || !Object.keys(t.colors).length) errors.push('colors: at least one color is required');
   group('colors', (v) => (SAFE(v) && COLOR.test(v.trim()) ? null : `invalid color ${JSON.stringify(v)}`));
   group('fonts', (v) => {
-    if (!v || !SAFE(v.family) || /["']/.test(v.family)) return 'needs a "family" string without quotes';
-    if (v.fallback !== undefined && !SAFE(v.fallback)) return 'invalid fallback';
+    if (!v || typeof v.family !== 'string' || !FAMILY.test(v.family)) return 'invalid family (letters, digits, spaces and hyphens only, max 61 chars)';
+    if (v.fallback !== undefined && !fallbackOk(v.fallback)) return 'invalid fallback';
     if (v.google !== undefined && !(Array.isArray(v.google) && v.google.every((w) => Number.isInteger(w) && w >= 100 && w <= 900))) return 'google must be an array of weights 100–900';
     return null;
   });
@@ -47,7 +52,7 @@ export function validateTokens(t) {
   return errors;
 }
 
-const fontStack = (f) => `"${f.family}", ${f.fallback ?? DEFAULT_FALLBACK}`;
+const fontStack = (f) => `"${f.family.trim()}", ${f.fallback ?? DEFAULT_FALLBACK}`;
 const title = (k) => k.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 
 export function renderTailwindTheme(t) {
@@ -98,7 +103,7 @@ export function mergeThemeJson(json, t) {
 export function googleFontsUrl(t) {
   const fams = Object.values(t.fonts ?? {}).filter((f) => Array.isArray(f.google) && f.google.length);
   if (!fams.length) return null;
-  const parts = fams.map((f) => `family=${f.family.trim().replace(/\s+/g, '+')}:wght@${[...new Set(f.google)].sort((a, b) => a - b).join(';')}`);
+  const parts = fams.map((f) => `family=${encodeURIComponent(f.family.trim()).replace(/%20/g, '+')}:wght@${[...new Set(f.google)].sort((a, b) => a - b).join(';')}`);
   return `https://fonts.googleapis.com/css2?${parts.join('&')}&display=swap`;
 }
 
@@ -127,23 +132,38 @@ export function applyTokens(themeDir, t) {
   const tw = path.join(themeDir, 'tailwind-theme.css');
   const tj = path.join(themeDir, 'theme.json');
   const st = path.join(themeDir, 'style.css');
-  fs.writeFileSync(tw, renderTailwindTheme(t));
-  fs.writeFileSync(tj, `${JSON.stringify(mergeThemeJson(JSON.parse(fs.readFileSync(tj, 'utf8')), t), null, '\t')}\n`);
-  fs.writeFileSync(st, rewriteFontImport(fs.readFileSync(st, 'utf8'), t));
+  // Read and compute everything first so a missing/unparseable input throws before any write.
+  const outputs = [
+    [tw, renderTailwindTheme(t)],
+    [tj, `${JSON.stringify(mergeThemeJson(JSON.parse(fs.readFileSync(tj, 'utf8')), t), null, '\t')}\n`],
+    [st, rewriteFontImport(fs.readFileSync(st, 'utf8'), t)],
+  ];
+  for (const [file, content] of outputs) fs.writeFileSync(`${file}.tmp`, content);
+  for (const [file] of outputs) fs.renameSync(`${file}.tmp`, file);
   return { written: ['tailwind-theme.css', 'theme.json', 'style.css'] };
+}
+
+export function runApply(themeDir, t, { compile } = {}) {
+  const { written } = applyTokens(themeDir, t);
+  let compiled = null;
+  if (compile) {
+    compiled = compile();
+    if (!compiled || compiled.success === false) {
+      const e = new Error(`Tailwind compile failed: ${compiled?.message ?? compiled?.error ?? JSON.stringify(compiled)}`);
+      e.code = 'ECOMPILE';
+      throw e;
+    }
+  }
+  if (fs.existsSync(statePath(themeDir))) updateState(themeDir, (s) => { setPath(s, 'site.tokens', t); });
+  return { written, compiled };
 }
 
 function main(argv) {
   const [cmd, themeDir, file] = argv;
   if (cmd !== 'apply' || !themeDir || !file) { process.stderr.write('Usage: node tokens.mjs apply <themeDir> <tokens.json> [--no-compile]\n'); process.exit(64); }
   const t = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const { written } = applyTokens(themeDir, t);
-  let compiled = null;
-  if (!argv.includes('--no-compile')) {
-    compiled = createWp(loadRuntime(themeDir)).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
-  }
-  if (fs.existsSync(statePath(themeDir))) updateState(themeDir, (s) => { setPath(s, 'site.tokens', t); });
-  process.stdout.write(`${JSON.stringify({ written, compiled }, null, 2)}\n`);
+  const compile = argv.includes('--no-compile') ? null : () => createWp(loadRuntime(themeDir)).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
+  process.stdout.write(`${JSON.stringify(runApply(themeDir, t, { compile }), null, 2)}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
