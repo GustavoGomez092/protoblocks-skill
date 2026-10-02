@@ -105,3 +105,46 @@ test('CLI: record <themeDir> <plan.json> prints the recorded sections; usage exi
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /^\[[A-Z]+\] /);
 });
+
+// ---- residuals ----------------------------------------------------------------------------------------------------
+function laterTheme() {
+  const theme = setup([['home', [1, 2, 3], {}], ['about', [1, 2, 4], {}]]);
+  updateState(theme, (s) => {
+    const h = s.pages[0].sections;
+    Object.assign(h[0], { anchor: 'pb-header', block: 'site-header', decision: 'new', inPart: true, status: 'done' });
+    Object.assign(h[2], { anchor: 'pb-footer', block: 'site-footer', decision: 'new', inPart: true, status: 'done' });
+  });
+  return theme;
+}
+
+test('later-page inPart rows get prevStatus done, so a pass returns them to done (never re-animated)', () => {
+  const theme = laterTheme();
+  recordPlan(theme, { page: 'about', sections: [
+    { n: 1, label: 'Header', decision: 'reuse', block: 'site-header', part: 'header' },
+    { n: 4, label: 'Footer', decision: 'reuse', block: 'site-footer', part: 'footer' },
+  ] });
+  const about = loadState(theme).pages[1];
+  assert.equal(about.sections[0].prevStatus, 'done');
+  assert.equal(about.sections[2].prevStatus, 'done');
+  assert.equal(about.sections[1].prevStatus, undefined);
+});
+
+test('part is derived from an existing part anchor when the row omits it', () => {
+  const theme = laterTheme();
+  updateState(theme, (s) => { s.pages[1].sections[0].anchor = 'pb-header'; }); // cropped with part: header
+  const out = recordPlan(theme, { page: 'about', sections: [{ n: 1, label: 'Header', decision: 'reuse', block: 'site-header' }] });
+  assert.deepEqual([out.sections[0].anchor, out.sections[0].inPart], ['pb-header', true]);
+  // and the later-page rule still applies to a derived part
+  const t2 = laterTheme();
+  updateState(t2, (s) => { s.pages[1].sections[0].anchor = 'pb-header'; });
+  assert.throws(() => recordPlan(t2, { page: 'about', sections: [{ n: 1, label: 'Header', decision: 'new', block: 'site-header' }] }), code('EPLAN'));
+});
+
+test('namespaced block names: proto-blocks/x and ns/x accepted, malformed ones refused', () => {
+  const theme = setup();
+  const out = recordPlan(theme, { page: 'home', sections: [{ n: 1, label: 'A', decision: 'new', block: 'proto-blocks/hero-split' }, { n: 3, label: 'B', decision: 'reuse', block: 'acme/x' }] });
+  assert.deepEqual(out.sections.map((s) => s.block), ['proto-blocks/hero-split', 'acme/x']);
+  for (const block of ['a/b/c', '/x', 'x/', 'Acme/x', 'acme/x--y']) {
+    assert.throws(() => recordPlan(setup(), { page: 'home', sections: [{ n: 1, label: 'A', decision: 'new', block }] }), code('EPLAN'), block);
+  }
+});

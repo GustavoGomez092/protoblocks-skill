@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { updateState } from './state.mjs';
-import { assertSlug, isSlug } from './slugs.mjs';
+import { assertSlug, parseBlockName } from './slugs.mjs';
 
 // Header and footer render from the theme's template parts on every page, so they get fixed anchors instead of
 // pb-s<n>: the part keeps one id site-wide, and a later page's own pb-s<n> can never collide with it.
@@ -12,7 +12,7 @@ const DECISIONS = ['new', 'reuse', 'extend'];
 const USAGE = 'Usage: node plan.mjs record <themeDir> <plan.json>\n';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
-const isBlock = (b) => typeof b === 'string' && b.split('/').length <= 2 && b.split('/').every(isSlug);
+const isBlock = (b) => { try { parseBlockName(b); return true; } catch { return false; } };
 
 function validatePlan(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw fail('EPLAN', 'The plan must be a JSON object {page, sections: [...]}.');
@@ -26,7 +26,7 @@ function validatePlan(plan) {
     if (seenN.has(p.n)) throw fail('EPLAN', `${at} is listed twice.`);
     seenN.add(p.n);
     if (!DECISIONS.includes(p.decision)) throw fail('EPLAN', `${at}: decision must be one of ${DECISIONS.join(', ')}.`);
-    if (!isBlock(p.block)) throw fail('EPLAN', `${at}: block must be a slug like "hero-split" (got ${JSON.stringify(p.block ?? null)}).`);
+    if (!isBlock(p.block)) throw fail('EPLAN', `${at}: block must be a slug like "hero-split" or "<namespace>/<slug>" (got ${JSON.stringify(p.block ?? null)}).`);
     if (typeof p.label !== 'string' || !p.label) throw fail('EPLAN', `${at}: label is required.`);
     if (p.notes !== undefined && typeof p.notes !== 'string') throw fail('EPLAN', `${at}: notes must be a string.`);
     if (p.part !== undefined) {
@@ -53,19 +53,24 @@ export function recordPlan(themeDir, plan) {
       if (!sec) throw fail('ENOSECTION', `No section n=${p.n} on page "${plan.page}" (run intake.mjs crop first).`);
       Object.assign(sec, { label: p.label, decision: p.decision, block: p.block });
       if (p.notes !== undefined) sec.notes = p.notes;
-      if (!p.part) continue;
-      const anchor = PART_ANCHORS[p.part];
+      // A row without `part` on a section already carrying a part anchor (cropped with part) is that part.
+      const part = p.part ?? Object.keys(PART_ANCHORS).find((k) => PART_ANCHORS[k] === sec.anchor);
+      if (!part) continue;
+      if (p.part === undefined && plan.sections.some((o) => o.part === part)) throw fail('EPLAN', `Section ${p.n} is the ${part} (#${sec.anchor}), but another row is marked as the ${part}.`);
+      const anchor = PART_ANCHORS[part];
       const clash = page.sections.find((x) => x.n !== p.n && x.anchor === anchor);
-      if (clash) throw fail('EPLAN', `Section ${clash.n} on "${plan.page}" already has the anchor ${anchor}; only one ${p.part} per page.`);
-      if (sec.anchor !== anchor && (sec.qa ?? []).length) throw fail('EPLAN', `Section ${p.n} was already verified as #${sec.anchor}; it cannot become the ${p.part} now.`);
+      if (clash) throw fail('EPLAN', `Section ${clash.n} on "${plan.page}" already has the anchor ${anchor}; only one ${part} per page.`);
+      if (sec.anchor !== anchor && (sec.qa ?? []).length) throw fail('EPLAN', `Section ${p.n} was already verified as #${sec.anchor}; it cannot become the ${part} now.`);
       sec.anchor = anchor;
       const inPartElsewhere = s.pages.some((o) => o.slug !== page.slug && o.sections.some((x) => x.anchor === anchor && x.inPart === true));
       if (inPartElsewhere) {
         if (p.decision !== 'reuse') {
-          throw fail('EPLAN', `The ${p.part} already renders from the theme's template part (built on another page), so on "${plan.page}" it must be planned as "reuse". To change it, follow "Editing the header later" in protoblocks-section-loop references/header-footer.md.`);
+          throw fail('EPLAN', `The ${part} already renders from the theme's template part (built on another page), so on "${plan.page}" it must be planned as "reuse". To change it, follow "Editing the header later" in protoblocks-section-loop references/header-footer.md.`);
         }
         sec.inPart = true;
         if (sec.status === 'planned') sec.status = 'building';
+        // Already built, verified and animated on the first page: a pass here returns it to done, never animating.
+        sec.prevStatus = 'done';
       }
     }
     page.plan = { approvedAt: new Date().toISOString(), by: 'developer' };

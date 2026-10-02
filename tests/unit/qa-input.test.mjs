@@ -400,3 +400,42 @@ test('capReached is stored on the qa records of that iteration so a resumed sess
   assert.ok(qa.filter((q) => q.iteration === 2).every((q) => q.capReached === true));
   assert.equal(qa.at(-1).capReached, true);
 });
+
+// ---- residuals ----------------------------------------------------------------------------------------------------
+test('recording the same iteration twice is refused: a done section stays done, no duplicate qa entries', () => {
+  const theme = setup();
+  updateState(theme, (s) => { s.pages[0].sections[0].status = 'done'; });
+  const dir = prep(theme);
+  const f = writeV(dir, verdict(true));
+  assert.equal(recordVerdict(theme, 'home', 1, f).status, 'done');
+  const before = loadState(theme).pages[0].sections[0].qa.length;
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/already recorded/));
+  const sec = loadState(theme).pages[0].sections[0];
+  assert.equal(sec.status, 'done');
+  assert.equal(sec.qa.length, before);
+  // a failing verdict for an already-recorded iteration is refused too
+  assert.throws(() => recordVerdict(theme, 'home', 1, writeV(dir, verdict(false), 'v2.json')), everdict(/already recorded/));
+});
+
+test('null mismatch/heightDelta/widthDelta are treated like absent fields', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  const v = verdict(true);
+  v.breakpoints[1] = { ...v.breakpoints[1], mismatch: null, heightDelta: null, widthDelta: null };
+  const r = resultFor(verdict(true));
+  delete r.results[1].mismatch; delete r.results[1].heightDelta; // absent in result, null in verdict
+  r.results[2].mismatch = null; r.results[2].heightDelta = null; // null in result, absent in verdict
+  delete v.breakpoints[2].mismatch; delete v.breakpoints[2].heightDelta;
+  const f = writeV(dir, v);
+  writeResult(dir, r);
+  assert.equal(recordVerdict(theme, 'home', 1, f).pass, true);
+});
+
+test('a passing diff breakpoint needs numeric mismatch and heightDelta (null is not 0)', () => {
+  const theme = setup();
+  const dir = prep(theme);
+  const v = verdict(true);
+  v.breakpoints[0] = { ...v.breakpoints[0], mismatch: null, heightDelta: null };
+  const f = writeV(dir, v); // result.json carries the same nulls
+  assert.throws(() => recordVerdict(theme, 'home', 1, f), everdict(/desktop has mismatch null/));
+});

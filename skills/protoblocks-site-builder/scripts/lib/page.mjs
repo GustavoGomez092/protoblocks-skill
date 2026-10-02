@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, updateState } from './state.mjs';
 import { refreshMenus } from './navigation.mjs';
-import { assertSlug } from './slugs.mjs';
+import { assertSlug, parseBlockName } from './slugs.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'page.php');
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -23,7 +23,7 @@ export function pageSpecFromState(state, slug, { force = false } = {}) {
     // planned = not built yet (the plan may already name its block); inPart = rendered by a template part.
     .filter((s) => s.status !== 'skipped' && s.status !== 'planned' && !s.inPart && s.block)
     .map((s) => ({
-      name: s.block.includes('/') ? s.block : `proto-blocks/${s.block}`,
+      name: parseBlockName(s.block, `block name of section ${s.n}`).name,
       attrs: { ...(s.attrs ?? {}), anchor: s.anchor },
       ...(s.inner?.length ? { innerRaw: s.inner.join('\n') } : {}),
     }));

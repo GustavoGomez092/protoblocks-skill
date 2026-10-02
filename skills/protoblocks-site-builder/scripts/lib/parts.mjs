@@ -6,7 +6,7 @@ import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { assertFork } from './guards.mjs';
 import { blockComment } from './blocks.mjs';
 import { loadState, getSection } from './state.mjs';
-import { assertSlug } from './slugs.mjs';
+import { assertSlug, parseBlockName } from './slugs.mjs';
 
 const SCRIPT = path.join(WP_SCRIPTS_DIR, 'parts.php');
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -103,7 +103,7 @@ function markupFromState(args) {
   assertSlug(page, 'page slug');
   const { section } = getSection(loadState(themeDir), page, n);
   if (typeof section.block !== 'string' || !section.block) throw fail('EINPUT', `Section ${section.n} on "${page}" has no block yet; build it first.`);
-  if (!/^(?:[a-z0-9][a-z0-9-]*\/)?[a-z0-9][a-z0-9-]*$/.test(section.block)) throw fail('EINPUT', `Invalid block name ${JSON.stringify(section.block)} in state`);
+  parseBlockName(section.block, 'block name in state');
   const attrs = { ...(section.attrs ?? {}), anchor: section.anchor };
   const innerRaw = Array.isArray(section.inner) && section.inner.length ? section.inner.join('\n') : undefined;
   return partMarkup({ block: nsBlock(section.block), attrs, innerRaw });

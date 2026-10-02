@@ -182,10 +182,11 @@ function crossCheck(verdict, iterDir, anchor, qa) {
     if (!r) { errors.push(`breakpoint ${b.name}: not in result.json`); continue; }
     if (r.mode !== b.mode) errors.push(`breakpoint ${b.name}: mode ${b.mode} but check-section ran ${r.mode}`);
     if (r.numericPass !== b.numericPass) errors.push(`breakpoint ${b.name}: numericPass ${b.numericPass} but check-section measured ${r.numericPass}`);
+    // null and absent mean the same: no measurement (sanity and error results have no mismatch/heightDelta).
     for (const key of ['mismatch', 'heightDelta']) {
-      if ((r[key] !== undefined || b[key] !== undefined) && !sameNum(b[key], r[key])) errors.push(`breakpoint ${b.name}: ${key} ${JSON.stringify(b[key] ?? null)} but check-section measured ${JSON.stringify(r[key] ?? null)}`);
+      if ((r[key] != null || b[key] != null) && !sameNum(b[key], r[key])) errors.push(`breakpoint ${b.name}: ${key} ${JSON.stringify(b[key] ?? null)} but check-section measured ${JSON.stringify(r[key] ?? null)}`);
     }
-    if (b.widthDelta !== undefined && !sameNum(b.widthDelta, r.widthDelta)) errors.push(`breakpoint ${b.name}: widthDelta ${JSON.stringify(b.widthDelta)} but check-section measured ${JSON.stringify(r.widthDelta ?? null)}`);
+    if (b.widthDelta != null && !sameNum(b.widthDelta, r.widthDelta)) errors.push(`breakpoint ${b.name}: widthDelta ${JSON.stringify(b.widthDelta)} but check-section measured ${JSON.stringify(r.widthDelta ?? null)}`);
   }
   if (verdict.pass === true) {
     if (result.numericPass !== true) errors.push('pass is true but check-section reported numericPass false');
@@ -193,8 +194,9 @@ function crossCheck(verdict, iterDir, anchor, qa) {
       if (r?.numericPass !== true) errors.push(`pass is true but breakpoint ${r?.breakpoint} failed its numeric checks`);
       if (r?.mode !== 'diff') continue;
       if (r.fullyMasked) errors.push(`pass is true but breakpoint ${r.breakpoint} was fully masked (nothing compared)`);
-      if (!(r.mismatch <= qa.mismatchMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has mismatch ${r.mismatch} > ${qa.mismatchMax} (site.qa)`);
-      if (!(r.heightDelta <= qa.heightDeltaMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has heightDelta ${r.heightDelta} > ${qa.heightDeltaMax} (site.qa)`);
+      // a diff result must carry numbers: null <= max is true in JS, so check the type first
+      if (!(typeof r.mismatch === 'number' && r.mismatch <= qa.mismatchMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has mismatch ${r.mismatch ?? null} > ${qa.mismatchMax} (site.qa) or no number`);
+      if (!(typeof r.heightDelta === 'number' && r.heightDelta <= qa.heightDeltaMax)) errors.push(`pass is true but breakpoint ${r.breakpoint} has heightDelta ${r.heightDelta ?? null} > ${qa.heightDeltaMax} (site.qa) or no number`);
     }
   }
   return errors;
@@ -207,6 +209,11 @@ export function recordVerdict(themeDir, slug, n, verdictFile) {
   const { real, iterDir, iteration } = verdictIteration(themeDir, slug, sec.anchor, verdictFile);
   if (sec.preparedIteration === undefined) throw everdict(`Section ${num} has no prepared iteration: run qa-input.mjs prepare first.`);
   if (iteration !== sec.preparedIteration) throw everdict(`Verdict ${verdictFile} is for iteration ${iteration}, but the newest prepared iteration is ${sec.preparedIteration}; record only the newest one (re-dispatch visual-qa for iter-${sec.preparedIteration}).`);
+  // One real verdict per iteration: a second record would duplicate qa entries and re-apply the status change
+  // (e.g. move a done section to animating). An error verdict may be followed by a real one for the same iteration.
+  if ((sec.qa ?? []).some((q) => q.iteration === iteration && q.mode !== 'error')) {
+    throw everdict(`Iteration ${iteration} of section ${num} is already recorded; run qa-input.mjs prepare for a new iteration before verifying again.`);
+  }
   let verdict;
   try { verdict = JSON.parse(fs.readFileSync(real, 'utf8')); } catch (e) { throw everdict(`Verdict ${verdictFile} is not valid JSON: ${e.message}`); }
   const errors = validateVerdict(verdict);

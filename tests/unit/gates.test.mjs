@@ -206,3 +206,13 @@ test('a symlinked block folder (outside proto-blocks/) is read like the plugin r
   const r = runGates(wp, { block: 'linked' });
   assert.equal(r.steps[0].ok, true, JSON.stringify(r.steps[0]));
 });
+
+test('block names: proto-blocks/<slug> is the same block as <slug>; other namespaces and malformed names are EINPUT', () => {
+  const { wp, payloads } = setup();
+  assert.equal(runGates(wp, { block: 'proto-blocks/b' }).ok, true);
+  assert.equal(payloads[0].block, 'b');
+  for (const block of ['acme/b', 'proto-blocks/', 'a/b/c', 'proto-blocks/B']) {
+    const s = setup();
+    assert.throws(() => runGates(s.wp, { block }), (e) => e.code === 'EINPUT', block);
+  }
+});

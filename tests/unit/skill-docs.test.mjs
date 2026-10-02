@@ -225,6 +225,7 @@ test('section-loop and breakdown docs keep the stage-4 loop rules', () => {
   // cap on resume
   assert.match(verify, /On resume, if the section's last `qa` record has `capReached: true`, ask the developer/);
   assert.match(loop, /capReached: true` on the last `qa` record \| ask the developer first/);
+  assert.ok(loop.indexOf('`building` with `capReached: true`') < loop.indexOf('| `planned`, `building` | Build |'), 'specific capReached row comes before the general building row');
   // I3 part move runs once, after the last section passed
   assert.match(hf, /Run steps 1-8 once, when every section of the first page has passed Verify/);
   // I1 fixed anchors in the docs

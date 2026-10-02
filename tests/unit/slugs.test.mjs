@@ -73,3 +73,18 @@ test('cropSections and framesFromUrl reject unsafe slugs before any write (EINPU
   }
   assert.equal(fs.existsSync(path.join(theme, '.protoblocks', 'artifacts')), false);
 });
+
+test('parseBlockName: one shared rule for block names (optional namespace/)', async () => {
+  const { parseBlockName } = await import('../../skills/protoblocks-site-builder/scripts/lib/slugs.mjs');
+  assert.deepEqual(parseBlockName('hero'), { namespace: 'proto-blocks', slug: 'hero', name: 'proto-blocks/hero' });
+  assert.deepEqual(parseBlockName('acme/x'), { namespace: 'acme', slug: 'x', name: 'acme/x' });
+  for (const bad of ['', 'a/b/c', '/x', 'x/', 'A', 'a--b', null]) assert.throws(() => parseBlockName(bad), (e) => e.code === 'EINPUT', String(bad));
+  assert.throws(() => parseBlockName('../x', 'block', 'EBLOCK'), (e) => e.code === 'EBLOCK');
+});
+
+test('page.mjs validates block names with the same rule', () => {
+  const st = (block) => ({ pages: [{ slug: 'home', sections: [{ n: 1, anchor: 'pb-s1', block, status: 'building' }] }] });
+  assert.equal(pageSpecFromState(st('proto-blocks/hero'), 'home').blocks[0].name, 'proto-blocks/hero');
+  assert.equal(pageSpecFromState(st('hero'), 'home').blocks[0].name, 'proto-blocks/hero');
+  assert.throws(() => pageSpecFromState(st('a/b/c'), 'home'), (e) => e.code === 'EINPUT');
+});

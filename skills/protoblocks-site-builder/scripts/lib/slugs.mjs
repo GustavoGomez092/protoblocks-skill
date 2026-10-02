@@ -11,3 +11,16 @@ export function assertSlug(value, what = 'slug', code = 'EINPUT') {
   }
   return value;
 }
+
+/**
+ * Block names: "<slug>" or "<namespace>/<slug>", each part a slug. A bare slug means "proto-blocks/<slug>".
+ * Shared by plan.mjs, page.mjs, gates.mjs and parts.mjs.
+ */
+export function parseBlockName(value, what = 'block name', code = 'EINPUT') {
+  const parts = typeof value === 'string' ? value.split('/') : [];
+  if (!parts.length || parts.length > 2 || !parts.every(isSlug)) {
+    throw Object.assign(new Error(`Invalid ${what} ${JSON.stringify(value ?? null)}: use "<slug>" or "<namespace>/<slug>" (lowercase letters and digits separated by single dashes).`), { code });
+  }
+  const [namespace, slug] = parts.length === 2 ? parts : ['proto-blocks', parts[0]];
+  return { namespace, slug, name: `${namespace}/${slug}` };
+}

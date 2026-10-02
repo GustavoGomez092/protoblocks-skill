@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, getSection } from './state.mjs';
-import { assertSlug } from './slugs.mjs';
+import { assertSlug, parseBlockName } from './slugs.mjs';
 
 // The plugin prints the JSON array and may append text ("Success: ...") on the same line;
 // earlier output may itself contain "[". Try each "[" start until one parses to an array.
@@ -31,8 +31,11 @@ export function gateInputFromState(state, page, n) {
  * themeDir (the CLI's <themeDir>) must be the theme WordPress renders with: the gate reads the block from the active
  * stylesheet directory, so a mismatch would test a different copy of the block (EWRONGTHEME).
  */
-export function runGates(wp, { block, attrs = {}, themeDir: expectedTheme } = {}) {
-  assertSlug(block, 'block slug');
+export function runGates(wp, { block: blockName, attrs = {}, themeDir: expectedTheme } = {}) {
+  // Same block-name rule as plan.mjs/page.mjs: "<slug>" or "proto-blocks/<slug>" (the same block). Gates exercise
+  // Proto-Blocks only, so another namespace is refused.
+  const { namespace, slug: block } = parseBlockName(blockName, 'block name');
+  if (namespace !== 'proto-blocks') throw Object.assign(new Error(`Gates only check Proto-Blocks (proto-blocks/<slug>); "${blockName}" is from the "${namespace}" namespace.`), { code: 'EINPUT' });
   const steps = [];
   const step = (id, ok, detail) => { steps.push({ id, ok, detail }); return ok; };
   const done = () => ({ ok: steps.every((s) => s.ok), steps });

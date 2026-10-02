@@ -53,7 +53,7 @@ node "$PB/lib/state.mjs" validate "$THEME"
 
 ## Later pages
 
-`plan.mjs record` stores the header and footer of a later page as `reuse`, `inPart: true`, anchors `pb-header` / `pb-footer`, status `building`. Skip Build for them except `library.mjs record` (so `usedOn` lists the page); `page.mjs build` leaves them out. Verify them like any section once the page is built: `prepare` targets `#pb-header` / `#pb-footer`, which the parts render.
+`plan.mjs record` stores the header and footer of a later page as `reuse`, `inPart: true`, anchors `pb-header` / `pb-footer`, status `building`, `prevStatus: "done"` (a pass returns them to `done`; they are never animated again). A row without `part` on a section cropped as the header or footer counts as that part. Skip Build for them except `library.mjs record` (so `usedOn` lists the page); `page.mjs build` leaves them out. Verify them like any section once the page is built: `prepare` targets `#pb-header` / `#pb-footer`, which the parts render.
 
 ## Notes
 
