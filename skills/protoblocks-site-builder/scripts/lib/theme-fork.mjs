@@ -71,8 +71,15 @@ function textDomainFiles(themeDir) {
   return files.filter((f) => fs.existsSync(f));
 }
 
+function insideGitWorkTree(dir, exec) {
+  const r = exec('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir });
+  return r.code === 0 && r.stdout.trim() === 'true';
+}
+
 function gitInit(themeDir, forkedFrom, exec) {
   if (exec('git', ['--version']).code !== 0 || fs.existsSync(path.join(themeDir, '.git'))) return false;
+  // A themes dir that already lives in a repo (e.g. a versioned wp-content) must not get a nested repo.
+  if (insideGitWorkTree(path.dirname(themeDir), exec)) return false;
   exec('git', ['init', '-q'], { cwd: themeDir });
   exec('git', ['add', '-A'], { cwd: themeDir });
   const hasIdentity = exec('git', ['config', 'user.email'], { cwd: themeDir }).stdout.trim() !== '';
@@ -80,9 +87,45 @@ function gitInit(themeDir, forkedFrom, exec) {
   return exec('git', [...id, 'commit', '-q', '-m', `chore: fork ${forkedFrom}`], { cwd: themeDir }).code === 0;
 }
 
-export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, zipFile, forkedFrom, exec = realExec, cp = fs.cpSync }) {
+/**
+ * What already sits at <themesDir>/<slug>: 'none', 'symlink' (never replaced), 'fork' (has the
+ * Proto Fork marker; always reused unless re-forked) or 'foreign' (only replaced with force).
+ */
+export function inspectThemeDir(themeDir) {
+  let st;
+  try { st = fs.lstatSync(themeDir); } catch { return { kind: 'none', marker: null }; }
+  const style = path.join(themeDir, 'style.css');
+  const marker = fs.existsSync(style) ? forkMarker(fs.readFileSync(style, 'utf8')) : null;
+  if (st.isSymbolicLink()) return { kind: 'symlink', marker };
+  return { kind: marker ? 'fork' : 'foreign', marker };
+}
+
+export const backupRoot = (themesDir) => path.join(path.dirname(path.resolve(themesDir)), '.protoblocks', 'backups');
+
+// Move (never delete) a folder we are about to replace into <wp-content>/.protoblocks/backups/<slug>-<ISO ts>/.
+function moveToBackup(themesDir, slug, themeDir) {
+  const root = backupRoot(themesDir);
+  fs.mkdirSync(root, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let dest = path.join(root, `${slug}-${stamp}`);
+  for (let i = 2; fs.existsSync(dest); i++) dest = path.join(root, `${slug}-${stamp}-${i}`);
+  fs.renameSync(themeDir, dest);
+  return dest;
+}
+
+/**
+ * Forks proto-blocks-theme into <themesDir>/<slug> and activates it.
+ * - An existing fork (marker present) is ALWAYS reused, whatever `force` says; no zip is needed then.
+ * - `force` only replaces a foreign (non-fork) folder; `refork: '<slug>'` replaces an existing fork.
+ * - A replaced folder is moved to <wp-content>/.protoblocks/backups/<slug>-<ts>/ (reported as `backup`),
+ *   and moved back if the new fork cannot be set up. A symlinked folder is never replaced (ESYMLINK).
+ */
+export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, refork, zipFile, forkedFrom, exec = realExec, cp = fs.cpSync }) {
   // Validate slug format first, before any other processing
   validateSlug(slug);
+  if (refork !== undefined && refork !== slug) {
+    throw new ForkError(`--refork must repeat the theme slug exactly ("${slug}"), got ${JSON.stringify(refork)}; nothing was changed.`, 'ERFORK');
+  }
 
   const themeDir = path.join(themesDir, slug);
 
@@ -93,34 +136,33 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
     throw e;
   }
 
-  // Extract and validate zip before removing any existing folder
+  const existing = inspectThemeDir(themeDir);
+  // Reusing never writes over anything, so a fork (even a symlinked one) is reused whatever `force` says.
+  if (existing.marker && refork === undefined) {
+    wp.check(['theme', 'activate', slug]);
+    return { themeDir, slug, reused: true, forkedFrom: existing.marker };
+  }
+  if (existing.kind === 'symlink' && (force || refork !== undefined)) {
+    throw new ForkError(`wp-content/themes/${slug} is a symlink (a development checkout?); it is never replaced. Use another --slug.`, 'ESYMLINK');
+  }
+  if ((existing.kind === 'foreign' || existing.kind === 'symlink') && !force) {
+    throw new ForkError(`wp-content/themes/${slug} already exists and is not a protoblocks fork. Ask the developer; re-run with --force to replace it (the folder is moved to wp-content/.protoblocks/backups/, not deleted), or pick another --slug.`, 'EFORKEXISTS');
+  }
+
+  // Extract and validate the zip before moving any existing folder.
+  let backup = null;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-theme-'));
   try {
     const entries = unzip(zipFile, tmp);
     const src = entries.map((e) => path.join(tmp, e)).find((p) => fs.existsSync(path.join(p, 'style.css')));
     if (!src) throw new ForkError(`No theme folder with style.css inside ${zipFile}`, 'ENOTHEME');
 
-    // Now safe to remove existing folder if needed
-    if (fs.existsSync(themeDir)) {
-      const style = path.join(themeDir, 'style.css');
-      const marker = fs.existsSync(style) ? forkMarker(fs.readFileSync(style, 'utf8')) : null;
-      if (marker && !force) {
-        wp.check(['theme', 'activate', slug]);
-        return { themeDir, slug, reused: true, forkedFrom: marker };
-      }
-      if (!force) {
-        throw new ForkError(`wp-content/themes/${slug} already exists and is not a protoblocks fork. Ask the developer; re-run with --force to replace it (this deletes that folder).`, 'EFORKEXISTS');
-      }
-      fs.rmSync(themeDir, { recursive: true, force: true });
-    }
+    if (existing.kind !== 'none') backup = moveToBackup(themesDir, slug, themeDir);
 
     try {
       cp(src, themeDir, { recursive: true });
     } catch (err) {
-      // If copy fails, clean up the partial theme directory and rethrow
-      if (fs.existsSync(themeDir)) {
-        fs.rmSync(themeDir, { recursive: true, force: true });
-      }
+      rollback(themeDir, backup);
       throw err;
     }
   } finally {
@@ -135,14 +177,17 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
     gitInit(themeDir, forkedFrom, exec);
     wp.check(['theme', 'activate', slug]);
   } catch (err) {
-    // If activation or setup failed, clean up the theme directory we just created
-    if (fs.existsSync(themeDir)) {
-      fs.rmSync(themeDir, { recursive: true, force: true });
-    }
+    rollback(themeDir, backup);
     throw err;
   }
 
-  return { themeDir, slug, reused: false, forkedFrom };
+  return { themeDir, slug, reused: false, forkedFrom, ...(backup ? { backup } : {}) };
+}
+
+// Remove only the folder this call created, then put the moved-away original back.
+function rollback(themeDir, backup) {
+  if (fs.existsSync(themeDir)) fs.rmSync(themeDir, { recursive: true, force: true });
+  if (backup && fs.existsSync(backup)) fs.renameSync(backup, themeDir);
 }
 
 export async function fetchThemeZip({ fetchRelease = fetchLatestRelease, downloadImpl = download, tmpRoot = os.tmpdir() } = {}) {
@@ -169,11 +214,19 @@ async function main(argv) {
     if (argv[i] === '--force') a.force = true;
     else if (argv[i].startsWith('--')) a[argv[i].slice(2)] = argv[++i];
   }
-  if (!a.name) { process.stderr.write('Usage: node theme-fork.mjs --name "<Project>" [--slug s] [--force] [--cwd D]\n'); process.exit(64); }
+  if (!a.name) { process.stderr.write('Usage: node theme-fork.mjs --name "<Project>" [--slug s] [--force] [--refork <slug>] [--cwd D]\n'); process.exit(64); }
   const rt = loadRuntime(a.cwd ?? process.cwd());
+  const themesDir = path.join(rt.publicPath, 'wp-content', 'themes');
+  const slug = a.slug ?? slugify(a.name);
+  const opts = { wp: createWp(rt), themesDir, name: a.name, slug, force: !!a.force, refork: a.refork };
+  // A reusable fork needs no download, so re-runs work offline.
+  if (inspectThemeDir(path.join(themesDir, slug)).marker && a.refork === undefined) {
+    process.stdout.write(`${JSON.stringify(forkTheme(opts), null, 2)}\n`);
+    return;
+  }
   const { zipFile, forkedFrom, cleanup } = await fetchThemeZip();
   try {
-    const r = forkTheme({ wp: createWp(rt), themesDir: path.join(rt.publicPath, 'wp-content', 'themes'), name: a.name, slug: a.slug, force: !!a.force, zipFile, forkedFrom });
+    const r = forkTheme({ ...opts, zipFile, forkedFrom });
     process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
   } finally {
     cleanup();

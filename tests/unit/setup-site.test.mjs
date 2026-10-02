@@ -28,7 +28,7 @@ function harness({ preflight = okPreflight(), themeReused = false, forkThrows = 
     forkTheme: (o) => {
       calls.push(['fork', o]);
       if (forkThrows) throw forkThrows;
-      return { themeDir, slug: 'acme', reused: themeReused, forkedFrom: o.forkedFrom };
+      return { themeDir, slug: 'acme', reused: themeReused, forkedFrom: o.forkedFrom ?? 'proto-blocks-theme@1.0.0' };
     },
     installThemeAssets: (d) => { calls.push(['assets', d]); return { copied: [], functionsUpdated: false }; },
   };
@@ -145,4 +145,49 @@ test('--update-plugins is opt-in and reaches ensurePlugins', async () => {
   await setupSite({ name: 'Acme' }, h.deps);
   await setupSite({ name: 'Acme', updatePlugins: true }, h.deps);
   assert.deepEqual(seen.map((o) => o?.updatePlugins), [false, true]);
+});
+
+// ---- I1: reuse skips the download; refork ----
+function withFork(markerLine = 'Proto Fork: proto-blocks-theme@1.0.0') {
+  const pub = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-setup-pub-'));
+  const dir = path.join(pub, 'wp-content', 'themes', 'acme');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'style.css'), `/*\nTheme Name: Acme\n${markerLine}\n*/`);
+  return okPreflight({ publicPath: pub });
+}
+
+test('a reusable fork skips fetchThemeZip entirely (offline re-runs work)', async () => {
+  const h = harness({ preflight: withFork(), themeReused: true });
+  h.deps.fetchThemeZip = async () => { throw Object.assign(new Error('offline'), { code: 'ERELEASE' }); };
+  const r = await setupSite({ name: 'Acme' }, h.deps);
+  assert.deepEqual(names(h.calls), ['preflight', 'createWp', 'plugins', 'fork', 'assets']);
+  assert.equal(h.calls.find((c) => c[0] === 'fork')[1].zipFile, undefined);
+  assert.equal(r.theme.reused, true);
+});
+
+test('force does not trigger a download for an existing fork either', async () => {
+  const h = harness({ preflight: withFork(), themeReused: true });
+  await setupSite({ name: 'Acme', force: true }, h.deps);
+  assert.equal(names(h.calls).includes('fetchZip'), false);
+});
+
+test('refork downloads and passes refork through; a foreign folder still downloads', async () => {
+  const h = harness({ preflight: withFork() });
+  await setupSite({ name: 'Acme', refork: 'acme' }, h.deps);
+  assert.ok(names(h.calls).includes('fetchZip'));
+  assert.equal(h.calls.find((c) => c[0] === 'fork')[1].refork, 'acme');
+  const f = harness({ preflight: withFork('Author: x') });
+  await setupSite({ name: 'Acme', force: true }, f.deps);
+  assert.ok(names(f.calls).includes('fetchZip'));
+});
+
+test('refork that does not equal the slug is ERFORK before plugins are touched', async () => {
+  const h = harness({ preflight: withFork() });
+  await assert.rejects(setupSite({ name: 'Acme', refork: 'other' }, h.deps), (e) => e.code === 'ERFORK');
+  assert.deepEqual(names(h.calls), ['preflight']);
+});
+
+test('parseArgs accepts --refork <slug>', () => {
+  assert.equal(parseArgs(['--name', 'A', '--refork', 'a']).refork, 'a');
+  assert.throws(() => parseArgs(['--name', 'A', '--refork']), (e) => e.code === 'EUSAGE');
 });

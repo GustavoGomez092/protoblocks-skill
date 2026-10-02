@@ -20,10 +20,18 @@ Every tool prints JSON on stdout. On failure it prints `[CODE] message` on stder
 Ask the developer for the client/project name if you do not have it (the slug is derived from it; `--slug` overrides).
 
 ```bash
-node "$PB/lib/setup-site.mjs" --name "<Project>" [--slug s] [--site "<Local site>"] [--force] [--update-plugins] [--cwd D]
+node "$PB/lib/setup-site.mjs" --name "<Project>" [--slug s] [--site "<Local site>"] [--force] [--refork <slug>] [--update-plugins] [--cwd D]
 ```
 
 It runs preflight itself, then: installs/activates Proto-Blocks and wordpress-seo, safe-svg, duplicate-post; enables Tailwind; sets `/%postname%/` permalinks only when they are plain (a custom structure is left alone and reported in `plugins.warnings`); forks `proto-blocks-theme` into `wp-content/themes/<slug>` and activates it; installs the managed theme assets; creates the build state. Running it again reuses the fork (`theme.reused: true`) and leaves plugins alone.
+
+Theme fork rules:
+- A folder whose `style.css` has the `Proto Fork:` marker is always reused, with or without `--force`, and nothing is downloaded (re-runs work offline).
+- `--force` only applies to a foreign (non-fork) folder with the same slug.
+- To replace an existing fork with a fresh copy of the theme, pass `--refork <slug>` repeating the slug exactly (`ERFORK` otherwise). Only with the developer's explicit OK: the new fork starts with fresh build state.
+- A replaced folder (foreign under `--force`, fork under `--refork`) is moved, never deleted, to `wp-content/.protoblocks/backups/<slug>-<timestamp>/`; the result reports it as `theme.backup`. If the new fork cannot be set up, the folder is moved back.
+- A symlinked theme folder is never replaced (`ESYMLINK`).
+- The fork gets its own git repo, unless the themes folder is already inside a git work tree.
 
 Plugins already installed are never replaced. When a newer Proto-Blocks release exists the result says `"updateAvailable": "<version>"` on the `proto-blocks` entry; tell the developer. Only with their explicit OK re-run with `--update-plugins`, which reinstalls Proto-Blocks from the release zip. It refuses with `EPLUGINDEV` when the plugin folder is a symlink or a git checkout (WordPress would delete the checkout, `.git` included); the developer updates that copy themselves (e.g. `git pull`).
 
@@ -31,7 +39,9 @@ Result: `{ preflight, plugins, theme: {themeDir, slug, reused, forkedFrom}, asse
 
 Errors:
 - `EPREFLIGHT` - lists the failing checks with fixes; relay them, change nothing.
-- `EFORKEXISTS` - a folder with that slug exists and is not a protoblocks fork. Ask the developer; only on their explicit OK re-run with `--force` (it deletes that folder).
+- `EFORKEXISTS` - a folder with that slug exists and is not a protoblocks fork. Ask the developer; only on their explicit OK re-run with `--force` (the folder is moved to `wp-content/.protoblocks/backups/`), or pick another `--slug`.
+- `ERFORK` - `--refork` did not repeat the theme slug exactly; nothing changed.
+- `ESYMLINK` - the theme folder is a symlink (a development checkout); it is never replaced. Pick another `--slug`.
 - `ESLUG` - bad or underivable slug; pick another with `--slug`.
 - `ENOTHEME` - the downloaded zip had no theme.
 - `ERELEASE` - release lookup failed and Proto-Blocks is not installed.
