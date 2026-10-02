@@ -3,10 +3,23 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import pixelmatch from 'pixelmatch';
 import sharp from 'sharp';
-import { loadRaw, resizeToWidth, cropRaw, rawToPng } from './image.mjs';
+import { loadRaw, resizeToWidth, cropRaw } from './image.mjs';
 
 export const MASK_COLOR = [255, 0, 255];
 const round4 = (n) => Math.round(n * 10000) / 10000;
+
+export function normalizeMasks(masks) {
+  const out = [];
+  for (const m of masks) {
+    if (![m?.x, m?.y, m?.w, m?.h].every(Number.isFinite)) continue;
+    const x = Math.floor(m.x);
+    const y = Math.floor(m.y);
+    const w = Math.ceil(m.x + m.w) - x;
+    const h = Math.ceil(m.y + m.h) - y;
+    if (w > 0 && h > 0) out.push({ x, y, w, h });
+  }
+  return out;
+}
 
 function paintMasks(raw, masks) {
   const seen = new Uint8Array(raw.width * raw.height);
@@ -33,13 +46,16 @@ export function compareRaw(design, render, { threshold = 0.1, masks = [] } = {})
   const height = Math.min(design.height, render.height);
   const a = cropRaw(design, { x: 0, y: 0, w: width, h: height });
   const b = cropRaw(render, { x: 0, y: 0, w: width, h: height });
-  const masked = paintMasks(a, masks);
-  paintMasks(b, masks);
+  const norm = normalizeMasks(masks);
+  const masked = paintMasks(a, norm);
+  paintMasks(b, norm);
   const heat = Buffer.alloc(width * height * 4);
-  const diffPixels = pixelmatch(a.data, b.data, heat, width, height, { threshold, includeAA: false, alpha: 0.25, diffColor: [255, 0, 0] });
   const comparedPixels = width * height - masked;
+  const fullyMasked = comparedPixels <= 0;
+  const diffPixels = fullyMasked || !height ? 0 : pixelmatch(a.data, b.data, heat, width, height, { threshold, includeAA: false, alpha: 0.25, diffColor: [255, 0, 0] });
   return {
-    mismatch: comparedPixels ? diffPixels / comparedPixels : 0,
+    mismatch: fullyMasked ? 1 : diffPixels / comparedPixels,
+    fullyMasked,
     heightDelta: design.height ? Math.abs(render.height - design.height) / design.height : 0,
     diffPixels,
     comparedPixels,
@@ -81,7 +97,12 @@ async function main(argv) {
   const a = {};
   for (let i = 0; i < argv.length; i += 2) a[argv[i].replace(/^--/, '')] = argv[i + 1];
   if (!a.design || !a.render) { process.stderr.write('Usage: node diff.mjs --design d.png --render r.png [--out c.png] [--masks json] [--threshold 0.1]\n'); process.exit(64); }
-  const r = await diffImages({ design: a.design, render: a.render, out: a.out, masks: a.masks ? JSON.parse(a.masks) : [], threshold: a.threshold ? Number(a.threshold) : 0.1 });
+  let masks = [];
+  if (a.masks) {
+    try { masks = JSON.parse(a.masks); } catch (err) { const e = new Error(`--masks is not valid JSON: ${err.message}`); e.code = 'EMASKS'; throw e; }
+    if (!Array.isArray(masks)) { const e = new Error('--masks must be a JSON array'); e.code = 'EMASKS'; throw e; }
+  }
+  const r = await diffImages({ design: a.design, render: a.render, out: a.out, masks, threshold: a.threshold ? Number(a.threshold) : 0.1 });
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
 }
 

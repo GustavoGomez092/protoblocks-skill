@@ -89,3 +89,68 @@ qtest('composite is a valid PNG wider than the three panels', async () => {
   assert.equal(img.width, 3 * 100 + 4 * 16);
   assert.equal(img.height, 50 + 2 * 16);
 });
+
+qtest('fully masked design fails safe: mismatch 1, fullyMasked true', async () => {
+  const { diffImages } = await load();
+  const d = tmpDir();
+  const a = await makeImage({ width: 50, height: 40 }, path.join(d, 'a.png'));
+  const b = await makeImage({ width: 50, height: 40 }, path.join(d, 'b.png'));
+  const r = await diffImages({ design: a, render: b, masks: [{ x: 0, y: 0, w: 50, h: 40 }] });
+  assert.equal(r.comparedPixels, 0);
+  assert.equal(r.mismatch, 1);
+  assert.equal(r.fullyMasked, true);
+  const ok = await diffImages({ design: a, render: b });
+  assert.equal(ok.fullyMasked, false);
+});
+
+qtest('compareRaw: zero overlap height is fully masked, not a perfect match', async () => {
+  const { compareRaw } = await load();
+  const raw = (h) => ({ data: Buffer.alloc(10 * 4 * h, 255), width: 10, height: h });
+  const r = compareRaw(raw(5), raw(0));
+  assert.equal(r.mismatch, 1);
+  assert.equal(r.fullyMasked, true);
+});
+
+qtest('overlapping masks are counted once', async () => {
+  const { diffImages } = await load();
+  const d = tmpDir();
+  const a = await makeImage({ width: 100, height: 100 }, path.join(d, 'a.png'));
+  const r = await diffImages({ design: a, render: a, masks: [{ x: 0, y: 0, w: 20, h: 20 }, { x: 10, y: 10, w: 20, h: 20 }] });
+  assert.equal(r.comparedPixels, 100 * 100 - (400 + 400 - 100));
+});
+
+qtest('mask past the right and bottom edges is clipped', async () => {
+  const { diffImages } = await load();
+  const d = tmpDir();
+  const a = await makeImage({ width: 100, height: 100 }, path.join(d, 'a.png'));
+  const r = await diffImages({ design: a, render: a, masks: [{ x: 90, y: 90, w: 50, h: 50 }] });
+  assert.equal(r.comparedPixels, 100 * 100 - 100);
+});
+
+qtest('fractional mask is expanded to whole pixels and its count matches what is painted', async () => {
+  const { diffImages } = await load();
+  const d = tmpDir();
+  // render differs only at pixels (0..1, 0..1); a mask at x=0.5,y=0.5,w=1,h=1 must cover all 4
+  const a = await makeImage({ width: 100, height: 100 }, path.join(d, 'a.png'));
+  const b = await makeImage({ width: 100, height: 100, rects: [{ x: 0, y: 0, w: 2, h: 2, color: [0, 0, 0] }] }, path.join(d, 'b.png'));
+  const r = await diffImages({ design: a, render: b, masks: [{ x: 0.5, y: 0.5, w: 1, h: 1 }] });
+  assert.equal(r.comparedPixels, 100 * 100 - 4);
+  assert.equal(r.diffPixels, 0);
+});
+
+qtest('masks with non-finite or non-positive size are ignored', async () => {
+  const { diffImages } = await load();
+  const d = tmpDir();
+  const a = await makeImage({ width: 20, height: 20 }, path.join(d, 'a.png'));
+  const r = await diffImages({ design: a, render: a, masks: [{ x: NaN, y: 0, w: 5, h: 5 }, { x: 0, y: 0, w: 0, h: 5 }, { x: 0, y: 0, w: 5, h: -1 }, { x: 0, y: 0, w: Infinity, h: 5 }] });
+  assert.equal(r.comparedPixels, 400);
+});
+
+qtest('CLI wraps invalid --masks JSON as [EMASKS] and exits 1', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const d = tmpDir();
+  const a = await makeImage({ width: 10, height: 10 }, path.join(d, 'a.png'));
+  const p = spawnSync(process.execPath, [path.join(QA_DIR, 'diff.mjs'), '--design', a, '--render', a, '--masks', '{nope'], { encoding: 'utf8' });
+  assert.equal(p.status, 1);
+  assert.match(p.stderr, /\[EMASKS\]/);
+});
