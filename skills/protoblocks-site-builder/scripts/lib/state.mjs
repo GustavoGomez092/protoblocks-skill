@@ -163,7 +163,7 @@ export function initState(themeDir, site) {
   if (fs.existsSync(statePath(themeDir))) throw new StateError(`State already exists at ${statePath(themeDir)}`, 'EEXISTS');
   const state = { schemaVersion: SCHEMA_VERSION, site: { ...site, qa: { ...DEFAULT_QA, ...(site.qa ?? {}) } }, library: {}, pages: [] };
   saveState(themeDir, state);
-  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.lock\nbuild.json.tmp-*\n');
+  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.lock\nbuild.json.tmp-*\n# scratch files (plan gate, part markup, attrs)\nplan.json\nheader.html\nfooter.html\n*.attrs.json\n');
   return state;
 }
 
