@@ -75,8 +75,17 @@ Re-run the gate after every fix. Pass attrs that exercise the template (all fiel
 |---|---|---|
 | `EEDITED` | the page was edited in wp-admin since the last build | ask; `--force` backs up first |
 | `ESLUGTAKEN` / `EFOREIGN` | a page with this slug exists and the builder did not create it | ask; `--force` only to adopt it |
-| `ENOTPAGE` | the stored post id is not a page | tell the developer; do not force |
+| `ENOTPAGE` | the stored post id is not a page (`--force` cannot fix it) | tell the developer, then clear the stored id by slug (below) and build again |
 | `ESTALE` | the page changed while the build ran | re-run the build |
 | `ENOPLAN` | the page has no approved plan (`pages[i].plan.approvedAt`) | run the plan gate (`protoblocks-design-breakdown`); never record approval yourself |
 
 Warnings about a kept title, slug or status mean the developer changed them; the message contains the command to hand control back.
+
+`ENOTPAGE` recovery, after telling the developer (the post itself is left alone; the next build creates or adopts the page by slug, and its guards apply again):
+
+<!-- test:run -->
+```bash
+PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' home)
+test "$PI" -ge 0
+node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.postId" null
+```

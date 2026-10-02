@@ -198,3 +198,41 @@ test('at least the design-breakdown plan-gate blocks are executable', () => {
   assert.ok(blocks.some((b) => b.fixture === 'later' && /plan\.mjs" record/.test(b.block)), 'later-page plan gate block');
   assert.ok(n >= 4, `expected >= 4 runnable blocks in protoblocks-design-breakdown, found ${n}`);
 });
+
+// Stage 4 final-review rules that live only in prose: keep them from silently disappearing.
+test('section-loop and breakdown docs keep the stage-4 loop rules', () => {
+  const read = (rel) => fs.readFileSync(path.join(SKILLS, rel), 'utf8');
+  const loop = read('protoblocks-section-loop/SKILL.md');
+  const verify = read('protoblocks-section-loop/references/verify.md');
+  const build = read('protoblocks-section-loop/references/build.md');
+  const hf = read('protoblocks-section-loop/references/header-footer.md');
+  const bdSkill = read('protoblocks-design-breakdown/SKILL.md');
+  const bd = read('protoblocks-design-breakdown/references/breakdown.md');
+  const intake = read('protoblocks-design-breakdown/references/intake.md');
+  // I4 Animate fallback
+  assert.match(loop, /`protoblocks-motion` skill is not installed, set the status to `done`/);
+  // I5 regress after editing a block used on other pages, before re-verifying (SKILL.md and verify.md agree)
+  for (const [name, text] of [['SKILL.md', loop], ['verify.md', verify]]) {
+    assert.match(text, /`usedOn`[^\n]{0,80}lists other pages[^\n]*regress\.mjs/, `${name}: regress after a shared-block edit`);
+  }
+  assert.match(loop, /pass: false`[^\n]*usedOn[^\n]*regress\.mjs[^\n]*before re-verifying/);
+  // ENOTPAGE is not a --force case
+  assert.match(loop, /`ENOTPAGE`[^\n]*not fixable with `--force`[^\n]*postId`? to `null`/);
+  assert.doesNotMatch(loop, /`EFOREIGN`, `ENOTPAGE` mean/);
+  assert.match(build, /\| `ENOTPAGE` \|[^\n]*`--force` cannot fix it/);
+  // draft/private pages and anonymous QA
+  assert.match(verify, /Draft or private page[^\n]*404[^\n]*Ask the developer[^\n]*--force/);
+  // cap on resume
+  assert.match(verify, /On resume, if the section's last `qa` record has `capReached: true`, ask the developer/);
+  assert.match(loop, /capReached: true` on the last `qa` record \| ask the developer first/);
+  // I3 part move runs once, after the last section passed
+  assert.match(hf, /Run steps 1-8 once, when every section of the first page has passed Verify/);
+  // I1 fixed anchors in the docs
+  assert.match(hf, /markup "\$THEME" --from-state/);
+  assert.doesNotMatch(hf + bdSkill + bd, /"anchor":"pb-s1"/);
+  // segment / crop use the frame path from state, never a hard-coded desktop.png
+  assert.doesNotMatch(bdSkill + intake, /design\/desktop\.png/);
+  assert.match(bdSkill, /segment\.mjs" analyze "\$FRAME"/);
+  // overlay header guidance
+  assert.match(bd, /Overlay header on a full-bleed photo hero[^\n]*mask the photo region[^\n]*context of the hero/);
+});

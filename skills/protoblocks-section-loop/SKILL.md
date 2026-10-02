@@ -27,6 +27,7 @@ Resume by `status`:
 |---|---|
 | `planned`, `building` | Build |
 | `verifying` | Verify, re-run from `prepare` |
+| `building` with `capReached: true` on the last `qa` record | ask the developer first (`references/verify.md`, "Iteration cap") |
 | `animating` | Animate |
 | `done`, `skipped` | next section |
 
@@ -47,10 +48,10 @@ Details and checklist: `references/build.md`.
    `node "$PB/lib/gates.mjs" "$THEME" --from-state <page> <n>`
 6. Assemble the page (creates it on first run, then rewrites it):
    `node "$PB/lib/page.mjs" build "$THEME" <page>`
-   `EEDITED`, `ESLUGTAKEN`, `EFOREIGN`, `ENOTPAGE` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). `ESTALE` is different: the page changed during the build; just re-run the build (it re-plans and re-backs-up), never `--force`. Relay `warnings` (kept developer title/slug/status).
+   `EEDITED`, `ESLUGTAKEN`, `EFOREIGN` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). `ENOTPAGE` (the stored `postId` is not a page) is not fixable with `--force`: tell the developer, then clear `pages.<i>.postId` to `null` (by-slug recipe in `references/build.md`) and build again. `ESTALE`: the page changed during the build; just re-run the build, never `--force`. `ENOPLAN`: no approved plan; go back to the plan gate. Relay `warnings` (kept developer title/slug/status).
 7. Record the block in the library:
    `node "$PB/lib/library.mjs" record "$THEME" <block> <page> --purpose "<one line>" [--variants a,b]` (variants are added to the recorded ones)
-8. `extend` only: `node "$PB/lib/regress.mjs" "$THEME" <block>`. `checked: 0` with a `note` means no baselines yet (fine). Failures: fix the block until earlier pages are unchanged.
+8. `extend`, or any edit to a block whose `usedOn` (`library.mjs list`) lists other pages: `node "$PB/lib/regress.mjs" "$THEME" <block>`. `checked: 0` with a `note` means no baselines yet (fine). Failures: fix the block until earlier pages are unchanged.
 9. Commit in the theme fork (skip if nothing changed):
    `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(block): <block>"`
 
@@ -62,12 +63,12 @@ Procedure, result fields and fix strategies: `references/verify.md`.
 2. Dispatch the `protoblocks-skill:visual-qa` subagent (Agent tool, subagent type `protoblocks-skill:visual-qa`) with the prompt `CheckInput: <input path>`. It needs a Bash timeout of 600000 (set in the agent). Elsewhere: run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the composites with the same rubric.
 3. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`.
 4. `pass: true`: status is now `animating` (go to Animate), or `done` again for a section that was `done` before this re-verification (next section).
-5. `pass: false`: apply the verdict's fixes, highest severity first, re-run gates and page build, then Verify again. An error verdict (`error` set) stays `verifying`, does not count as an iteration, and means fix the environment and re-run.
-6. `capReached: true`: stop and ask the developer, never continue silently (see `references/verify.md`, "Iteration cap"). Their options: accept with notes, give guidance and continue, or skip the section.
+5. `pass: false`: apply the verdict's fixes, highest severity first, re-run gates and page build. If you edited a block whose `usedOn` lists other pages, run `node "$PB/lib/regress.mjs" "$THEME" <block>` and fix until it passes, before re-verifying. Then Verify again. An error verdict (`error` set) stays `verifying`, does not count as an iteration, and means fix the environment and re-run.
+6. `capReached: true` (also stored on that iteration's `qa` records, so check it on resume): stop and ask the developer before another iteration, never continue silently (see `references/verify.md`, "Iteration cap"). Their options: accept with notes, give guidance and continue, or skip the section.
 
 ## Animate
 
-When status is `animating`, load the `protoblocks-motion` skill (Stage 5).
+When status is `animating`, load the `protoblocks-motion` skill (Stage 5). If the `protoblocks-motion` skill is not installed, set the status to `done` (`state.mjs set "$THEME" "pages.$PI.sections.$SI.status" '"done"'`, indexes looked up as in `references/build.md`) and continue with the next section.
 
 ## Iron rules
 

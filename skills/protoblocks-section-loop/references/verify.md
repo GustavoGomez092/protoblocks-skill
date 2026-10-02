@@ -8,7 +8,7 @@
 2. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` returns `{input, iteration}` and sets status `verifying`. It needs `page.url` (run `page.mjs build` first) and the section's crops, and refuses a `planned` or `skipped` section (`[EINPUT]` build it first). Breakpoints without a design frame are checked with sanity checks only. Only the newest prepared iteration can be recorded.
 3. Dispatch the subagent `protoblocks-skill:visual-qa` with the prompt `CheckInput: <input path>`. It runs `check-section.mjs` (Bash timeout 600000, already in the agent file), reads the composites, writes `<iterDir>/verdict.json` and replies with it. Outside Claude Code run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the `design | render | heatmap` composites.
 4. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`. `record` never trusts the verdict's numbers: it compares them with `<iterDir>/result.json` (written by `check-section.mjs`) and `input.json`, and re-applies the pass rule with the thresholds in `site.qa`. `[EVERDICT]` means the verdict is inconsistent (pass with failing numbers or a high discrepancy, numbers or breakpoints that differ from `result.json`, anchor mismatch, an older iteration, outside the iteration folder, or no `result.json` because check-section did not run): re-dispatch visual-qa for the newest iteration; never edit the file.
-5. Pass: status is `animating` (or back to `done` if the section was `done` before this re-verification), baselines were stored for later regression checks. Fail: status is `building`; fix, re-run gates and `page.mjs build`, repeat from step 2.
+5. Pass: status is `animating` (or back to `done` if the section was `done` before this re-verification), baselines were stored for later regression checks. Fail: status is `building`; fix, re-run gates and `page.mjs build`; if the edited block's `usedOn` lists other pages, run `regress.mjs` (see "Regression") and fix until it passes; repeat from step 2.
 
 ## Pass rule
 
@@ -26,9 +26,11 @@ Each breakpoint result in `result.json` (and `verdict.breakpoints`) has `mode` `
 | `fullyMasked` (reported as mismatch 1) | every pixel was masked, nothing was compared | the masks are wrong: fix `sections[j].masks.<bp>` (recipe below), not the block |
 | `imageErrors` (in-section) | images in the section failed, stalled or are broken | fix the attachment id/url, or re-import with `media.mjs import ... --alt`; check `section.attrs` |
 | `pageImageWarnings` | stalled images elsewhere on the page | informational; never chase them |
-| `status` >= 400 on an `error` result | HTTP error loading the page | page URL wrong or page not published: check `page.url`, re-run `page.mjs build` |
+| `status` >= 400 on an `error` result | HTTP error loading the page | page URL wrong or page not published: check `page.url`, re-run `page.mjs build` (draft/private: see the note below) |
 | `pageErrors`, `consoleErrors` | PHP/JS errors captured while loading | fix the template; they explain an `error` result |
 | sanity `issues` | `overflow`, `overlap` (high), `small-text`, `tap-target` (medium), `note` (ignore) | fix in the block CSS for that breakpoint |
+
+Draft or private page: QA loads the page as an anonymous visitor, so a draft, pending or private page answers with a 404 or a redirect to the login page (renders that show a login form, or `status` >= 400). `page.mjs build` keeps a status the developer set. Ask the developer whether to publish it: only with their OK, `node "$PB/lib/page.mjs" build "$THEME" <page> --force` (it backs up first, and `--force` publishes a draft, pending or private page).
 
 ### Error-shaped verdicts
 
@@ -63,7 +65,7 @@ The next `prepare` copies the masks into the check input. Mask only what you can
 
 ## Iteration cap
 
-`record` returns `capReached: true` after `maxIterations` failed real iterations (error verdicts do not count; the count restarts after a passing iteration). Stop. Show the developer the latest composite path(s) (`<iterDir>/<bp>-composite.png`, see `result.json`) and the open discrepancies, then ask them to choose:
+`record` returns `capReached: true` after `maxIterations` failed real iterations (error verdicts do not count; the count restarts after a passing iteration), and stores `capReached: true` on that iteration's `qa` records. On resume, if the section's last `qa` record has `capReached: true`, ask the developer before running another iteration. Stop. Show the developer the latest composite path(s) (`<iterDir>/<bp>-composite.png`, see `result.json`) and the open discrepancies, then ask them to choose:
 
 1. Accept with notes: set status `animating` and write what remains in `section.notes` (for example "accepted by developer: hero image 12px taller").
 2. Give guidance and continue: apply their direction and keep iterating. Continuing past the cap is a developer decision; a fresh budget only starts after a pass, so further failed iterations stay over the cap and each one asks again.
@@ -71,6 +73,6 @@ The next `prepare` copies the masks into the check input. Mask only what you can
 
 Never continue, accept or skip silently.
 
-## Regression (decision `extend`)
+## Regression (decision `extend`, or any edit to a shared block)
 
-After an `extend` or any shared-block edit: `node "$PB/lib/regress.mjs" "$THEME" <block>` re-shoots every earlier use against its stored baseline. Output `{block, checked, results, pass}`; `checked: 0` plus a `note` means no baselines yet. Thresholds: `mismatch <= 0.01` and `heightDelta <= 0.005`. A result with `error` failed too (page gone, baseline file missing, browser). Fix the block until every previous page is unchanged; the extension must be additive. Once the section itself passes Verify, new baselines are stored for it.
+After an `extend`, and after any edit (including a Verify fix) to a block whose `usedOn` (`library.mjs list`) lists other pages, and before re-verifying: `node "$PB/lib/regress.mjs" "$THEME" <block>` re-shoots every earlier use against its stored baseline. Output `{block, checked, results, pass}`; `checked: 0` plus a `note` means no baselines yet. Thresholds: `mismatch <= 0.01` and `heightDelta <= 0.005`. A result with `error` failed too (page gone, baseline file missing, browser). Fix the block until every previous page is unchanged; the extension must be additive. Once the section itself passes Verify, new baselines are stored for it.

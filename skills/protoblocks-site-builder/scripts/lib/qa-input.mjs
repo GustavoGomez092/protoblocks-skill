@@ -258,7 +258,10 @@ export function recordVerdict(themeDir, slug, n, verdictFile) {
     // The budget restarts after a passing iteration (e.g. re-verifying after a shared block edit).
     const lastPass = Math.max(0, ...section.qa.filter((q) => q.pass === true).map((q) => q.iteration));
     const failedIters = new Set(section.qa.filter((q) => q.pass === false && q.iteration > lastPass && !errorIters.has(q.iteration)).map((q) => q.iteration));
-    result = { pass: verdict.pass, iteration, capReached: !verdict.pass && !isError && failedIters.size >= max, status: section.status };
+    const capReached = !verdict.pass && !isError && failedIters.size >= max;
+    // Persist it: a resumed session must ask the developer before another iteration (verify.md, "Iteration cap").
+    if (capReached) for (const q of section.qa) if (q.iteration === iteration) q.capReached = true;
+    result = { pass: verdict.pass, iteration, capReached, status: section.status };
   });
   return result;
 }

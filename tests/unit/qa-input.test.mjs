@@ -389,3 +389,14 @@ test('a pass on a section that was done before re-verification returns it to don
   // an animating section re-verified stays animating
   assert.equal(recordVerdict(t2, 'home', 1, writeV(prep(t2), verdict(true))).status, 'animating');
 });
+
+test('capReached is stored on the qa records of that iteration so a resumed session sees it', () => {
+  const theme = setup(2);
+  const run = (v) => recordVerdict(theme, 'home', 1, writeV(prep(theme), v));
+  run(verdict(false));
+  assert.ok(loadState(theme).pages[0].sections[0].qa.every((q) => q.capReached === undefined));
+  assert.equal(run(verdict(false)).capReached, true);
+  const qa = loadState(theme).pages[0].sections[0].qa;
+  assert.ok(qa.filter((q) => q.iteration === 2).every((q) => q.capReached === true));
+  assert.equal(qa.at(-1).capReached, true);
+});
