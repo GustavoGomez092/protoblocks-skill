@@ -30,8 +30,9 @@ const assertVariants = (variants) => {
 export function readBlockJson(themeDir, block) {
   assertBlock(block);
   const root = path.join(themeDir, 'proto-blocks');
-  const file = path.join(root, block, 'block.json');
-  if (!fs.existsSync(file)) return null;
+  // Same lookup order as the plugin's Discovery: block.json, then <name>.json.
+  const file = [path.join(root, block, 'block.json'), path.join(root, block, `${block}.json`)].find((f) => fs.existsSync(f));
+  if (!file) return null;
   const rootReal = fs.realpathSync(root);
   const fileReal = fs.realpathSync(file);
   if (!fileReal.startsWith(rootReal + path.sep)) throw fail('EBLOCK', `Block "${block}" resolves outside ${root}; refusing to read ${file}`);
@@ -43,14 +44,38 @@ export function readBlockJson(themeDir, block) {
 }
 
 const INNER = new Set(['inner-blocks', 'innerblocks']);
+const OPTION_TYPES = ['select', 'radio', 'multiselect'];
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+function describeField(v) {
+  const type = v?.type;
+  if (type === 'repeater') {
+    const nested = isObj(v.fields) ? Object.entries(v.fields).map(([k, f]) => `${k}:${describeField(f)}`) : [];
+    return `repeater(${nested.join(',')})`;
+  }
+  return type;
+}
+
+function hasInner(fields) {
+  return Object.values(isObj(fields) ? fields : {}).some((v) => INNER.has(v?.type) || (v?.type === 'repeater' && hasInner(v.fields)));
+}
+
+function describeControl(v) {
+  const type = v?.type;
+  if (!OPTION_TYPES.includes(type)) return type;
+  if (Array.isArray(v.options)) {
+    const keys = v.options.map((o) => (typeof o === 'string' ? o : o?.key ?? o?.value)).filter((k) => k !== undefined && k !== null);
+    return `${type}(${keys.join('|')})`;
+  }
+  if (typeof v.optionsSource === 'string' && v.optionsSource) return `${type}(@${v.optionsSource})`;
+  return type;
+}
 
 export function summarizeBlock(json) {
-  const pb = json.protoBlocks ?? {};
-  const fields = Object.fromEntries(Object.entries(pb.fields ?? {}).map(([k, v]) => [k, v.type]));
-  const controls = Object.fromEntries(Object.entries(pb.controls ?? {}).map(([k, v]) => [
-    k, ['select', 'radio', 'multiselect'].includes(v.type) && Array.isArray(v.options) ? `${v.type}(${v.options.map((o) => o.key ?? o.value).join('|')})` : v.type,
-  ]));
-  return { name: json.name, title: json.title, description: json.description ?? '', fields, controls, useTailwind: !!pb.useTailwind, innerBlocks: Object.values(fields).some((t) => INNER.has(t)) };
+  const pb = isObj(json.protoBlocks) ? json.protoBlocks : {};
+  const fields = Object.fromEntries(Object.entries(isObj(pb.fields) ? pb.fields : {}).map(([k, v]) => [k, describeField(v)]));
+  const controls = Object.fromEntries(Object.entries(isObj(pb.controls) ? pb.controls : {}).map(([k, v]) => [k, describeControl(v)]));
+  return { name: json.name, title: json.title, description: json.description ?? '', fields, controls, useTailwind: !!pb.useTailwind, innerBlocks: hasInner(pb.fields) };
 }
 
 function registeredSlugs(wp) {
@@ -76,9 +101,22 @@ export function listLibrary(wp, themeDir) {
   const own = (slug) => (Object.hasOwn(lib, slug) ? lib[slug] : undefined);
   return [...new Set(registered)]
     .filter((slug) => SLUG.test(slug))
-    .filter((slug) => fs.existsSync(path.join(themeDir, 'proto-blocks', slug, 'block.json')))
+    .filter((slug) => fs.existsSync(path.join(themeDir, 'proto-blocks', slug)))
     .sort()
-    .map((slug) => ({ slug, ...summarizeBlock(readBlockJson(themeDir, slug)), purpose: own(slug)?.purpose ?? '', variants: own(slug)?.variants ?? [], usedOn: own(slug)?.usedOn ?? [], baselines: own(slug)?.baselines ?? [] }));
+    .map((slug) => {
+      const state = { purpose: own(slug)?.purpose ?? '', variants: own(slug)?.variants ?? [], usedOn: own(slug)?.usedOn ?? [], baselines: own(slug)?.baselines ?? [] };
+      let json;
+      try {
+        json = readBlockJson(themeDir, slug);
+      } catch (e) {
+        if (e.code !== 'EBLOCKJSON' && e.code !== 'EBLOCK') throw e;
+        // Keep the block visible so the agent does not recreate it.
+        process.stderr.write(`warning: library entry "${slug}" is unreadable [${e.code}]: ${e.message}\n`);
+        return { slug, error: { code: e.code, message: e.message }, ...state };
+      }
+      return json ? { slug, ...summarizeBlock(json), ...state } : null;
+    })
+    .filter(Boolean);
 }
 
 export function recordUse(themeDir, block, pageSlug, { purpose, variants } = {}) {

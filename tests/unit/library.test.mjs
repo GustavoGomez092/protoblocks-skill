@@ -171,3 +171,100 @@ test('CLI prints errors as [CODE] message and exits 1', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^\[EBLOCK\] /);
 });
+
+// ---- fix round 1 ----
+const listOf = (...slugs) => fakeWp(JSON.stringify(slugs.map((s) => ({ name: `proto-blocks/${s}` }))));
+const captureStderr = (fn) => {
+  const orig = process.stderr.write;
+  let buf = '';
+  process.stderr.write = (c) => { buf += c; return true; };
+  try { return { result: fn(), stderr: buf }; } finally { process.stderr.write = orig; }
+};
+
+test('listLibrary keeps a broken block visible with an error entry and warns on stderr', () => {
+  const t = tmp();
+  addBlock(t, 'good', { name: 'proto-blocks/good', title: 'Good' });
+  addBlock(t, 'broken', '{ nope');
+  const outside = tmp();
+  fs.writeFileSync(path.join(outside, 'block.json'), '{"name":"evil"}');
+  fs.symlinkSync(outside, path.join(t, 'proto-blocks', 'escape'));
+  const { result: lib, stderr } = captureStderr(() => listLibrary(listOf('good', 'broken', 'escape'), t));
+  assert.deepEqual(lib.map((e) => e.slug), ['broken', 'escape', 'good']);
+  assert.equal(lib[0].error.code, 'EBLOCKJSON');
+  assert.match(lib[0].error.message, /broken/);
+  assert.equal(lib[1].error.code, 'EBLOCK');
+  assert.equal(lib[2].error, undefined);
+  assert.equal(lib[2].title, 'Good');
+  assert.match(stderr, /broken/);
+  assert.equal(stderr.trim().split('\n').length, 2);
+});
+
+test('summarizeBlock is null-safe and handles string options and optionsSource', () => {
+  const s = summarizeBlock({ name: 'x', protoBlocks: {
+    fields: { a: null, b: { type: 'text' } },
+    controls: { c: null, size: { type: 'select', options: ['s', 'm', null, { value: 'l' }] },
+      page: { type: 'select', optionsSource: 'wp:posts', sourceArgs: { post_type: 'page' } },
+      cat: { type: 'radio', optionsSource: 'wp:terms' }, plain: { type: 'select' } } } });
+  assert.deepEqual(s.fields, { a: undefined, b: 'text' });
+  assert.equal(s.controls.size, 'select(s|m|l)');
+  assert.equal(s.controls.page, 'select(@wp:posts)');
+  assert.equal(s.controls.cat, 'radio(@wp:terms)');
+  assert.equal(s.controls.plain, 'select');
+  assert.equal(s.controls.c, undefined);
+  assert.doesNotThrow(() => summarizeBlock({ name: 'x', protoBlocks: null }));
+});
+
+test('summarizeBlock renders repeaters from nested fields and sees inner blocks inside them', () => {
+  const s = summarizeBlock({ name: 'x', protoBlocks: { fields: {
+    items: { type: 'repeater', fields: { title: { type: 'text' }, content: { type: 'wysiwyg' } } },
+    rows: { type: 'repeater', fields: { body: { type: 'innerblocks' } } },
+    empty: { type: 'repeater' } } } });
+  assert.equal(s.fields.items, 'repeater(title:text,content:wysiwyg)');
+  assert.equal(s.fields.rows, 'repeater(body:innerblocks)');
+  assert.equal(s.fields.empty, 'repeater()');
+  assert.equal(s.innerBlocks, true);
+  assert.equal(summarizeBlock({ name: 'x', protoBlocks: { fields: { items: { type: 'repeater', fields: { t: { type: 'text' } } } } } }).innerBlocks, false);
+});
+
+test('summarizeBlock summarises the real example blocks', () => {
+  const ex = '/Volumes/Content/projects/proto-blocks/proto-blocks/examples';
+  if (!fs.existsSync(ex)) return;
+  const hero = summarizeBlock(JSON.parse(fs.readFileSync(path.join(ex, 'hero', 'block.json'), 'utf8')));
+  assert.equal(hero.innerBlocks, true);
+  const acc = summarizeBlock(JSON.parse(fs.readFileSync(path.join(ex, 'accordion', 'block.json'), 'utf8')));
+  assert.match(acc.fields.items, /^repeater\(title:text,content:wysiwyg/);
+  const dyn = summarizeBlock(JSON.parse(fs.readFileSync(path.join(ex, 'dynamic-select', 'block.json'), 'utf8')));
+  assert.equal(dyn.controls.relatedPage, 'select(@wp:posts)');
+});
+
+test('readBlockJson falls back to <name>.json, with the same containment', () => {
+  const t = tmp();
+  const d = path.join(t, 'proto-blocks', 'legacy');
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'legacy.json'), '{"name":"proto-blocks/legacy"}');
+  assert.equal(readBlockJson(t, 'legacy').name, 'proto-blocks/legacy');
+  // block.json wins when both exist
+  fs.writeFileSync(path.join(d, 'block.json'), '{"name":"proto-blocks/primary"}');
+  assert.equal(readBlockJson(t, 'legacy').name, 'proto-blocks/primary');
+  // invalid fallback JSON names the fallback file
+  const d2 = path.join(t, 'proto-blocks', 'bad');
+  fs.mkdirSync(d2);
+  fs.writeFileSync(path.join(d2, 'bad.json'), '{ x');
+  assert.throws(() => readBlockJson(t, 'bad'), (e) => e.code === 'EBLOCKJSON' && e.message.includes('bad.json'));
+  // symlinked fallback escaping the root
+  const outside = tmp();
+  fs.writeFileSync(path.join(outside, 'o.json'), '{"name":"evil"}');
+  const d3 = path.join(t, 'proto-blocks', 'esc');
+  fs.mkdirSync(d3);
+  fs.symlinkSync(path.join(outside, 'o.json'), path.join(d3, 'esc.json'));
+  throwsCode(() => readBlockJson(t, 'esc'), 'EBLOCK');
+  assert.equal(readBlockJson(t, 'none'), null);
+});
+
+test('listLibrary lists a block that only has <name>.json', () => {
+  const t = tmp();
+  const d = path.join(t, 'proto-blocks', 'legacy');
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'legacy.json'), '{"name":"proto-blocks/legacy","title":"L"}');
+  assert.equal(listLibrary(listOf('legacy'), t)[0].title, 'L');
+});
