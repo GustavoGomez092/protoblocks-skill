@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
-import { readBlockJson } from './library.mjs';
 import { loadState, getSection } from './state.mjs';
 import { assertSlug } from './slugs.mjs';
 
@@ -42,13 +41,12 @@ export function runGates(wp, { block, attrs = {}, themeDir: expectedTheme } = {}
   if (expectedTheme !== undefined && realOrSelf(expectedTheme) !== realOrSelf(themeDir)) {
     throw Object.assign(new Error(`${expectedTheme} is not the active theme: WordPress renders with ${themeDir} (get_stylesheet_directory). Gates would test that theme's copy of "${block}". Activate the fork (wp theme activate <slug>) or pass the active theme's directory.`), { code: 'EWRONGTHEME' });
   }
-  const jsonPath = path.join(themeDir, 'proto-blocks', block, 'block.json');
+  // Same lookup order as the plugin's discovery (and library.mjs): block.json, then <name>.json. No containment
+  // check here: the block slug is validated, and the plugin itself loads a symlinked block folder.
+  const dir = path.join(themeDir, 'proto-blocks', block);
+  const jsonPath = [path.join(dir, 'block.json'), path.join(dir, `${block}.json`)].find((f) => fs.existsSync(f)) ?? path.join(dir, 'block.json');
   let json = null;
-  try {
-    // Same lookup as the plugin's discovery (and library.mjs): block.json, then <name>.json.
-    json = readBlockJson(themeDir, block);
-    if (json === null) throw new Error(`neither block.json nor ${block}.json exists`);
-  } catch (e) { step('anchor-support', false, `Cannot read ${jsonPath}: ${e.message}`); return done(); }
+  try { json = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); } catch (e) { step('anchor-support', false, `Cannot read ${jsonPath}: ${e.message}`); return done(); }
   if (!step('anchor-support', json?.supports?.anchor === true, json?.supports?.anchor === true ? 'supports.anchor true' : 'block.json must declare "supports": { "anchor": true } (QA targets #pb-s<n>)')) return done();
 
   const v = wp.run(['proto-blocks', 'validate', block, '--format=json']);

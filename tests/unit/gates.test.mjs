@@ -197,3 +197,12 @@ test('gateInputFromState reads block and attrs of a section by page slug and n',
   assert.throws(() => gateInputFromState(loadState(t), 'home', 9), (e) => e.code === 'ENOSECTION');
   assert.throws(() => gateInputFromState(loadState(t), 'About_Us', 1), (e) => e.code === 'EINPUT');
 });
+
+test('a symlinked block folder (outside proto-blocks/) is read like the plugin reads it', () => {
+  const { wp, theme } = setup();
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-real-'));
+  fs.writeFileSync(path.join(real, 'linked.json'), JSON.stringify({ supports: { anchor: true } }));
+  fs.symlinkSync(real, path.join(theme, 'proto-blocks', 'linked'), 'dir');
+  const r = runGates(wp, { block: 'linked' });
+  assert.equal(r.steps[0].ok, true, JSON.stringify(r.steps[0]));
+});
