@@ -86,7 +86,7 @@ test('the shipped theme assets include the page-shell stylesheet (assets/css/pb-
   const r = installThemeAssets(theme);
   assert.ok(r.copied.includes('assets/css/pb-shell.css'), JSON.stringify(r.copied));
   const css = fs.readFileSync(path.join(theme, 'assets/css/pb-shell.css'), 'utf8');
-  for (const rule of [':where(body) { margin: 0; }', 'body .wp-site-blocks > :has(#pb-header)', 'body .wp-site-blocks > :has(#pb-footer)', 'body .wp-site-blocks > * { margin-block: 0; }']) assert.ok(css.includes(rule), rule);
+  for (const rule of [':where(body) { margin: 0; }', 'body .wp-site-blocks > .wp-block-template-part:has(#pb-header)', 'body .wp-site-blocks > .wp-block-template-part:has(#pb-footer)', 'body .wp-block-post-content > :is([id^="pb-s"], [id="pb-header"], [id="pb-footer"]) { margin-block: 0; }', 'body .wp-site-blocks > * { margin-block: 0; }']) assert.ok(css.includes(rule), rule);
   const php = fs.readFileSync(path.join(DEFAULT_ASSETS_DIR, 'inc/pb-assets.php'), 'utf8');
   assert.match(php, /glob\(\$css_dir \. '\/pb-\*\.css'\)/);
   assert.match(php, /wp_style_is\('global-styles', 'registered'\) \? \['global-styles'\] : \[\]/);

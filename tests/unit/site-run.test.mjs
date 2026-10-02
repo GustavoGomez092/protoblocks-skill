@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
-import { createRun, leftoverManifests, leftoverReason, loadManifest, recoverRun, snapshotTailwind, RECOVER_COMMAND } from '../site-run.mjs';
+import { createRun, leftoverManifests, leftoverReason, loadManifest, recoverRun, snapshotTailwind, rawOption, restoreOptions, RECOVER_COMMAND } from '../site-run.mjs';
 import { recoverAll } from '../recover.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -25,12 +25,14 @@ function fakeSite() {
   const calls = [];
   const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
   const fail = (stderr = 'Error') => ({ code: 1, stdout: '', stderr });
+  const missingOption = (name) => fail(`Error: Could not get '${name}' option. Does it exist?`);
   const flag = (args, name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
   const exec = (_cmd, args) => {
     calls.push(args.join(' '));
     const [a, b, ...rest] = args;
     if (a === 'option' && b === 'get') {
-      if (!options.has(rest[0])) return fail();
+      if (site.down) return fail('Error: Error establishing a database connection.');
+      if (!options.has(rest[0])) return missingOption(rest[0]);
       const raw = options.get(rest[0]);
       const v = JSON.parse(raw);
       return ok(`${rest.includes('--format=json') || typeof v !== 'string' ? raw : v}\n`);
@@ -54,7 +56,8 @@ function fakeSite() {
     return fail(`unexpected: ${args.join(' ')}`);
   };
   const wp = createWp({ wp: 'fake-wp', mode: 'local-wrapper', publicPath }, { exec });
-  return { root, publicPath, options, posts, terms, calls, wp, dir: path.join(root, 'tmp') };
+  const site = { root, publicPath, options, posts, terms, calls, wp, dir: path.join(root, 'tmp'), down: false };
+  return site;
 }
 
 const twDir = (site) => path.join(site.publicPath, 'wp-content', 'uploads', 'proto-blocks', 'tailwind');
@@ -204,7 +207,7 @@ test('recover.mjs refuses to run without the site lock', () => {
   assert.match(r.stderr, /under the site lock/);
 });
 
-test('the lock script is committed, gives cleanup 120s before SIGKILL, and matches the shared copy', () => {
+test('the lock script is committed and gives cleanup 120s before SIGKILL', () => {
   const src = fs.readFileSync(path.join(REPO, 'tests', 'pb-site-test.sh'), 'utf8');
   assert.match(src, /GRACE="\$\{PB_SITE_GRACE:-120\}"/);
   assert.match(src, /export PB_SITE_LOCK=1/);
@@ -215,6 +218,80 @@ test('the lock script is committed, gives cleanup 120s before SIGKILL, and match
   assert.ok(fs.statSync(path.join(REPO, 'tests', 'pb-site-test.sh')).mode & 0o100, 'executable');
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts['test:recover'], 'node tests/recover.mjs');
+  assert.equal(pkg.scripts['test:recover:stale'], 'node tests/recover.mjs --stale-ok');
+});
+
+// The shared copy other worktrees run is written by whichever worktree changed it last: a difference is reported (a
+// skip with the reason), not a failure of this worktree.
+test('the shared lock-script copy matches this worktree\'s tests/pb-site-test.sh', (t) => {
+  const src = fs.readFileSync(path.join(REPO, 'tests', 'pb-site-test.sh'), 'utf8');
   const shared = '/private/tmp/claude-501/pb-site-test.sh';
-  if (fs.existsSync(shared)) assert.equal(fs.readFileSync(shared, 'utf8'), src, `${shared} must stay identical (copy it)`);
+  if (!fs.existsSync(shared)) { t.skip(`${shared} does not exist`); return; }
+  if (fs.readFileSync(shared, 'utf8') !== src) { t.skip(`${shared} differs from this worktree's tests/pb-site-test.sh (another worktree may own it); copy it when this one is merged`); return; }
+  assert.ok(true);
+});
+
+// A manifest file edited by hand (or by anything else): every field recovery acts on is validated first.
+function tamper(site, edit) {
+  const { run } = interruptedRun(site);
+  const m = JSON.parse(fs.readFileSync(run.file, 'utf8'));
+  edit(m, run);
+  fs.writeFileSync(run.file, JSON.stringify(m));
+  return run;
+}
+
+test('loadManifest rejects anything recovery must not act on (EMANIFEST), and recoverAll then touches nothing', () => {
+  const cases = {
+    'an option outside the harness snapshots': (m) => { m.options.siteurl = '"http://evil.test"'; },
+    'theme_mods_ of another theme': (m) => { m.options['theme_mods_client-theme'] = null; },
+    'a Tailwind copy outside tests/.tmp': (m) => { m.tailwind.copyDir = '/etc'; },
+    'a Tailwind file escaping the cache (..)': (m) => { m.tailwind.files.push('../../../wp-config.php'); },
+    'an absolute Tailwind file': (m) => { m.tailwind.files.push('/etc/passwd'); },
+    'a Tailwind dir escaping the cache': (m) => { m.tailwind.dirs = ['..']; },
+    'another Yoast snapshot path': (m) => { m.yoast = { snapshotFile: '/tmp/other.json' }; },
+    'an id that is not the file name': (m) => { m.id = 'deadbeef'; m.tailwind = null; },
+    'no start time': (m) => { delete m.startedAt; },
+    'a post without id or name': (m) => { m.posts.push({ type: 'page' }); },
+    'a fork slug that is not a string': (m) => { m.forks.push({ slug: 5 }); },
+  };
+  for (const [why, edit] of Object.entries(cases)) {
+    const site = fakeSite();
+    const run = tamper(site, edit);
+    assert.throws(() => loadManifest(run.file), (e) => e.code === 'EMANIFEST', why);
+    const before = site.calls.length;
+    const [r] = recoverAll({ dir: site.dir, wpFor: () => site.wp });
+    assert.equal(r.ok, false, why);
+    assert.match(r.problems.join(), /EMANIFEST|not a valid|not allowed|outside|must/, why);
+    assert.equal(site.calls.length, before, `${why}: no WP-CLI call`);
+    assert.equal(site.options.get('stylesheet'), JSON.stringify(FORK), `${why}: nothing restored`);
+    assert.deepEqual(leftoverManifests(site.dir), [run.file], `${why}: manifest kept`);
+  }
+});
+
+test('recover refuses a manifest older than 1 hour unless --stale-ok, and reports when each run started', () => {
+  const site = fakeSite();
+  const run = tamper(site, (m) => { m.startedAt = new Date(Date.now() - 2 * 3600 * 1000).toISOString(); });
+  const before = site.calls.length;
+  const [stale] = recoverAll({ dir: site.dir, wpFor: () => site.wp });
+  assert.equal(stale.ok, false);
+  assert.match(stale.problems.join(), /older than 1 hour.*--stale-ok/);
+  assert.equal(stale.startedAt, JSON.parse(fs.readFileSync(run.file, 'utf8')).startedAt);
+  assert.equal(site.calls.length, before, 'a stale manifest touches nothing');
+  const [ok] = recoverAll({ dir: site.dir, wpFor: () => site.wp, staleOk: true });
+  assert.equal(ok.ok, true, ok.problems.join());
+  assert.equal(site.options.get('stylesheet'), '"dev-theme"');
+  const cli = spawnSync(process.execPath, [path.join(REPO, 'tests', 'recover.mjs'), '--bogus'], { encoding: 'utf8', env: { ...process.env, PB_SITE_LOCK: '1' }, timeout: 20000 });
+  assert.equal(cli.status, 64, 'only --stale-ok is accepted');
+});
+
+test('rawOption: an absent option is null, any other WP-CLI failure throws (a restore never deletes on an error)', () => {
+  const site = fakeSite();
+  assert.equal(rawOption(site.wp, 'nope'), null);
+  assert.equal(rawOption(site.wp, 'stylesheet'), '"dev-theme"');
+  site.options.set('sidebars_widgets', '{"b":2}');
+  site.down = true;
+  assert.throws(() => rawOption(site.wp, 'stylesheet'), /database connection/);
+  assert.throws(() => restoreOptions(site.wp, { sidebars_widgets: null }), /database connection/);
+  site.down = false;
+  assert.equal(site.options.get('sidebars_widgets'), '{"b":2}', 'nothing deleted while WP-CLI was failing');
 });

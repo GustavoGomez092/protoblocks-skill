@@ -350,3 +350,8 @@ test('docs: README requirements, install scope, versions, approvals, refork and 
   assert.match(tests, /test:recover/);
   assert.match(tests, /tests\/pb-site-test\.sh/);
 });
+
+test('docs: visual-qa names stalledRequests as a possible explanation of a font mismatch, never a failure on its own', () => {
+  const agent = fs.readFileSync(path.join(ROOT, 'agents', 'visual-qa.md'), 'utf8');
+  assert.match(agent, /`stalledRequests`[^\n]*never fails the check[^\n]*font mismatch/);
+});

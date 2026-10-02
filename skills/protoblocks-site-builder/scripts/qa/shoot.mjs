@@ -65,7 +65,8 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
       } else {
         await page.screenshot({ path: out, fullPage });
       }
-      return { out, url, selector: selector ?? null, width, scale, box, status, consoleErrors: errors.console, pageErrors: errors.page, imageErrors, pageImageWarnings, ...(inspect ? { inspected } : {}) };
+      // stalledRequests: informational (requests still pending after openPage's bounded waits, e.g. a web font).
+      return { out, url, selector: selector ?? null, width, scale, box, status, consoleErrors: errors.console, pageErrors: errors.page, imageErrors, pageImageWarnings, stalledRequests: errors.stalled ?? [], ...(inspect ? { inspected } : {}) };
     } catch (e) {
       throw withDiagnostics(e, errors, status);
     } finally {

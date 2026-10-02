@@ -295,3 +295,20 @@ qtest('checkSection rejects null and non-object input with EINPUT', async () => 
     await assert.rejects(() => checkSection(input), (e) => e.code === 'EINPUT', String(input));
   }
 });
+
+// A request that never finishes (here a fetch; a stalled web font is reported the same way, see browser.test.mjs).
+qtest('a stalled request is reported as stalledRequests (informational) by shoot and checkSection, and does not fail the check', { timeout: 120000 }, async () => {
+  const { checkSection } = await load();
+  const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
+  const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>stall</title><style>body{margin:0} #pb-s1{height:200px;background:#1e3a8a;color:#fff;font:32px Arial,sans-serif}</style></head><body><section id="pb-s1">Heading</section><script>fetch("/__hang")</script></body></html>';
+  const srv = await serveFixtures({ '/font.html': { type: 'text/html', body: page } });
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/font.html`;
+    const shot = await shoot({ url, selector: '#pb-s1', width: 1000, out: path.join(d, 'design.png') });
+    assert.ok(shot.stalledRequests.some((u) => u.endsWith('/__hang')), JSON.stringify(shot.stalledRequests));
+    const r = await checkSection({ url, anchor: 'pb-s1', iterDir: path.join(d, 'i'), qa: QA, breakpoints: [{ name: 'desktop', width: 1000, design: shot.out }, { name: 'mobile', width: 390, sanityOnly: true }] });
+    for (const b of r.results) assert.ok(b.stalledRequests.some((u) => u.endsWith('/__hang')), JSON.stringify(b));
+    assert.equal(r.numericPass, true, 'a stalled request alone never fails the check');
+  } finally { await srv.close(); }
+});

@@ -52,6 +52,16 @@ unique name, fork marker or build state, not active) and their `theme_mods_` row
 cache and the Yoast options back. A manifest is deleted once all of it is restored; otherwise it is kept and the
 problems are printed (exit 1): fix them by hand and run it again.
 
+Before acting, `recover.mjs` validates each manifest and leaves it untouched (`EMANIFEST`) unless: its `id` is the one
+in its file name; its options are only the ones the harness snapshots (`SNAPSHOT_OPTIONS` in `tests/site-run.mjs`,
+plus `theme_mods_<originalTheme>`); its Tailwind copy is `tests/.tmp/site-run-<id>-tailwind` with relative paths
+inside the cache (no `..`, nothing absolute); its Yoast snapshot is `tests/.tmp/yoast-options-snapshot.json`; and its
+posts, terms and theme folders are well-formed. It prints when each run started and refuses a manifest older than 1
+hour (the site may have changed since): check the site, then run `tests/pb-site-test.sh <worktree> test:recover:stale`
+(`recover.mjs --stale-ok`). The lock script's own recovery after a stopped run always handles that run's fresh
+manifests. A WP-CLI failure other than "option does not exist" is an
+error, never read as an absent option, so a restore cannot delete an option because of a transient failure.
+
 ## Site-test safety rules
 
 - Unique names per run (`pb-itest-*-<hex>`, `pb-e2e-<hex>`, `pb-nav-e2e-<hex>`); cleanup deletes by the exact id or

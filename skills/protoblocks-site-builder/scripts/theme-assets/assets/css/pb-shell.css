@@ -11,10 +11,13 @@
 
 /* The theme pads `.wp-site-blocks > header/footer` with side gutters and caps them at 1440px. Once the design's header
    and footer blocks live in the template parts (#pb-header, #pb-footer after move-parts) they draw their own full-bleed
-   band and inner container, so the part wrapper must not shrink them. */
-body .wp-site-blocks > :has(#pb-header),
-body .wp-site-blocks > :has(#pb-footer) { max-width: none; padding-inline: 0; }
+   band and inner container, so the part wrapper must not shrink them. Only the template part: never `main`. */
+body .wp-site-blocks > .wp-block-template-part:has(#pb-header),
+body .wp-site-blocks > .wp-block-template-part:has(#pb-footer) { max-width: none; padding-inline: 0; }
 
 /* With global styles on, WordPress puts the root blockGap (24px) between the header part, the page content and the
    footer part. The design has no such gap: sections carry their own spacing. */
 body .wp-site-blocks > * { margin-block: 0; }
+
+/* With global styles on, the post-content flow layout puts blockGap between sections; sections carry their own spacing. */
+body .wp-block-post-content > :is([id^="pb-s"], [id="pb-header"], [id="pb-footer"]) { margin-block: 0; }

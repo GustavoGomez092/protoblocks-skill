@@ -558,3 +558,23 @@ test('applyTokens applies the body font to style.css and theme.json; warns when 
   const w = applyTokens(bare, { colors: { a: '#000' }, fonts: { sans: { family: 'Inter' } } });
   assert.ok(w.warnings.some((x) => /body/.test(x)), JSON.stringify(w));
 });
+
+test('runApply offline after an online apply keeps the fontFace entries whose files are still in assets/fonts', async () => {
+  const theme = forkTheme();
+  await runApply(theme, tokens, { compile: null, download: fakeDownload() });
+  const faces = (th) => Object.fromEntries(JSON.parse(fs.readFileSync(path.join(th, 'theme.json'), 'utf8')).settings.typography.fontFamilies.map((f) => [f.slug, f.fontFace]));
+  const online = faces(theme);
+  assert.equal(online.sans.length, 3);
+  // One Inter file goes missing; DM Serif Display's stays.
+  const gone = online.sans.find((f) => f.unicodeRange.startsWith('U+0100')).src[0].slice('file:./'.length);
+  fs.rmSync(path.join(theme, gone));
+  const r = await runApply(theme, tokens, { compile: null, download: fakeDownload({ offline: true }) });
+  assert.match(r.warnings.join('\n'), /could not be downloaded.*kept the fonts already in assets\/fonts/s);
+  const offline = faces(theme);
+  assert.deepEqual(offline.display, online.display, 'still-present files keep their entries');
+  assert.deepEqual(offline.sans, online.sans.filter((f) => f.src[0] !== `file:./${gone}`), 'an entry whose file is gone is dropped');
+  // A family with no file left falls back to the stack (no fontFace key).
+  for (const f of online.display) fs.rmSync(path.join(theme, f.src[0].slice('file:./'.length)));
+  await runApply(theme, tokens, { compile: null, download: fakeDownload({ offline: true }) });
+  assert.equal(faces(theme).display, undefined);
+});

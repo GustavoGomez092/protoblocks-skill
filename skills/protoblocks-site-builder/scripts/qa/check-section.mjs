@@ -49,6 +49,7 @@ export async function checkSection(input) {
       const render = path.join(iterDir, `${bp.name}-render.png`);
       try {
         const shot = await shoot({ url, selector, width: bp.width, scale: bp.scale ?? 1, out: render, browser, imageWaitMs });
+        // stalledRequests (requests still pending after the bounded waits, e.g. an unreachable web font) are only reported.
         const clean = shot.pageErrors.length === 0 && shot.imageErrors.length === 0;
         // The diff rescales the render to the design width, so a section that does not span the breakpoint (container
         // instead of alignfull, theme max-width) would otherwise pass silently. Box width is in CSS px.
@@ -57,12 +58,12 @@ export async function checkSection(input) {
         if (bp.sanityOnly || !bp.design) {
           const s = await sanity({ url, selector, width: bp.width, browser, imageWaitMs });
           // sanity issues never flip numericPass (the subagent judges them); page errors and in-anchor image errors do
-          results.push({ breakpoint: bp.name, mode: 'sanity', ok: s.ok, issues: s.issues, widthDelta, numericPass: clean && widthDelta === 0, status: shot.status ?? null, render, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors, pageImageWarnings: shot.pageImageWarnings });
+          results.push({ breakpoint: bp.name, mode: 'sanity', ok: s.ok, issues: s.issues, widthDelta, numericPass: clean && widthDelta === 0, status: shot.status ?? null, render, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors, pageImageWarnings: shot.pageImageWarnings, stalledRequests: shot.stalledRequests ?? [] });
           continue;
         }
         const d = await diffImages({ design: bp.design, render, out: path.join(iterDir, `${bp.name}-composite.png`), masks: bp.masks ?? [] });
         const numericPass = !d.fullyMasked && d.mismatch <= qa.mismatchMax && d.heightDelta <= qa.heightDeltaMax && widthDelta === 0 && clean;
-        results.push({ breakpoint: bp.name, mode: 'diff', mismatch: d.mismatch, heightDelta: d.heightDelta, widthDelta, fullyMasked: !!d.fullyMasked, numericPass, status: shot.status ?? null, render, composite: d.composite, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors, pageImageWarnings: shot.pageImageWarnings });
+        results.push({ breakpoint: bp.name, mode: 'diff', mismatch: d.mismatch, heightDelta: d.heightDelta, widthDelta, fullyMasked: !!d.fullyMasked, numericPass, status: shot.status ?? null, render, composite: d.composite, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors, pageImageWarnings: shot.pageImageWarnings, stalledRequests: shot.stalledRequests ?? [] });
       } catch (e) {
         const status = e.status ?? null;
         const http = status >= 400 ? ` (HTTP ${status})` : '';

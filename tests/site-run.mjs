@@ -89,15 +89,55 @@ export function createRun(base = {}, { dir = TMP } = {}) {
 }
 const pick = (d) => Object.fromEntries(Object.keys(emptyRecord()).map((k) => [k, d[k]]));
 
-/** Reads a manifest written by createRun (EMANIFEST when it is not one). */
+// The options a site test ever snapshots (helpers.mjs themeOptionNames + SETUP_OPTION_NAMES + the pb-itest fixture's
+// mods, the e2e's proto_blocks_tailwind), plus theme_mods_<originalTheme>. Recovery restores no other option.
+export const SNAPSHOT_OPTIONS = Object.freeze(['sidebars_widgets', 'theme_switched', 'current_theme', 'theme_mods_pb-itest',
+  'proto_blocks_wizard_completed', 'proto_blocks_component_style', 'permalink_structure', 'proto_blocks_tailwind']);
+const SLUG = /^[A-Za-z0-9._-]+$/;
+const NAME = /^[a-z0-9_-]+$/;
+const relSafe = (p) => typeof p === 'string' && p !== '' && !path.isAbsolute(p) && !p.split(/[\\/]/).includes('..');
+
+/**
+ * Reads and validates a manifest written by createRun. Everything recovery acts on must be what the harness writes:
+ * the id is the file name's, only the snapshot options, the Tailwind copy next to the manifest with relative paths,
+ * the Yoast snapshot at its one path, well-formed posts/terms/forks. Anything else is EMANIFEST (nothing is touched).
+ */
 export function loadManifest(file) {
+  const bad = (why) => Object.assign(new Error(`${file}: ${why}`), { code: 'EMANIFEST' });
   let m;
-  try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw Object.assign(new Error(`${file}: ${e.message}`), { code: 'EMANIFEST' }); }
-  if (m?.version !== 1 || typeof m.id !== 'string' || !Array.isArray(m.posts) || !Array.isArray(m.forks) || typeof m.options !== 'object') {
-    throw Object.assign(new Error(`${file} is not a site-run manifest`), { code: 'EMANIFEST' });
+  try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw bad(e.message); }
+  if (m?.version !== 1 || !Array.isArray(m.posts) || !Array.isArray(m.forks) || !Array.isArray(m.terms ?? []) || typeof m.options !== 'object' || m.options === null) {
+    throw bad('not a site-run manifest');
   }
+  const dir = path.dirname(path.resolve(file));
+  if (typeof m.id !== 'string' || path.basename(file) !== `site-run-${m.id}.json` || !/^[0-9a-f]{8}$/.test(m.id)) throw bad('the id must be the one in the file name');
+  if (typeof m.startedAt !== 'string' || Number.isNaN(Date.parse(m.startedAt))) throw bad('startedAt is not a valid time');
+  if (m.originalTheme != null && !(typeof m.originalTheme === 'string' && SLUG.test(m.originalTheme))) throw bad('originalTheme is not a theme slug');
+  const allowed = new Set([...SNAPSHOT_OPTIONS, ...(m.originalTheme ? [`theme_mods_${m.originalTheme}`] : [])]);
+  for (const [name, value] of Object.entries(m.options)) {
+    if (!allowed.has(name)) throw bad(`option ${name} is not allowed (only the options the site tests snapshot)`);
+    if (value !== null && typeof value !== 'string') throw bad(`option ${name} must be a raw JSON string or null`);
+  }
+  if (m.tailwind != null) {
+    const t = m.tailwind;
+    if (t.copyDir !== path.join(dir, `site-run-${m.id}-tailwind`)) throw bad('tailwind.copyDir is outside the manifest\'s own copy folder');
+    if (!Array.isArray(t.files) || !t.files.every(relSafe)) throw bad('tailwind.files must be relative paths inside the cache');
+    if (!Array.isArray(t.dirs) || !t.dirs.every(relSafe)) throw bad('tailwind.dirs must be relative paths inside the cache');
+    if (t.option !== null && typeof t.option !== 'string') throw bad('tailwind.option must be a raw JSON string or null');
+  }
+  if (m.yoast != null && m.yoast.snapshotFile !== path.join(dir, 'yoast-options-snapshot.json')) throw bad('yoast.snapshotFile must be the Yoast crash snapshot next to the manifest');
+  for (const p of m.posts) {
+    const idOk = p?.id == null || (Number.isInteger(p.id) && p.id > 0);
+    const nameOk = p?.name == null || (typeof p.name === 'string' && NAME.test(p.name));
+    if (!p || typeof p.type !== 'string' || !NAME.test(p.type) || !idOk || !nameOk || (p.id == null && p.name == null)) throw bad(`post record ${JSON.stringify(p)} must have a type and an id or name`);
+  }
+  for (const t of m.terms ?? []) if (!t || t.taxonomy !== 'wp_theme' || typeof t.slug !== 'string') throw bad(`term record ${JSON.stringify(t)} is not a wp_theme term`);
+  for (const f of m.forks) if (!f || typeof f.slug !== 'string' || !SLUG.test(f.slug)) throw bad(`theme folder record ${JSON.stringify(f)} must have a slug`);
   return { ...emptyRecord(), ...m };
 }
+
+/** True when a manifest's run started more than `maxAgeMs` ago (default 1 hour). */
+export const isStale = (m, { now = Date.now(), maxAgeMs = 3600 * 1000 } = {}) => now - Date.parse(m.startedAt) > maxAgeMs;
 
 // ---- Proto-Blocks' Tailwind cache: every file under uploads/proto-blocks/tailwind, its directories, whether the
 // directory and its parent existed, and the proto_blocks_tailwind option (null = absent).
@@ -114,9 +154,15 @@ function walkDirs(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isDirectory()) { const p = path.join(dir, e.name); out.push(p); walkDirs(p, out); }
   return out;
 }
+/**
+ * An option's raw JSON, or null when it does not exist (WP-CLI exit 1 "Could not get ... option"). Any other failure
+ * throws: a transient WP-CLI/database error must never read as "absent" (a restore would then delete the option).
+ */
 export const rawOption = (wp, name) => {
   const r = wp.run(['option', 'get', name, '--format=json']);
-  return r.code === 0 ? r.stdout.trim() : null;
+  if (r.code === 0) return r.stdout.trim();
+  if (r.code === 1 && /Could not get '[^']*' option/.test(r.stderr ?? '')) return null;
+  throw Object.assign(new Error(`wp option get ${name} failed (exit ${r.code}): ${(r.stderr || r.stdout || '').trim().slice(0, 500)}`), { code: 'EWP' });
 };
 export function snapshotTailwind(wp, publicPath) {
   const dir = tailwindDir(publicPath);

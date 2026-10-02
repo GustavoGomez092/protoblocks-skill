@@ -217,13 +217,14 @@ export function parseFontFaces(css) {
 
 /**
  * Downloads the Google fonts named in the tokens into `$THEME/assets/fonts/` (css2 through download.mjs, then each woff2
- * once) and returns theme.json fontFace entries per family. Offline, or when a family's files fail, that family keeps
- * its fallback stack and a warning says so; nothing here throws for the network.
+ * once) and returns theme.json fontFace entries per family. Offline, or when a family's files fail, that family is
+ * listed in `failed` with a warning (runApply then keeps its earlier self-hosted files, else the fallback stack);
+ * nothing here throws for the network.
  */
 export async function selfHostFonts(themeDir, t, { download = realDownload } = {}) {
   const url = googleFontsUrl(t);
   const families = Object.values(t.fonts ?? {}).filter((f) => Array.isArray(f.google) && f.google.length).map((f) => f.family.trim());
-  const out = { faces: {}, files: [], warnings: [] };
+  const out = { faces: {}, files: [], warnings: [], failed: [] };
   if (!url) return out;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-fonts-'));
   let css;
@@ -232,7 +233,8 @@ export async function selfHostFonts(themeDir, t, { download = realDownload } = {
     await download(url, cssFile, { headers: { 'User-Agent': BROWSER_UA }, timeoutMs: FONT_TIMEOUT_MS });
     css = fs.readFileSync(cssFile, 'utf8');
   } catch (e) {
-    out.warnings.push(`Google Fonts could not be downloaded (${e.message}): ${families.join(', ')} not self-hosted; the fallback stack is used. Re-run tokens.mjs apply when online.`);
+    out.warnings.push(`Google Fonts could not be downloaded (${e.message}): ${families.join(', ')} not updated; fonts already in ${FONTS_DIR} are kept, otherwise the fallback stack is used. Re-run tokens.mjs apply when online.`);
+    out.failed.push(...families);
     return out;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -241,7 +243,7 @@ export async function selfHostFonts(themeDir, t, { download = realDownload } = {
   const saved = new Map(); // url -> file name
   for (const family of families) {
     const faces = parseFontFaces(css).filter((f) => f.family.toLowerCase() === family.toLowerCase());
-    if (!faces.length) { out.warnings.push(`Google Fonts returned no woff2 file for ${family}; the fallback stack is used.`); continue; }
+    if (!faces.length) { out.warnings.push(`Google Fonts returned no woff2 file for ${family}; the fallback stack is used.`); out.failed.push(family); continue; }
     const entries = [];
     try {
       for (const f of faces) {
@@ -255,7 +257,8 @@ export async function selfHostFonts(themeDir, t, { download = realDownload } = {
       }
       out.faces[family] = entries;
     } catch (e) {
-      out.warnings.push(`A font file of ${family} could not be downloaded (${e.message}); ${family} keeps the fallback stack.`);
+      out.warnings.push(`A font file of ${family} could not be downloaded (${e.message}); ${family} keeps the fonts already in ${FONTS_DIR}, otherwise the fallback stack.`);
+      out.failed.push(family);
     }
   }
   return out;
@@ -291,15 +294,38 @@ export function applyTokens(themeDir, t, { fontFaces = {} } = {}) {
   return { written: ['tailwind-theme.css', 'theme.json', 'style.css'], ...(warnings.length ? { warnings } : {}) };
 }
 
+/**
+ * theme.json fontFace entries of `families` from an earlier apply whose files are all still in assets/fonts (an
+ * offline re-apply must not drop fonts that are already self-hosted). Per family name.
+ */
+export function keptFontFaces(themeDir, families) {
+  let json;
+  try { json = JSON.parse(fs.readFileSync(path.join(themeDir, 'theme.json'), 'utf8')); } catch { return {}; }
+  const out = {};
+  const fileOk = (src) => {
+    const m = typeof src === 'string' && src.match(/^file:\.\/assets\/fonts\/([A-Za-z0-9._-]+\.woff2)$/);
+    return Boolean(m) && fs.existsSync(path.join(themeDir, FONTS_DIR, m[1]));
+  };
+  for (const fam of json?.settings?.typography?.fontFamilies ?? []) {
+    const family = families.find((f) => f.toLowerCase() === String(fam?.name ?? '').trim().toLowerCase());
+    if (!family || !Array.isArray(fam.fontFace)) continue;
+    const keep = fam.fontFace.filter((face) => Array.isArray(face?.src) && face.src.length && face.src.every(fileOk));
+    if (keep.length) out[family] = keep;
+  }
+  return out;
+}
+
 /** Validates, self-hosts the Google fonts, writes the three files, compiles Tailwind, then records site.tokens. */
 export async function runApply(themeDir, t, { compile, download } = {}) {
   assertFork(themeDir);
   const errors = validateTokens(t);
   if (errors.length) throw Object.assign(new Error(`Invalid tokens:\n- ${errors.join('\n- ')}`), { code: 'ETOKENS' });
   const fonts = await selfHostFonts(themeDir, t, download ? { download } : {});
-  const applied = applyTokens(themeDir, t, { fontFaces: fonts.faces });
+  const kept = keptFontFaces(themeDir, fonts.failed);
+  const keptWarnings = Object.entries(kept).map(([family, faces]) => `${family}: kept the fonts already in ${FONTS_DIR} (${faces.length} font face${faces.length === 1 ? '' : 's'}).`);
+  const applied = applyTokens(themeDir, t, { fontFaces: { ...kept, ...fonts.faces } });
   const written = applied.written;
-  const warnings = [...fonts.warnings, ...(applied.warnings ?? [])];
+  const warnings = [...fonts.warnings, ...keptWarnings, ...(applied.warnings ?? [])];
   let compiled = null;
   if (compile) {
     compiled = compile();

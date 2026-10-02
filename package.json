@@ -9,7 +9,8 @@
     "test:integration:page": "node --test --test-concurrency=1 tests/integration/page.test.mjs",
     "test:site:files": "node --test --test-concurrency=1 $PB_SITE_FILES",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.test.mjs",
-    "test:recover": "node tests/recover.mjs"
+    "test:recover": "node tests/recover.mjs",
+    "test:recover:stale": "node tests/recover.mjs --stale-ok"
   },
   "engines": {
     "node": ">=20.9"
