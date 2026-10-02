@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertFork } from './guards.mjs';
 
 export const MANAGED_START = '// >>> protoblocks-site-builder (managed — do not edit between these markers)';
 export const MANAGED_END = '// <<< protoblocks-site-builder';
@@ -41,6 +42,7 @@ function walk(dir, base = dir) {
 }
 
 export function installThemeAssets(themeDir, assetsDir = DEFAULT_ASSETS_DIR) {
+  assertFork(themeDir);
   const fnFile = path.join(themeDir, 'functions.php');
   if (!fs.existsSync(fnFile)) throw codeError('ENOFUNCTIONS', `No functions.php in ${themeDir}`);
   const before = fs.readFileSync(fnFile, 'utf8');

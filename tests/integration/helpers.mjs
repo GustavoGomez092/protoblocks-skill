@@ -61,32 +61,14 @@ export async function useItestTheme(wp) {
   const originalThemeFile = path.join(tmpDir, 'original-theme.txt');
 
   if (!fs.existsSync(path.join(dir, 'style.css'))) {
-    let forked = false;
+    // forkTheme removes only what it created itself when it fails, so nothing here deletes "pb-itest":
+    // a pre-existing folder this helper did not create is left for a human to inspect.
+    const { fetchThemeZip, forkTheme } = await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs');
+    const { zipFile, forkedFrom, cleanup } = await fetchThemeZip();
     try {
-      const { fetchThemeZip, forkTheme } = await import('../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs');
-      const { zipFile, forkedFrom, cleanup } = await fetchThemeZip();
-      try {
-        forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
-        forked = true;
-      } finally {
-        cleanup();
-      }
-    } catch (err) {
-      if (err.code !== 'ERR_MODULE_NOT_FOUND') {
-        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
-        throw err;
-      }
-      /* theme-fork.mjs not available yet (before Stage 2 Task 4) */
-    }
-    if (!forked) {
-      const src = path.join(themes, ORIGINAL_THEME);
-      fs.cpSync(src, dir, {
-        recursive: true,
-        filter: (fullSrc) => {
-          const rel = path.relative(src, fullSrc);
-          return !rel.split(path.sep).some(part => part === '.git' || part === 'node_modules');
-        }
-      });
+      forkTheme({ wp, themesDir: themes, name: 'PB Itest', slug: 'pb-itest', zipFile, forkedFrom });
+    } finally {
+      cleanup();
     }
   }
 

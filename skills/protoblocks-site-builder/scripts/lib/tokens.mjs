@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { createWp, loadThemeRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
+import { assertFork } from './guards.mjs';
 import { statePath, updateState, setPath } from './state.mjs';
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -108,6 +109,16 @@ export function renderTailwindTheme(t) {
   return lines.join('\n');
 }
 
+// The font used for body text: an explicit `body` font, else `sans`, `text`, `base`, else the first font.
+export function bodyFontSlug(t) {
+  const keys = Object.keys(t?.fonts ?? {});
+  if (!keys.length) return null;
+  return ['body', 'sans', 'text', 'base'].find((k) => keys.includes(k)) ?? keys[0];
+}
+
+// WordPress kebab-cases preset slugs for CSS variables (letters and digits split: "sans2" -> "sans-2").
+export const presetVar = (slug) => `var(--wp--preset--font-family--${slug.match(/[a-z]+|[0-9]+/g).join('-')})`;
+
 export function mergeThemeJson(json, t) {
   const out = structuredClone(json);
   out.settings ??= {};
@@ -118,11 +129,45 @@ export function mergeThemeJson(json, t) {
   if (t.fonts || t.type) out.settings.typography ??= {};
   if (t.fonts) {
     out.settings.typography.fontFamilies = Object.entries(t.fonts).map(([slug, f]) => ({ slug, name: f.family, fontFamily: fontStack(f) }));
+    const body = bodyFontSlug(t);
+    if (body) {
+      out.styles ??= {};
+      out.styles.typography ??= {};
+      out.styles.typography.fontFamily = presetVar(body);
+    }
   }
   if (t.type) {
     out.settings.typography.fontSizes = Object.entries(t.type).map(([slug, v]) => ({ slug, name: title(slug), size: typeof v === 'string' ? v : v.size }));
   }
   return out;
+}
+
+export const BODY_FONT_START = '/* >>> protoblocks: body font (managed by tokens.mjs apply; change the tokens instead) */';
+export const BODY_FONT_END = '/* <<< protoblocks: body font */';
+const FONT_DECL = /font-family\s*:[^;{}]*;?/;
+
+/**
+ * Point the theme's top-level `body { font-family: … }` rule at `stack`. The first time, the rule is
+ * wrapped in managed markers; later runs only rewrite the declaration inside them (idempotent).
+ * Returns `{ css, warning? }`; when no such rule exists the CSS is returned unchanged with a warning.
+ */
+export function rewriteBodyFont(css, stack) {
+  const decl = `font-family: ${stack};`;
+  const start = css.indexOf(BODY_FONT_START);
+  const end = start === -1 ? css.indexOf(BODY_FONT_END) : css.indexOf(BODY_FONT_END, start);
+  if (start !== -1 && end !== -1) {
+    const region = css.slice(start + BODY_FONT_START.length, end);
+    if (!FONT_DECL.test(region)) return { css, warning: 'style.css: the managed body font region has no font-family declaration; left unchanged.' };
+    return { css: `${css.slice(0, start + BODY_FONT_START.length)}${region.replace(FONT_DECL, decl)}${css.slice(end)}` };
+  }
+  if (start !== -1 || end !== -1) return { css, warning: 'style.css: broken protoblocks body font markers; left unchanged (fix them by hand).' };
+  const rules = /^body\s*\{[^{}]*\}/gm;
+  for (let m = rules.exec(css); m; m = rules.exec(css)) {
+    if (!FONT_DECL.test(m[0])) continue;
+    const rule = m[0].replace(FONT_DECL, decl);
+    return { css: `${css.slice(0, m.index)}${BODY_FONT_START}\n${rule}\n${BODY_FONT_END}${css.slice(m.index + m[0].length)}` };
+  }
+  return { css, warning: 'style.css has no top-level `body { font-family: … }` rule; the body font comes only from theme.json styles.typography.fontFamily.' };
 }
 
 export function googleFontsUrl(t) {
@@ -148,6 +193,7 @@ export function rewriteFontImport(css, t) {
 }
 
 export function applyTokens(themeDir, t) {
+  assertFork(themeDir);
   const errors = validateTokens(t);
   if (errors.length) {
     const e = new Error(`Invalid tokens:\n- ${errors.join('\n- ')}`);
@@ -157,19 +203,27 @@ export function applyTokens(themeDir, t) {
   const tw = path.join(themeDir, 'tailwind-theme.css');
   const tj = path.join(themeDir, 'theme.json');
   const st = path.join(themeDir, 'style.css');
+  const warnings = [];
   // Read and compute everything first so a missing/unparseable input throws before any write.
+  let style = rewriteFontImport(fs.readFileSync(st, 'utf8'), t);
+  const body = bodyFontSlug(t);
+  if (body) {
+    const r = rewriteBodyFont(style, fontStack(t.fonts[body]));
+    style = r.css;
+    if (r.warning) warnings.push(r.warning);
+  }
   const outputs = [
     [tw, renderTailwindTheme(t)],
     [tj, `${JSON.stringify(mergeThemeJson(JSON.parse(fs.readFileSync(tj, 'utf8')), t), null, '\t')}\n`],
-    [st, rewriteFontImport(fs.readFileSync(st, 'utf8'), t)],
+    [st, style],
   ];
   for (const [file, content] of outputs) fs.writeFileSync(`${file}.tmp`, content);
   for (const [file] of outputs) fs.renameSync(`${file}.tmp`, file);
-  return { written: ['tailwind-theme.css', 'theme.json', 'style.css'] };
+  return { written: ['tailwind-theme.css', 'theme.json', 'style.css'], ...(warnings.length ? { warnings } : {}) };
 }
 
 export function runApply(themeDir, t, { compile } = {}) {
-  const { written } = applyTokens(themeDir, t);
+  const { written, warnings } = applyTokens(themeDir, t);
   let compiled = null;
   if (compile) {
     compiled = compile();
@@ -180,14 +234,15 @@ export function runApply(themeDir, t, { compile } = {}) {
     }
   }
   if (fs.existsSync(statePath(themeDir))) updateState(themeDir, (s) => { setPath(s, 'site.tokens', t); });
-  return { written, compiled };
+  return { written, compiled, ...(warnings ? { warnings } : {}) };
 }
 
 function main(argv) {
   const [cmd, themeDir, file] = argv;
   if (cmd !== 'apply' || !themeDir || !file) { process.stderr.write('Usage: node tokens.mjs apply <themeDir> <tokens.json> [--no-compile]\n'); process.exit(64); }
+  const rt = loadThemeRuntime(themeDir);
   const t = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const compile = argv.includes('--no-compile') ? null : () => createWp(loadRuntime(themeDir)).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
+  const compile = argv.includes('--no-compile') ? null : () => createWp(rt).evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']);
   process.stdout.write(`${JSON.stringify(runApply(themeDir, t, { compile }), null, 2)}\n`);
 }
 

@@ -1566,11 +1566,12 @@ git commit -m "feat(setup): block-theme navigation menus with pending page links
 - Produces:
   - `serializeAttrs(attrs) => string` — JSON like WordPress `serialize_block_attributes()`: `--` → `--`, `<` → `<`, `>` → `>`, `&` → `&`, `\"` → `"`; empty object → `''`.
   - `blockComment(name, attrs, innerMarkup?) => string` — self-closing `<!-- wp:name {attrs} /-->` when `innerMarkup` is undefined; otherwise `<!-- wp:name {attrs} -->\n{inner}\n<!-- /wp:name -->`. Block names without a namespace are written as given (core blocks).
-  - `partMarkup({ block, attrs = {}, navRef }) => string` — the proto-block wrapping `core/navigation {"ref":navRef}` when `navRef` is a number, else self-closing.
-  - `writePart(themeDir, slug, markup) => string` (path; slug must match `/^[a-z0-9-]+$/`).
-  - `parts.php overrides` → `[{id, slug, theme, modified}]` for the active stylesheet; `parts.php remove-override <slug>` → `{removed:int[]}`.
-  - `listOverrides(wp) => array`, `removeOverride(wp, slug, { confirm }) => {removed}` — throws `Error` code `ECONFIRM` without `confirm: true`.
-  - CLI: `node parts.mjs write <themeDir> <slug> <markupFile>`; `node parts.mjs overrides <themeDir>`; `node parts.mjs remove-override <themeDir> <slug> --confirm`.
+  - `partMarkup({ block, attrs = {}, navRef }) => string` — the proto-block wrapping `core/navigation {"ref":navRef}` when `navRef` is a positive integer, self-closing when `navRef` is undefined; any other `navRef` throws. `blockComment` validates the block name (`/^[a-z0-9-]+(\/[a-z0-9-]+)?$/`).
+  - `writePart(themeDir, slug, markup) => string` (path; slug must match `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`).
+  - `listOverrides(wp, theme) => [{id, slug, theme, modified}]` — `theme` is the active stylesheet (`basename(themeDir)`); `parts.php` exits `ETHEMEMISMATCH` if it is not `get_stylesheet()`. Row `theme` comes from the post's real `wp_theme` terms.
+  - `removeOverride(wp, theme, slug, { confirm, expectId }) => {removed:int[], records:[...], recovery:string[]}`. Validates slug (`ESLUG`) and theme (`ETHEME`) before any WP call; no match returns empty arrays. Throws `ECONFIRM` (with `e.rows`, the exact rows and the `--confirm --id <n>` hint) unless `confirm === true` AND `expectId` is the previewed post id; `ESTALE` if the id changed; `EAMBIGUOUS` for more than one match; `ETHEMEMISMATCH`; `ENOTRASH` when `EMPTY_TRASH_DAYS` is 0. PHP error codes surface as `e.code`. The override is moved to Trash (recoverable: `wp eval 'wp_untrash_post(<id>);' && wp post update <id> --post_status=publish`), never force-deleted.
+  - `parts.php overrides <theme>`; `parts.php preview <theme> <slug>`; `parts.php remove-override <theme> <slug> confirm <expectedId>`.
+  - CLI: `node parts.mjs write <themeDir> <slug> <markupFile>`; `node parts.mjs overrides <themeDir>`; `node parts.mjs remove-override <themeDir> <slug>` (preview) and `... <slug> --confirm --id <n>` (id taken from the preview).
 
 - [ ] **Step 1: Failing unit tests**
 

@@ -24,7 +24,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
     "tokens": { "colors": {…}, "fonts": {…}, "type": {…}, "radii": {…}, "shadows": {…} },
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
     "qa": { "mismatchMax": 0.08, "pageMismatchMax": 0.12, "heightDeltaMax": 0.03, "maxIterations": 5 },
-    "navigation": { "primary": 123, "footer": [124, 125], "pendingLinks": [{ "label": "Pricing", "page": "pricing" }] },
+    "navigation": { "menus": { "primary": { "id": 123, "spec": { "title": "Primary", "items": […] }, "pending": [{ "label": "Pricing", "page": "pricing" }], "contentHash": "<sha256>" } } },
     "parts": { "header": { "block": "site-header", "status": "done" }, "footer": { … } }
   },
   "library": {
@@ -46,6 +46,19 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
   }]
 }
 ```
+
+## `site.navigation.menus.<key>`
+
+Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^[a-z0-9][a-z0-9_-]*$`, the `wp_navigation` post slug is `pb-nav-<key>`).
+
+| Field | Meaning |
+|---|---|
+| `id` | `wp_navigation` post ID (the header/footer part references it as `ref`). |
+| `spec` | The spec last passed to `upsert` (`{ title?, items }`). `refresh` keeps it. |
+| `pending` | `[{ label, page }]` page links still written as placeholder custom links (page missing or unpublished). |
+| `contentHash` | sha256 of the menu's `post_content` as protoblocks last wrote it. `upsert` refuses (`[EEDITED]`) when the live menu no longer matches (edited in the Site Editor) unless `--force`. |
+
+`site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 
 ## Enums and defaults
 

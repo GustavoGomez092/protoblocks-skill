@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ensureManagedBlock, installThemeAssets, MANAGED_START } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 
+const FORK_STYLE = '/*\nTheme Name: T\nProto Fork: proto-blocks-theme@1.1.3\n*/';
+
 test('ensureManagedBlock appends once and normalizes on repeat', () => {
   const once = ensureManagedBlock("<?php\nrequire 'x.php';\n");
   assert.equal(once.split(MANAGED_START).length - 1, 1);
@@ -17,6 +19,7 @@ test('ensureManagedBlock appends once and normalizes on repeat', () => {
 test('installThemeAssets copies pb-* files only and updates functions.php', () => {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-theme-'));
   const assets = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-assets-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), FORK_STYLE);
   fs.writeFileSync(path.join(theme, 'functions.php'), '<?php\n');
   fs.mkdirSync(path.join(assets, 'inc'), { recursive: true });
   fs.mkdirSync(path.join(assets, 'assets/js'), { recursive: true });
@@ -37,6 +40,7 @@ const BROKEN = /broken protoblocks managed block.*nothing was changed/;
 function fixture(functionsSrc) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-theme-'));
   const assets = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-assets-'));
+  fs.writeFileSync(path.join(theme, 'style.css'), FORK_STYLE);
   if (functionsSrc !== null) fs.writeFileSync(path.join(theme, 'functions.php'), functionsSrc);
   fs.mkdirSync(path.join(assets, 'inc'), { recursive: true });
   fs.writeFileSync(path.join(assets, 'inc/pb-assets.php'), '<?php // a');
