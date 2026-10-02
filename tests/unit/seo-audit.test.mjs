@@ -23,7 +23,7 @@ const status = (e, id, o) => byId(run(e, o))[id];
 test('a good page passes every check', () => {
   const r = run(good());
   assert.equal(r.pass, true, JSON.stringify(r.checks, null, 2));
-  assert.deepEqual(r.checks.map((c) => c.id), ['h1-count', 'heading-order', 'kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description', 'kw-slug', 'title-length', 'description-length', 'img-alt', 'internal-link', 'jsonld-parse', 'jsonld-required', 'og-tags', 'og-image', 'canonical']);
+  assert.deepEqual(r.checks.map((c) => c.id), ['h1-count', 'heading-order', 'kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description', 'kw-slug', 'title-length', 'description-length', 'img-alt', 'internal-link', 'jsonld-parse', 'jsonld-required', 'og-tags', 'og-image', 'canonical', 'robots-noindex']);
   assert.ok(r.checks.every((c) => c.status === 'pass'));
 });
 
@@ -204,14 +204,6 @@ test('keyword matching is case-insensitive and spans whitespace and newlines', (
   for (const id of ['kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description']) assert.equal(s[id], 'pass', id);
 });
 
-test('JSON-LD nodes nested inside other nodes and @graph are found', () => {
-  const e = good();
-  e.jsonld = [JSON.stringify({ '@type': 'WebPage', name: 'x', url: 'y', mainEntity: { '@graph': [{ '@type': 'FAQPage' }] } })];
-  const r = run(e);
-  assert.equal(byId(r)['jsonld-required'], 'fail');
-  assert.match(r.checks.find((c) => c.id === 'jsonld-required').detail, /FAQPage\.mainEntity/);
-});
-
 test('malformed block next to a valid one reports the parse failure and still checks the valid node', () => {
   const e = good();
   e.jsonld = ['{not json', JSON.stringify({ '@type': 'Event', name: 'Open day' })];
@@ -282,4 +274,110 @@ test('kw-slug warns (not a vacuous pass) when the keyword has no words of 3+ cha
   const c = r.checks.find((x) => x.id === 'kw-slug');
   assert.equal(c.status, 'warn');
   assert.equal(c.detail, 'keyword has no words of 3+ characters to match');
+});
+
+// ---- final-review fix wave ----
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const INFERENCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../skills/protoblocks-seo/references/inference.md');
+const statusOf = (e, id, focusKeyword) => byId(auditExtract(e, { focusKeyword, ogImageInfo: og }))[id];
+
+test('the worked example in inference.md passes kw-h1, kw-first-paragraph and kw-description (word-based matching)', () => {
+  const doc = fs.readFileSync(INFERENCE, 'utf8');
+  const example = JSON.parse(doc.match(/<!-- seo\.json example -->\n```json\n([\s\S]*?)\n```/)[1]);
+  const h1 = 'Emergency plumbing in Austin';
+  const firstParagraph = 'Burst pipe at 2 a.m.? Our licensed Austin plumbers handle emergency repairs around the clock, with upfront quotes.';
+  assert.ok(doc.includes(`"${h1}"`), 'the worked example names this h1');
+  assert.ok(doc.includes(firstParagraph), 'the worked example shows this hero paragraph');
+  const e = good();
+  e.h[0].text = h1;
+  e.firstParagraph = firstParagraph;
+  e.metaDescription = example.description.value;
+  e.title = example.title.value.replace('%%sep%%', '-').replace('%%sitename%%', 'Acme');
+  const s = byId(auditExtract(e, { focusKeyword: example.focusKeyword.value, ogImageInfo: og }));
+  assert.equal(example.focusKeyword.value, 'emergency plumber austin');
+  for (const id of ['kw-title', 'kw-h1', 'kw-first-paragraph', 'kw-description']) assert.equal(s[id], 'pass', id);
+});
+
+test('kw-* checks match keyword words in any order, with plural and -ing/-er forms', () => {
+  const e = good();
+  e.h[0].text = "Austin's emergency plumbers";
+  e.firstParagraph = 'Plumbing emergencies in Austin are handled by our licensed team around the clock.';
+  for (const id of ['kw-h1', 'kw-first-paragraph']) assert.equal(statusOf(e, id, 'emergency plumber austin'), 'pass', id);
+});
+
+test('kw-* checks fail when any keyword word of 3+ characters is missing, and name the missing word', () => {
+  const e = good();
+  e.h[0].text = 'Emergency plumbing';
+  const r = auditExtract(e, { focusKeyword: 'emergency plumber austin', ogImageInfo: og });
+  const c = r.checks.find((x) => x.id === 'kw-h1');
+  assert.equal(c.status, 'fail');
+  assert.match(c.detail, /missing: austin/);
+});
+
+test('kw-* checks ignore keyword words under 3 characters', () => {
+  const e = good();
+  e.h[0].text = 'Plumber Austin';
+  assert.equal(statusOf(e, 'kw-h1', 'plumber in austin'), 'pass');
+});
+
+test('kw-* checks do not match mid-word substrings', () => {
+  const e = good();
+  e.h[0].text = 'Unplumbered spaces';
+  assert.equal(statusOf(e, 'kw-h1', 'plumber'), 'fail');
+});
+
+test('keyword matching normalises Unicode (NFC), curly quotes and dashes', () => {
+  const e = good();
+  e.h[0].text = 'O’Brien X‑ray café';
+  assert.equal(statusOf(e, 'kw-h1', "o'brien x-ray café"), 'pass');
+  e.h[0].text = 'O’Brien Xray';
+  assert.equal(statusOf(e, 'kw-h1', "o'brien x-ray"), 'fail', 'a hyphenated keyword word still needs its hyphenated form');
+});
+
+test('kw-slug compares against the decoded pathname', () => {
+  const e = good();
+  e.url = 'http://a.local/caf%C3%A9-austin/';
+  assert.equal(statusOf(e, 'kw-slug', 'café austin'), 'pass');
+  e.url = 'http://a.local/cafe%CC%81-austin/';
+  assert.equal(statusOf(e, 'kw-slug', 'café austin'), 'pass', 'decomposed slug is NFC-normalised too');
+});
+
+test('jsonld-required checks top-level and @graph nodes only, not nested ones', () => {
+  const e = good();
+  e.jsonld = [JSON.stringify({ '@type': 'WebPage', name: 'x', url: 'y', publisher: { '@type': 'Organization' }, mainEntity: { '@type': 'Event', name: 'nested' } })];
+  assert.equal(statusOf(e, 'jsonld-required', KW), 'pass');
+  e.jsonld = [JSON.stringify({ '@graph': [{ '@type': 'FAQPage' }] }), JSON.stringify([{ '@type': 'Event', name: 'top' }])];
+  const r = run(e);
+  const d = r.checks.find((c) => c.id === 'jsonld-required').detail;
+  assert.match(d, /FAQPage\.mainEntity/);
+  assert.match(d, /Event\.startDate/);
+});
+
+test('noindex: canonical is a warning that names the cause, plus a robots-noindex warning', () => {
+  const e = good();
+  e.canonical = null;
+  e.robots = 'noindex, follow';
+  const r = run(e);
+  const canonical = r.checks.find((c) => c.id === 'canonical');
+  assert.equal(canonical.status, 'warn');
+  assert.match(canonical.detail, /noindex/);
+  assert.equal(canonical.fix, "Settings → Reading → 'Discourage search engines' is on (or the page is noindex); Yoast omits canonical. Ask the developer; never toggle it yourself.");
+  const robots = r.checks.find((c) => c.id === 'robots-noindex');
+  assert.equal(robots.status, 'warn');
+  assert.match(robots.detail, /noindex, follow/);
+  assert.match(robots.fix, /never toggle it yourself/);
+  assert.equal(r.pass, true, 'warnings never fail');
+});
+
+test('robots-noindex passes for an indexable page; a missing canonical there still fails', () => {
+  const e = good();
+  e.robots = 'index, follow, max-image-preview:large';
+  assert.equal(status(e, 'robots-noindex'), 'pass');
+  e.canonical = null;
+  assert.equal(status(e, 'canonical'), 'fail');
+  delete e.robots;
+  assert.equal(status(e, 'robots-noindex'), 'pass');
 });
