@@ -148,6 +148,12 @@ test('initState gitignore includes build.json.lock', () => {
   assert.match(gi, /build\.json\.lock/);
 });
 
+test('initState gitignore covers the loop scratch files (plan, part markup, attrs)', () => {
+  initState(theme, site);
+  const lines = fs.readFileSync(path.join(theme, '.protoblocks/.gitignore'), 'utf8').split('\n');
+  for (const l of ['plan.json', 'header.html', 'footer.html', '*.attrs.json']) assert.ok(lines.includes(l), l);
+});
+
 test('CLI init without site file exits 64 with usage message', () => {
   const r = spawnSync(process.execPath, [CLI, 'init', theme], { encoding: 'utf8' });
   assert.notEqual(r.status, 0);

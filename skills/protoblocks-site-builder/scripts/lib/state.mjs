@@ -163,7 +163,7 @@ export function initState(themeDir, site) {
   if (fs.existsSync(statePath(themeDir))) throw new StateError(`State already exists at ${statePath(themeDir)}`, 'EEXISTS');
   const state = { schemaVersion: SCHEMA_VERSION, site: { ...site, qa: { ...DEFAULT_QA, ...(site.qa ?? {}) } }, library: {}, pages: [] };
   saveState(themeDir, state);
-  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.lock\nbuild.json.tmp-*\n');
+  fs.writeFileSync(path.join(stateDir(themeDir), '.gitignore'), 'artifacts/\nbuild.json.bak\nbuild.json.lock\nbuild.json.tmp-*\n# scratch files (plan gate, part markup, attrs)\nplan.json\nheader.html\nfooter.html\n*.attrs.json\n');
   return state;
 }
 
@@ -225,6 +225,17 @@ export function updateState(themeDir, fn, opts = {}) {
       }
     }
   }
+}
+
+/** Looks a section up by page slug and section number n (never by array position). */
+export function getSection(state, slug, n) {
+  const num = typeof n === 'string' && /^[1-9][0-9]*$/.test(n) ? Number(n) : n;
+  if (!Number.isInteger(num) || num <= 0) throw new StateError(`Section number must be a positive integer, got ${JSON.stringify(n ?? null)}`, 'EINPUT');
+  const page = state.pages.find((p) => p.slug === slug);
+  if (!page) throw new StateError(`No page "${slug}" in state.`, 'ENOPAGE');
+  const section = page.sections.find((s) => s.n === num);
+  if (!section) throw new StateError(`No section n=${num} on page "${slug}".`, 'ENOSECTION');
+  return { page, section };
 }
 
 const segs = (dotted) => (dotted === '' ? [] : dotted.split('.'));

@@ -60,6 +60,25 @@ Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^
 
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 
+## Plan fields (written by `protoblocks-design-breakdown`)
+
+Free-form keys (not schema-enforced), set at the plan gate after the developer approves:
+
+| Path | Meaning |
+|---|---|
+| `pages[i].plan` | `{ "approvedAt": "<ISO timestamp>", "by": "developer" }`, written by `plan.mjs record`. Must exist before the page `status` becomes `building`; `page.mjs build` refuses without it (`[ENOPLAN]`). |
+| `pages[i].notes.shellCap` | String note that the theme's 1440px shell cap in `style.css` was changed for a wider desktop frame. |
+| `sections[j].label` | Human label, e.g. "Hero". |
+| `sections[j].decision` | `new`, `reuse` or `extend` (enum-checked). |
+| `sections[j].block` | Block slug the section uses. |
+| `sections[j].notes` | Plan notes (shared classes, assets to replace, etc.). |
+| `sections[j].masks.<bp>` | Regions visual QA ignores: `[{ "x", "y", "w", "h" }]` in crop pixel coordinates of that breakpoint's crop. |
+| `sections[j].anchor` | `pb-s<n>`, except header and footer: always `pb-header` / `pb-footer` (set by `intake.mjs crop` for ranges with `part`, and by `plan.mjs record` for plan rows with `part`), so the template part keeps one id on every page. |
+| `sections[j].inPart` | `true` once a header/footer section has been written to a template part (`parts.mjs write`): `page.mjs` then leaves it out of the page content, since the part renders it. Set by `protoblocks-section-loop` on the first page (`references/header-footer.md`) and by `plan.mjs record` on later pages (`reuse` rows with `part`). |
+| `sections[j].prevStatus`, `sections[j].preparedIteration` | Set by `qa-input.mjs prepare`: the status before verification (a pass on a section that was `done` returns it to `done`) and the newest prepared iteration (`record` only accepts a verdict from that iteration). |
+
+Find pages by `slug` and sections by `n`, not by array position.
+
 ## Enums and defaults
 
 | Field | Values |

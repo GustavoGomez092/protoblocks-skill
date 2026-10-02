@@ -30,6 +30,6 @@ The prompt gives you the path to a CheckInput JSON (url, anchor, iterDir, qa thr
    - **low** — anti-aliasing, sub-pixel offsets, image compression, `pageImageWarnings`.
    Each discrepancy gets a `fix` phrased in block terms (template.php markup, Tailwind class/token, CSS rule, block attribute).
 4. `pass` = `numericPass` from the result AND no `high` discrepancies. If `result.json` has `numericPass: false`, the verdict can never pass: never set `pass: true` when `numericPass` is false.
-5. Write the verdict to `<iterDir>/verdict.json`, then reply with exactly that JSON and nothing else:
+5. Write the verdict to `<iterDir>/verdict.json`, then reply with exactly that JSON and nothing else. `breakpoints` lists every result of `result.json` (rename `breakpoint` to `name`) with `mode`, `mismatch`, `heightDelta`, `widthDelta` and `numericPass` copied verbatim; recording rejects a verdict whose numbers, breakpoints or `numericPass` differ from `result.json`:
 
 {"pass":false,"anchor":"pb-s3","numericPass":false,"breakpoints":[{"name":"desktop","mode":"diff","mismatch":0.11,"heightDelta":0.02,"widthDelta":0,"numericPass":false}],"discrepancies":[{"breakpoint":"desktop","area":"headline","issue":"font-size ~48px vs ~56px in design","severity":"high","fix":"use text-h1 on the h2"}],"artifacts":["<paths of composites/renders>"]}
