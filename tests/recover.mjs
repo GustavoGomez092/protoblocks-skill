@@ -30,7 +30,7 @@ export function recoverAll({ dir = TMP, wpFor = (m) => siteWp(m, { dir }) } = {}
     let m;
     try { m = loadManifest(file); } catch (e) { results.push({ file, ok: false, done: [], problems: [e.message] }); continue; }
     let r;
-    try { r = recoverRun(wpFor(m), m); } catch (e) { r = { done: [], problems: [e.message] }; }
+    try { r = recoverRun(wpFor(m), m, { tmpDir: dir }); } catch (e) { r = { done: [], problems: [e.message] }; }
     const ok = r.problems.length === 0;
     if (ok) {
       if (m.tailwind?.copyDir) fs.rmSync(m.tailwind.copyDir, { recursive: true, force: true });

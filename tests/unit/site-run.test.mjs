@@ -98,6 +98,7 @@ function interruptedRun(site) {
 test('recoverAll restores exactly what the manifest lists and deletes the manifest', () => {
   const site = fakeSite();
   const { run, fork } = interruptedRun(site);
+  fs.writeFileSync(path.join(site.dir, 'original-theme.txt'), 'dev-theme'); // written by the tests before a switch
   assert.deepEqual(leftoverManifests(site.dir), [run.file]);
   const results = recoverAll({ dir: site.dir, wpFor: () => site.wp });
   assert.equal(results.length, 1);
@@ -114,6 +115,7 @@ test('recoverAll restores exactly what the manifest lists and deletes the manife
   assert.deepEqual([...site.posts.keys()], [15], 'the run\'s page (found by its exact name), menu and attachment are gone; menu 15 stays');
   assert.equal(site.terms.size, 0);
   assert.deepEqual(leftoverManifests(site.dir), [], 'the manifest is deleted once everything is restored');
+  assert.equal(fs.existsSync(path.join(site.dir, 'original-theme.txt')), false, 'the crash hint for the original theme goes too');
   assert.equal(fs.existsSync(run.tailwindDir), false, 'and its Tailwind copy');
 });
 

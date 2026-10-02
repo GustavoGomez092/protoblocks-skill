@@ -189,7 +189,7 @@ const hasForkMarker = (dir) => {
  * a fork marker or build state for forks, not active) and their theme_mods_ rows, then restores the options, the
  * Tailwind cache and the Yoast options. Returns { done, problems }; recovery is complete when `problems` is empty.
  */
-export function recoverRun(wp, m, { publicPath = m.publicPath } = {}) {
+export function recoverRun(wp, m, { publicPath = m.publicPath, tmpDir = TMP } = {}) {
   const done = [];
   const problems = [];
   const step = (what, fn) => { try { const r = fn(); if (r) done.push(r); } catch (e) { problems.push(`${what}: ${e.message}`); } };
@@ -204,6 +204,13 @@ export function recoverRun(wp, m, { publicPath = m.publicPath } = {}) {
       if (!fs.existsSync(path.join(themesDir, m.originalTheme, 'style.css'))) throw new Error(`the original theme "${m.originalTheme}" is not in ${themesDir}`);
       wp.check(['theme', 'activate', m.originalTheme]);
       return `activated ${m.originalTheme} (was ${now})`;
+    });
+    // The tests' crash hint for the original theme (tests/.tmp/original-theme.txt), once that theme is active again.
+    step('original-theme hint', () => {
+      const hint = path.join(tmpDir, 'original-theme.txt');
+      if (!fs.existsSync(hint) || fs.readFileSync(hint, 'utf8').trim() !== m.originalTheme || active() !== m.originalTheme) return null;
+      fs.rmSync(hint);
+      return `removed ${hint}`;
     });
   }
 
@@ -306,7 +313,7 @@ export function onInterrupt(cleanup, { exit = (code) => process.exit(code) } = {
 
 /** Recovery of one manifest on signal: recoverRun, then the manifest goes when nothing is left, else it stays. */
 export function recoverOnSignal(wp, run, sig) {
-  const r = recoverRun(wp, run.data);
+  const r = recoverRun(wp, run.data, { tmpDir: path.dirname(run.file) });
   process.stderr.write(`site-test interrupted by ${sig}: ${r.done.length} cleanup step(s) done${r.problems.length ? `; NOT cleaned:\n  ${r.problems.join('\n  ')}\nmanifest kept: ${run.file}\nrun: ${RECOVER_COMMAND}` : '; site restored'}\n`);
   if (!r.problems.length) run.close();
   return r;
