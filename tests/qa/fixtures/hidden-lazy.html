@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>hidden lazy</title>
+<style>body{margin:0}section{background:#1e3a8a}</style></head>
+<body>
+<!-- WordPress adds loading="lazy"; Chromium never loads lazy images inside display:none subtrees -->
+<section id="pb-none" style="height:300px">
+  <div class="hidden" style="display:none"><img loading="lazy" width="40" height="40" alt="desktop-only" src="/__hang?display-none"></div>
+</section>
+<!-- below the fold so the request starts only during the scroll-through, and never completes -->
+<div style="height:8000px"></div>
+<section id="pb-vis" style="height:300px">
+  <div style="visibility:hidden"><img loading="lazy" width="40" height="40" alt="tab-panel" src="/__hang?visibility-hidden"></div>
+</section>
+</body></html>

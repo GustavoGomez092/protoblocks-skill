@@ -54,6 +54,10 @@ node "$PB/lib/state.mjs" restore "$THEME"                  # roll back to build.
 
 Values are JSON (quote strings: `'"done"'`). Writes are validated and locked. Recovery: `[EPARSE]`, or `[EINVALID]` from `get`/`validate` (the file on disk is bad), means run `restore`. `[EINVALID]` or `[EVALUE]` from `set`/`append` means the value was rejected and state is unchanged: fix the value and retry; never `restore` (it would roll back the previous good write). Never re-`init` over existing state. Full schema: `references/state-schema.md`.
 
+## Site setup
+
+**Site setup** - after preflight, run the `protoblocks-site-setup` skill (one-shot `setup-site.mjs`, then tokens, navigation, header/footer parts). It creates the theme fork and initializes the build state.
+
 ## Iron rules
 
 - Never claim a section passes without a recorded QA verdict in state.
