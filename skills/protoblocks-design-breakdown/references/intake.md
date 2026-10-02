@@ -1,6 +1,6 @@
 # Intake: design source to frames
 
-Goal: one PNG per breakpoint registered with `intake.mjs add-frame`, plus a list of assets. Frames are copied to `$THEME/.protoblocks/artifacts/<page>/design/<breakpoint>.png` and recorded in `pages[i].design.frames` as `{breakpoint, width, scale, image, pixelWidth}`. Always read `frame.image` from state; the extension follows the source file.
+Goal: one PNG per breakpoint registered with `intake.mjs add-frame`, plus a list of assets. Frames are copied to `$THEME/.protoblocks/artifacts/<page>/design/<breakpoint>.<ext>` and recorded in `pages[i].design.frames` as `{breakpoint, width, scale, image, pixelWidth}`. Always read `frame.image` from state; the extension follows the source file.
 
 ```bash
 node "$PB/lib/intake.mjs" add-frame "$THEME" <page> <desktop|tablet|mobile> <image> [--width W] [--title T]
@@ -71,8 +71,10 @@ Frames at or below 1440 need no change (the shell is centred). The cap is theme-
 
 Crop a region out of a frame (arbitrary x/y, integer image pixels, names `[A-Za-z0-9_-]+`):
 
+`$FRAME` is the frame's `image` path from state (SKILL.md Step 2 shows the lookup; JPEG frames keep `.jpg`):
+
 ```bash
-node "$PB/qa/segment.mjs" crop "$THEME/.protoblocks/artifacts/<page>/design/desktop.png" --ranges '[{"name":"hero-photo","y0":120,"y1":760,"x0":720,"x1":1440}]' --out "$THEME/.protoblocks/artifacts/<page>/assets"
+node "$PB/qa/segment.mjs" crop "$FRAME" --ranges '[{"name":"hero-photo","y0":120,"y1":760,"x0":720,"x1":1440}]' --out "$THEME/.protoblocks/artifacts/<page>/assets"
 ```
 
 Import every image that ends up in the page; alt text is required (use `--alt ""` only for purely decorative images). Imports are de-duplicated by file hash, so a logo reused on several pages is one attachment.
