@@ -13,6 +13,8 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
    "Disable WP Global Styles" on never get it, and the browser's 8px body margin makes every full-bleed band 16px
    narrower than the viewport. The header is on every page, so it carries the same zero-specificity reset. */
 :where(body) { margin: 0; }
+/* In the header template part the theme pads `.wp-site-blocks > header` with side gutters; the band is full-bleed. */
+.wp-site-blocks > .wp-block-template-part:has(> .pb-e2e-header) { padding-inline: 0; }
 header.pb-e2e-header { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
 .pb-e2e-header .pb-e2e-header__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; height: 80px; margin: 0 auto; padding: 0 24px; }
 .pb-e2e-header .pb-e2e-header__logo { display: block; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; line-height: 28px; letter-spacing: 0; color: #ffffff; }
@@ -65,6 +67,8 @@ section.pb-e2e-cta { box-sizing: border-box; display: block; width: 100%; margin
 }
 
 /* site-footer: full-bleed dark band, copyright left, navigation right. */
+/* In the footer template part the theme pads `.wp-site-blocks > footer` with side gutters; the band is full-bleed. */
+.wp-site-blocks > .wp-block-template-part:has(> .pb-e2e-footer) { padding-inline: 0; }
 footer.pb-e2e-footer { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 0; background: #0f172a; }
 .pb-e2e-footer .pb-e2e-footer__inner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
 .pb-e2e-footer .pb-e2e-footer__copy { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: 0; color: #cbd5e1; }

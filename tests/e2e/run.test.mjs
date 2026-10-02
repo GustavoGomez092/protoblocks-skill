@@ -1,5 +1,6 @@
-// End-to-end scripted dry run: design.html -> intake -> plan -> gates -> page build -> per-section numeric QA ->
-// motion -> page QA -> Yoast SEO -> done, driving the script surface only (no LLM judgement), on the Local test site.
+// End-to-end scripted run of the full pipeline: setup (fork, tokens, menu, parts) -> intake -> plan -> gates -> page
+// build -> per-section numeric QA -> motion -> header/footer part move (adopt, rebuild, re-verify) -> page QA -> Yoast
+// SEO -> done -> ask-more-pages, driving the script surface only (no LLM judgement), on the Local test site.
 //
 // SAFETY (the developer's real site). Run it only through the site lock:
 //   /private/tmp/claude-501/pb-site-test.sh <worktree> test:e2e
@@ -13,10 +14,10 @@
 //   Yoast's site-wide options.
 // - Tailwind: gates recompile Proto-Blocks' Tailwind cache for the active (e2e) theme; its option and cache files are
 //   snapshotted and put back byte for byte.
-// - No navigation menus and no template parts are created: the pipeline stops before the header/footer part move.
-//   Header and footer are verified as page sections only. The page renders through a slug-specific template in the
-//   throwaway fork (templates/page-<slug>.html = the fork's page.html without the two template-part lines), standing
-//   in for the part move, so the page shows the design's header and footer once. The part move is NOT covered here.
+// - Navigation: exactly one menu, key e2e-<hex> (post pb-nav-e2e-<hex>), deleted by its own id in `finally`. The
+//   developer's menu (wp_navigation 15) is only read.
+// - Parts: `parts.mjs write` into the throwaway fork only (files, deleted with the fork). `remove-override` is never
+//   called; the developer's template parts 154/159 are only read (checked unchanged afterwards).
 // - Never touches the developer's theme checkout or plugins (both checked before/after).
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -43,6 +44,10 @@ import { applySeo, recordAudit } from '../../skills/protoblocks-site-builder/scr
 import { nextAction } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
 import { loadState, updateState, statePath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import { buildInputs, recordPageQa } from '../../skills/protoblocks-site-builder/scripts/qa/page-qa.mjs';
+import { partMarkup, writePart, markupFromArgs, adoptParts, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
+import { refreshMenus } from '../../skills/protoblocks-site-builder/scripts/lib/navigation.mjs';
+import { recordUse } from '../../skills/protoblocks-site-builder/scripts/lib/library.mjs';
+import { spawnSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -58,6 +63,7 @@ const SNAPSHOT_FILE = path.join(TMP, 'yoast-options-snapshot.json');
 const RESTORE_COMMAND = `${path.join(TMP, 'wp-test-site')} eval-file ${OPTIONS_PHP} restore ${SNAPSHOT_FILE}`;
 const PARTS = [154, 159]; // the developer's header/footer template parts: read only
 const MENU_ID = 15; // the developer's navigation menu: read only
+const NAV_CLI = path.join(REPO, 'skills', 'protoblocks-site-builder', 'scripts', 'lib', 'navigation.mjs');
 const REQUIRED_PLUGINS = ['proto-blocks', 'wordpress-seo', 'safe-svg', 'duplicate-post'];
 // The pipeline must stop and clean up well inside the 10-minute window the lock script runs in.
 const BUDGET_MS = 420000;
@@ -75,7 +81,7 @@ const navLink = (label, url) => `<!-- wp:navigation-link {"label":"${label}","ur
 const nav = (links) => [`<!-- wp:navigation {"overlayMenu":"never"} -->\n${links.map(([l, u]) => navLink(l, u)).join('\n')}\n<!-- /wp:navigation -->`];
 const SECTIONS = [
   { n: 1, block: 'site-header', label: 'header', part: 'header', anchor: 'pb-header',
-    attrs: { logo: 'Northwind Solar' }, inner: nav([['Features', '#features'], ['Pricing', '#pricing'], ['Contact', '#contact']]) },
+    attrs: { logo: 'Northwind Solar' }, inner: (menuId) => [`<!-- wp:navigation {"ref":${menuId},"overlayMenu":"never"} /-->`] },
   { n: 2, block: 'hero-split', label: 'hero', anchor: 'pb-s2',
     attrs: { heading: 'Solar installation without the guesswork', text: 'Northwind designs, permits and finishes your solar installation in six weeks, for one fixed price agreed up front.', cta: { url: '#contact', text: 'Get a free quote', target: '', rel: '' } } },
   { n: 3, block: 'feature-grid', label: 'features', anchor: 'pb-s3',
@@ -90,6 +96,8 @@ const SECTIONS = [
     attrs: { copyright: 'Copyright 2026 Northwind Solar' }, inner: nav([['Privacy', '/privacy/'], ['Terms', '/terms/']]) },
 ];
 const HERO_PRESETS = ['split-lines', 'fade-up'];
+// The one menu this run creates (the header's navigation, referenced by `ref`); the footer's links are inline blocks.
+const MENU_SPEC = (hex) => ({ title: `E2E ${hex}`, items: [{ label: 'Features', url: '#features' }, { label: 'Pricing', url: '#pricing' }, { label: 'Contact', url: '#contact' }] });
 // The design's tokens (setup Step 2). System fonts only: no `google` weights, so `tokens.mjs apply` drops the fork's
 // Google Fonts @import (the page then needs no third-party request to load or reach network idle).
 const TOKENS = {
@@ -156,6 +164,8 @@ function siteFingerprint(wp) {
 
 const leftovers = (wp) => ({
   themes: fs.readdirSync(THEMES).filter((n) => n.startsWith('pb-e2e-')),
+  menus: JSON.parse(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--fields=ID,post_name', '--format=json']))
+    .filter((p) => String(p.post_name).startsWith('pb-nav-e2e-')),
   posts: JSON.parse(wp.check(['post', 'list', '--post_type=page,attachment', '--post_status=any', '--fields=ID,post_type,post_name', '--format=json']))
     .filter((p) => String(p.post_name).startsWith('pb-e2e')),
 });
@@ -271,6 +281,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
 
   let err;
   let pageId = null;
+  let menuId = null;
   const ownedMedia = [];
   let server;
   try {
@@ -301,16 +312,30 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     const tokens = runApply(themeDir, TOKENS, { compile: () => wp.evalFile(path.join(WP_SCRIPTS_DIR, 'tailwind.php'), ['compile']) });
     report.steps.tokens = { written: tokens.written, warnings: tokens.warnings ?? [] };
     assert.ok(!fs.readFileSync(path.join(themeDir, 'style.css'), 'utf8').includes('fonts.googleapis.com'), 'no web font import left in the fork');
+    assert.equal(nextAction(loadState(themeDir)).action, 'setup', 'setup is unfinished without menus and parts');
+    // Setup Step 3: one menu, through the CLI (it records site.navigation.menus.<key> in state).
+    const menuKey = `e2e-${hex}`;
+    const specFile = path.join(work, 'menu-spec.json');
+    fs.writeFileSync(specFile, JSON.stringify(MENU_SPEC(hex)));
+    const navRun = spawnSync(process.execPath, [NAV_CLI, 'upsert', themeDir, menuKey, specFile], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(navRun.status, 0, `navigation.mjs upsert: ${navRun.stderr}`);
+    const menu = JSON.parse(navRun.stdout);
+    menuId = menu.id;
+    report.steps.menu = { key: menuKey, id: menu.id, created: menu.created, pending: menu.pending };
+    assert.equal(menu.created, true);
+    assert.deepEqual(menu.pending, []);
+    assert.equal(wp.check(['post', 'get', String(menuId), '--field=post_name']).trim(), `pb-nav-${menuKey}`);
+    assert.equal(loadState(themeDir).site.navigation.menus[menuKey].id, menuId);
+    // Setup Step 4: header/footer parts in the fork (no Site Editor copies exist for a fresh fork; nothing is removed).
+    assert.deepEqual(listOverrides(wp, themeSlug), []);
+    writePart(themeDir, 'header', partMarkup({ block: 'proto-blocks/site-header', navRef: menuId }));
+    writePart(themeDir, 'footer', partMarkup({ block: 'proto-blocks/site-footer' }));
+    assert.equal(nextAction(loadState(themeDir)).action, 'ask-more-pages', 'setup complete, no pages yet');
     const motionInstall = installMotion(themeDir);
     assert.ok(motionInstall.copied.includes('assets/js/pb-motion.js'));
 
-    // 3. Blocks into the fork; the slug template that leaves the stock header/footer parts out (no part move).
+    // 3. The section blocks into the fork (the Build step's files).
     for (const b of BLOCK_NAMES) fs.cpSync(path.join(BLOCKS, b), path.join(themeDir, 'proto-blocks', b), { recursive: true });
-    const pageTpl = fs.readFileSync(path.join(themeDir, 'templates', 'page.html'), 'utf8');
-    const partLines = pageTpl.split('\n').filter((l) => /<!-- wp:template-part \{[^}]*"slug":"(header|footer)"/.test(l));
-    assert.equal(partLines.length, 2, 'the fork page template has exactly the header and footer part lines');
-    fs.writeFileSync(path.join(themeDir, 'templates', `page-${pageSlug}.html`), pageTpl.split('\n').filter((l) => !partLines.includes(l)).join('\n'));
-    report.deviations.push(`page renders via templates/page-${pageSlug}.html in the throwaway fork (page.html minus the header/footer template parts), standing in for the part move`);
 
     // 4. Intake: the design frame, background bands from findCuts, crops (header/footer get the part anchors).
     budget('intake');
@@ -337,10 +362,11 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       for (const def of SECTIONS) {
         const sec = page.sections.find((x) => x.n === def.n);
         sec.attrs = def.attrs;
-        if (def.inner) sec.inner = def.inner;
+        if (def.inner) sec.inner = typeof def.inner === 'function' ? def.inner(menuId) : def.inner;
         sec.status = 'building';
       }
     });
+    for (const def of SECTIONS) recordUse(themeDir, def.block, pageSlug, { purpose: def.label });
 
     // 6. Gates for every section, attrs from state (they travel as a payload file).
     budget('gates');
@@ -362,28 +388,30 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     const pageUrl = loadState(themeDir).pages.find((p) => p.slug === pageSlug).url;
     const html = (await fetchHtml(pageUrl)).body;
     for (const def of SECTIONS) assert.equal(html.split(`id="${def.anchor}"`).length - 1, 1, `#${def.anchor} renders once`);
-    assert.ok(!html.includes('wp-block-template-part'), 'no template part on the e2e page');
+    assert.equal((html.match(/<(header|footer) class="wp-block-template-part/g) ?? []).length, 2, 'the setup-time header and footer parts render (no anchor yet)');
     assert.match(html, /data-pb-motion="split-lines"[^>]*data-proto-animate="manual"/);
     assert.match(html, /data-pb-motion="fade-up"[^>]*data-proto-animate="manual"[^>]*data-pb-delay="0.15"/);
     lap('build');
 
     // 8. Per-section numeric QA: prepare -> check-section -> verdict built from result.json -> record.
-    for (const def of SECTIONS) {
-      budget(`verify section ${def.n}`);
+    const verify = async (def, phase) => {
+      budget(`verify section ${def.n} (${phase})`);
       const { input } = prepareCheck(themeDir, pageSlug, def.n);
       const result = await checkSection(JSON.parse(fs.readFileSync(input, 'utf8')));
       const verdictFile = path.join(path.dirname(input), 'verdict.json');
       fs.writeFileSync(verdictFile, `${JSON.stringify(verdictFromResult(result), null, 2)}\n`);
       const rec = recordVerdict(themeDir, pageSlug, def.n, verdictFile);
       const row = {
-        n: def.n, anchor: def.anchor, block: def.block, numericPass: result.numericPass, status: rec.status,
+        phase, n: def.n, anchor: def.anchor, block: def.block, iteration: rec.iteration, numericPass: result.numericPass, status: rec.status,
         breakpoints: result.results.map((r) => ({ name: r.breakpoint, mode: r.mode, numericPass: r.numericPass, mismatch: r.mismatch ?? null, heightDelta: r.heightDelta ?? null, widthDelta: r.widthDelta ?? null, sanityIssues: r.issues ?? undefined, error: r.error })),
         composite: result.results.find((r) => r.mode === 'diff')?.composite ?? null,
       };
       report.sections.push(row);
-      say(`section ${def.n} ${def.anchor}: ${JSON.stringify(row.breakpoints.map((b) => [b.name, b.mismatch, b.heightDelta, b.widthDelta, b.numericPass]))}`);
-      lap(`verify-${def.n}`);
-    }
+      say(`${phase} section ${def.n} ${def.anchor}: ${JSON.stringify(row.breakpoints.map((b) => [b.name, b.mismatch, b.heightDelta, b.widthDelta, b.numericPass]))}`);
+      lap(`verify-${phase}-${def.n}`);
+      return row;
+    };
+    for (const def of SECTIONS) await verify(def, 'section');
     const failed = report.sections.filter((r) => r.numericPass !== true);
     assert.deepEqual(failed.map((r) => r.anchor), [], `numeric QA failed: ${JSON.stringify(failed, null, 2)}`);
     assert.ok(report.sections.every((r) => r.status === 'animating'));
@@ -402,9 +430,43 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       assert.deepEqual(r, { pass: true, attempts: 1, capReached: false, status: 'done' });
       lap(`motion-${def.n}`);
     }
+
+    // 10. Move header and footer into the template parts (header-footer.md steps 1-8): part markup from state with the
+    //     anchor, write, adopt, rebuild, re-verify header, footer and the first content section on their anchors.
+    budget('move parts');
+    assert.deepEqual(nextAction(loadState(themeDir)), { action: 'move-parts', page: pageSlug, sections: [1, 5], why: 'header/footer (#pb-header, #pb-footer) passed as sections but are not in the template parts yet' });
+    assert.deepEqual(listOverrides(wp, themeSlug), []);
+    for (const [part, n] of [['header', 1], ['footer', 5]]) {
+      const markup = markupFromArgs([themeDir, '--from-state', pageSlug, String(n)]);
+      assert.match(markup, new RegExp(`"anchor":"pb-${part}"`));
+      writePart(themeDir, part, markup);
+    }
+    const adopted = adoptParts(themeDir, pageSlug);
+    report.steps.adopt = adopted;
+    assert.deepEqual(adopted, { page: pageSlug, moved: [{ n: 1, anchor: 'pb-header', status: 'building' }, { n: 5, anchor: 'pb-footer', status: 'building' }], reverify: 2 });
+    assert.deepEqual(nextAction(loadState(themeDir)), { action: 'section-build', page: pageSlug, section: 1, why: 'section 1 is building' });
+    for (const n of [1, 5]) recordUse(themeDir, SECTIONS[n - 1].block, pageSlug); // the inPart resume row: library record, build, verify
+    const rebuilt = buildPage(wp, themeDir, pageSlug);
+    report.steps.rebuild = { postId: rebuilt.postId, created: rebuilt.created, warnings: rebuilt.warnings, backupFile: rebuilt.backupFile };
+    assert.equal(rebuilt.postId, pageId);
+    assert.equal(rebuilt.created, false);
+    assert.deepEqual(rebuilt.warnings, []);
+    const html2 = (await fetchHtml(pageUrl)).body;
+    for (const def of SECTIONS) assert.equal(html2.split(`id="${def.anchor}"`).length - 1, 1, `#${def.anchor} renders once after the move`);
+    assert.ok(html2.indexOf('id="pb-header"') < html2.indexOf('<main'), 'the header renders from its part, above <main>');
+    assert.ok(html2.indexOf('id="pb-footer"') > html2.indexOf('</main>'), 'the footer renders from its part, below </main>');
+    assert.ok(!wp.check(['post', 'get', String(pageId), '--field=post_content']).includes('site-header'), 'the page content no longer holds the header');
+    for (const n of [1, 2, 5]) {
+      const row = await verify(SECTIONS[n - 1], 'after-move');
+      assert.equal(row.numericPass, true, `re-verification of #${row.anchor} after the move: ${JSON.stringify(row, null, 2)}`);
+      assert.equal(row.status, 'done', 'a re-verified section returns to done');
+    }
+    assert.deepEqual(refreshMenus(wp, themeDir), { refreshed: [], menus: {} }, 'no pending menu links');
+    const moved = loadState(themeDir).pages.find((p) => p.slug === pageSlug).sections;
+    assert.deepEqual(moved.map((x) => [x.n, x.status, x.inPart === true]), [[1, 'done', true], [2, 'done', false], [3, 'done', false], [4, 'done', false], [5, 'done', true]]);
     assert.equal(nextAction(loadState(themeDir)).action, 'page-qa');
 
-    // 10. Page QA against the full design frame (frames from state).
+    // 11. Page QA against the full design frame (frames from state).
     budget('page qa');
     const inputs = buildInputs(themeDir, pageSlug);
     const pq = await pageQa(inputs);
@@ -416,7 +478,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     lap('page-qa');
     assert.equal(nextAction(loadState(themeDir)).action, 'seo');
 
-    // 11. SEO: OG image from the hero, apply (first apply on a fresh page; no organization leaf), audit, record.
+    // 12. SEO: OG image from the hero, apply (first apply on a fresh page; no organization leaf), audit, record.
     budget('seo');
     const ogFile = path.join(work, `pb-e2e-og-${hex}.png`);
     const og = await ogImage({ url: pageUrl, selector: '#pb-s2', out: ogFile });
@@ -436,7 +498,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     assert.deepEqual(fails, [], 'no failing SEO check');
     assert.deepEqual(recordAudit(themeDir, pageSlug, auditFile), { pass: true, status: 'done' });
 
-    // 12. Done: the page is done and the next action asks for more pages.
+    // 13. Done: the page is done and the next action asks for more pages.
     const final = loadState(themeDir);
     const page = final.pages.find((p) => p.slug === pageSlug);
     assert.equal(page.status, 'done');
@@ -461,6 +523,19 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       for (const id of ids) {
         const name = wp.check(['post', 'get', String(id), '--field=post_name']).trim();
         if (name !== pageSlug) { problems.push(`page ${id} is "${name}", not ${pageSlug}: left in place`); continue; }
+        wp.check(['post', 'delete', String(id), '--force']);
+      }
+    });
+    // The menu: by the id upsert returned, plus any wp_navigation holding this run's unique slug.
+    step('delete menu', () => {
+      const slug = `pb-nav-e2e-${hex}`;
+      const ids = new Set(menuId ? [menuId] : []);
+      for (const id of wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', `--name=${slug}`, '--format=ids']).trim().split(/\s+/).filter(Boolean)) ids.add(Number(id));
+      for (const id of ids) {
+        if (id === MENU_ID) { problems.push(`refusing to delete menu ${MENU_ID}`); continue; }
+        const name = wp.check(['post', 'get', String(id), '--field=post_name']).trim();
+        const type = wp.check(['post', 'get', String(id), '--field=post_type']).trim();
+        if (name !== slug || type !== 'wp_navigation') { problems.push(`post ${id} is ${type} "${name}", not ${slug}: left in place`); continue; }
         wp.check(['post', 'delete', String(id), '--force']);
       }
     });
@@ -505,6 +580,8 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       parts: after ? { same: isDeepStrictEqual(after.parts, before.parts), before: before.parts, after: after.parts } : null,
       templatePartsListSame: after ? after.templateParts === before.templateParts : null,
       menusSame: after ? after.menus === before.menus && after.navigations === before.navigations && isDeepStrictEqual(after.menu15, before.menu15) : null,
+      menusBefore: { classic: before.menus, navigations: before.navigations, menu15: before.menu15 },
+      menusAfter: after ? { classic: after.menus, navigations: after.navigations, menu15: after.menu15 } : null,
       pluginsSame: after ? after.plugins === before.plugins : null,
       devThemeSame: after ? isDeepStrictEqual(after.devTheme, before.devTheme) : null,
       problems,
@@ -522,7 +599,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   const L = report.leftovers;
   assert.deepEqual(L.problems, []);
   assert.equal(L.activeThemeRestored, true, 'original theme active again');
-  assert.deepEqual(L.pbE2eAfter, { themes: [], posts: [] }, 'no pb-e2e-* theme, page or attachment left');
+  assert.deepEqual(L.pbE2eAfter, { themes: [], menus: [], posts: [] }, 'no pb-e2e-* theme, menu, page or attachment left');
   assert.equal(L.yoastOptionsIdentical, true);
   assert.equal(L.tailwindRestored, true);
   assert.equal(L.parts.same, true, 'template parts 154/159 unchanged');
