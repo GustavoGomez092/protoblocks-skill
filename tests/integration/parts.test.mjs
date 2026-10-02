@@ -127,6 +127,20 @@ itest('row theme comes from the real terms: a post tagged with two themes is ref
   assert.equal(h.status(mine), 'publish');
 }));
 
+// Pure computation, no posts touched: defines the helper by including parts.php with a harmless read-only command.
+itest('trash-days filter can only tighten the guard', () => {
+  const wp = testWp();
+  const stylesheet = wp.check(['option', 'get', 'stylesheet']).trim();
+  const php = (filterValue, constant) => `$args = ['overrides', '${stylesheet}']; ob_start(); include '${PARTS_PHP}'; ob_end_clean();
+    add_filter('protoblocks_parts_trash_days', fn() => ${filterValue}, 99);
+    echo protoblocks_parts_trash_days(${constant});`;
+  const run = (f, c) => wp.check(['eval', php(f, c)]).trim();
+  assert.equal(run(30, 0), '0', 'filter cannot loosen a disabled trash');
+  assert.equal(run(0, 30), '0', 'filter can disable');
+  assert.equal(run(5, 30), '5', 'filter can shorten');
+  assert.equal(run(99, 30), '30', 'filter cannot lengthen');
+});
+
 itest('serializeAttrs matches WordPress serialize_block_attributes', () => {
   const wp = testWp();
   const attrs = { a: '--><script>&"x"</script>', b: ['<', '>'], c: { d: 'q"--"' }, e: 1, f: true };

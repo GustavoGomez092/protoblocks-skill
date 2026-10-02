@@ -11,6 +11,13 @@ $fail = function (string $code, string $msg) {
     fwrite(STDERR, "[{$code}] {$msg}\n");
     exit(1);
 };
+// The filter may only make the trash guard stricter: the result is min(constant, filtered value),
+// so a filter can never enable trashing when EMPTY_TRASH_DAYS is 0 (wp_trash_post would force-delete).
+if (!function_exists('protoblocks_parts_trash_days')) {
+    function protoblocks_parts_trash_days(int $constant): int {
+        return min($constant, (int) apply_filters('protoblocks_parts_trash_days', $constant));
+    }
+}
 $cmd = $args[0] ?? '';
 $theme = $args[1] ?? '';
 if (!in_array($cmd, ['overrides', 'preview', 'remove-override'], true)) {
@@ -68,7 +75,7 @@ if (count($found) === 1 && $found[0]['id'] !== (int) $expect) {
 }
 if ($found) {
     // wp_trash_post force-deletes when trash is disabled; never allow that.
-    $trash_days = (int) apply_filters('protoblocks_parts_trash_days', defined('EMPTY_TRASH_DAYS') ? EMPTY_TRASH_DAYS : 0);
+    $trash_days = protoblocks_parts_trash_days(defined('EMPTY_TRASH_DAYS') ? (int) EMPTY_TRASH_DAYS : 0);
     if ($trash_days <= 0) {
         $fail('ENOTRASH', 'Trash is disabled, so removal would permanently delete the saved copy. Remove it manually: Site Editor -> template part -> Clear customizations.');
     }
