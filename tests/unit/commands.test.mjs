@@ -25,7 +25,9 @@ for (const name of NAMES) {
     assert.ok(paths.length > 0, 'no node "${CLAUDE_PLUGIN_ROOT}/..." command');
     for (const p of paths) assert.ok(fs.existsSync(path.join(ROOT, p)), `script not found: ${p}`);
     assert.match(text, /Shell variables do not persist between Bash commands/);
-    assert.doesNotMatch(text, /--force(?![^\n]*without the developer)/, 'a --force may only appear as something never to add without OK');
+    for (const line of text.split('\n').filter((l) => /--(force|force-organization|confirm|refork|accepted|update-plugins)\b/.test(l))) {
+      assert.match(line, /without the developer|only (with|if) the developer|developer's explicit OK/, `destructive flag without a developer-OK phrase on the same line: ${line.slice(0, 120)}`);
+    }
   });
 }
 
@@ -38,4 +40,5 @@ test('seo does not proceed while sections are open', () => {
   const t = fs.readFileSync(path.join(COMMANDS, 'seo.md'), 'utf8');
   assert.match(t, /do NOT proceed to SEO/);
   assert.match(t, /ESTATUS/);
+  assert.match(t, /status must be `seo` or `done`[^\n]*not ready/);
 });

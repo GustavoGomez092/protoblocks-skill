@@ -1,5 +1,8 @@
 # Motion on shared blocks
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Presets are attributes in the block's `template.php`, so every page that renders the block gets them. `library[block].usedOn` (written by `library.mjs record` in Build) lists those pages; `node "$PB/lib/library.mjs" list "$THEME"` prints it per block (`usedOn`, needs the site running).
 
 ## `reuse` sections

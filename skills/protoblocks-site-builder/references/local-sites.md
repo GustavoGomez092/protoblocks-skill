@@ -1,5 +1,8 @@
 # Local by Flywheel sites
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 ## Where Local keeps things
 
 | What | Path |

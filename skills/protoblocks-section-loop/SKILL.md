@@ -74,7 +74,7 @@ When the section's status is `animating`, load the `protoblocks-motion` skill an
 - Never mark a section passing without a recorded verdict.
 - Never edit `verdict.json` or state by hand; a verdict that contradicts its numbers is rejected (`EVERDICT`).
 - Never lower QA thresholds to get a pass; only the developer may change `site.qa`.
-- Never pass `--force` (page build) or `--confirm` (parts) without the developer's OK for that exact action.
+- Never pass `--force` (page build) or `--confirm` (parts) without the developer's OK for that exact action, given AFTER you showed the refusal or preview (see the orchestrator rule).
 - One section at a time, in plan order.
 - Never recreate a block the library lists with an `error`; tell the developer.
 

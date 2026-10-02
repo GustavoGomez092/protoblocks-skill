@@ -1,5 +1,8 @@
 # Build: authoring checklist and recipes
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Authoring rules (field types, controls, templates, Tailwind) live in the `protoblocks` skill; load it first. This file lists what the builder adds on top. `PB`, `THEME`, `WP` as in `SKILL.md`.
 
 ## Scaffold (decision `new`)

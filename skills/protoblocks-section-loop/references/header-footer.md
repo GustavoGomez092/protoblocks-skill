@@ -1,5 +1,8 @@
 # Header and footer
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Header and footer are sections of the first page (labels `header` and `footer`, blocks `site-header` and `site-footer`) with the fixed anchors `pb-header` and `pb-footer` (set at intake/plan time, never `pb-s<n>`). On the first page they go through the same Build and Verify loop as every other section. Once, after the last section of the first page has passed, they are moved into the theme's template parts (steps 1-8 below) so they render once for every page. On later pages they are `reuse` with `inPart: true` (recorded by `plan.mjs record`): nothing to build, `page.mjs` leaves them out, and they are only verified, through the part's anchor (`#pb-header`, `#pb-footer`). `PB`, `THEME` as in `SKILL.md`.
 
 ## Differences from other sections
@@ -21,7 +24,7 @@ The theme's `templates/page.html` (and `index`, `single`) include the `header` a
 Run steps 1-8 once, when every section of the first page has passed Verify (header and footer included, as normal sections). Doing it earlier shifts the page under sections still being verified.
 
 1. List Site Editor copies that would shadow the file: `node "$PB/lib/parts.mjs" overrides "$THEME"` (`[]` means none).
-2. If a `header` (or `footer`) copy exists, show the developer what would be discarded and ask. Run the preview once: `node "$PB/lib/parts.mjs" remove-override "$THEME" header` prints `[ECONFIRM]` with the id. Only after their explicit OK: `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`. The copy goes to Trash, not deleted; relay the printed recovery command. `[ESTALE]` means the id changed: preview again. `[EAMBIGUOUS]` or `[ETHEMEMISMATCH]`: nothing removed; tell the developer. `[ENOTRASH]`: Trash is disabled so removal would be permanent; ask the developer to use "Clear customizations" on the part in the Site Editor.
+2. If a `header` (or `footer`) copy exists, show the developer what would be discarded and ask. Run the preview once: `node "$PB/lib/parts.mjs" remove-override "$THEME" header` prints `[ECONFIRM]` with the id. Only after their explicit OK, given AFTER you have shown them that preview ("remove the override" said earlier is not the OK; show it, ask, wait): `node "$PB/lib/parts.mjs" remove-override "$THEME" header --confirm --id <n>`. The copy goes to Trash, not deleted; relay the printed recovery command. `[ESTALE]` means the id changed: preview again. `[EAMBIGUOUS]` or `[ETHEMEMISMATCH]`: nothing removed; tell the developer. `[ENOTRASH]`: Trash is disabled so removal would be permanent; ask the developer to use "Clear customizations" on the part in the Site Editor.
 3. Generate the part markup from state (a pure command, no WordPress needed): `--from-state` takes the section's `block`, `attrs`, its `anchor` (`pb-header` / `pb-footer`) and its `inner` (the navigation block with the menu `ref`), so nothing is hand-copied:
    ```bash
    node "$PB/lib/parts.mjs" markup "$THEME" --from-state <page> <n> > "$THEME/.protoblocks/header.html"

@@ -1,5 +1,8 @@
 # Intake: design source to frames
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 Goal: one PNG per breakpoint registered with `intake.mjs add-frame`, plus a list of assets. Frames are copied to `$THEME/.protoblocks/artifacts/<page>/design/<breakpoint>.<ext>` and recorded in `pages[i].design.frames` as `{breakpoint, width, scale, image, pixelWidth}`. Always read `frame.image` from state; the extension follows the source file.
 
 ```bash

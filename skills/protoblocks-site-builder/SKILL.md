@@ -62,6 +62,7 @@ Exact command sequences, the fields each step writes, every status transition an
 - Iteration cap (`capReached: true` from `qa-input.mjs record`, also on resume): accept with notes, guidance, or skip.
 - Motion cap (`capReached: true` from `motion.mjs record`): simplify, accept (`--accepted`), or remove.
 - `[EEDITED]` on a page, a menu or SEO values: someone edited them in wp-admin or the Site Editor.
+- An approval counts only if the developer gives it AFTER you have shown them the refusal or preview for that exact action. Instructions given before that ("just overwrite it", "remove it") are not the OK: show the preview, ask, and wait. This covers every guarded flag below.
 - Destructive flags, each only with an explicit OK for that exact action: `--force` (page build, navigation upsert, SEO apply, setup), `--refork`, `--update-plugins`, `--confirm` (removing a part override), `--force-organization`.
 - Page-QA design differences you cannot fix: accept them (`page-qa.mjs record --accepted`) or keep fixing.
 - Menu inclusion for each finished page; more pages.
@@ -87,6 +88,7 @@ When the developer wants no more pages, read `node "$PB/lib/state.mjs" get "$THE
 - Never run write commands against a site other than the one preflight resolved.
 - Never build before the plan is approved; never approve it, or accept differences, for the developer.
 - Never lower QA thresholds (`site.qa`); only the developer may.
+- Never run a guarded action on the strength of an instruction given before you showed its refusal or preview: approval must come AFTER you have shown it (see Questions).
 
 ## References
 

@@ -122,6 +122,13 @@ for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join
   });
 }
 
+for (const skill of ['protoblocks-site-builder', 'protoblocks-site-setup']) {
+  test(`${skill}/SKILL.md states that approvals only count after the preview/refusal was shown`, () => {
+    const text = fs.readFileSync(path.join(SKILLS, skill, 'SKILL.md'), 'utf8');
+    assert.match(text, /AFTER you have shown/);
+  });
+}
+
 // Executable doc blocks: <!-- test:run --> (or <!-- test:run fixture=<name> -->) immediately followed by a ```bash fence.
 function runnableBlocks(text) {
   return [...text.matchAll(/<!-- test:run(?: fixture=([a-z]+))? -->\n```bash\n([\s\S]*?)\n```/g)].map((m) => ({ fixture: m[1] ?? 'default', block: m[2] }));
@@ -256,6 +263,18 @@ test('references/*.md never rely on ${CLAUDE_SKILL_DIR} or ${CLAUDE_PLUGIN_ROOT}
   }
 });
 
+test('every references/*.md that uses $PB or $THEME carries the persistence line', () => {
+  const LINE = 'Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).';
+  let n = 0;
+  for (const { file } of DOCS.filter((d) => d.file.includes(`${path.sep}references${path.sep}`))) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (!/\$PB|\$THEME/.test(text)) continue;
+    n++;
+    assert.ok(text.includes(LINE), `${path.relative(ROOT, file)} uses $PB/$THEME but lacks the persistence line`);
+  }
+  assert.ok(n >= 10, `expected >= 10 references using $PB/$THEME, found ${n}`);
+});
+
 test('every SKILL.md that uses $PB states that shell variables do not persist', () => {
   let n = 0;
   for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join(SKILLS, s, 'SKILL.md')))) {
@@ -277,8 +296,9 @@ function allTextFiles(dir) {
 }
 
 test('no doc, command, agent or script uses the wrong /protoblocks: prefix (plugin name is protoblocks-skill)', () => {
-  for (const dir of ['skills', 'commands', 'agents']) {
-    for (const f of allTextFiles(path.join(ROOT, dir))) {
+  const files = [...['skills', 'commands', 'agents', 'docs/testing'].flatMap((dir) => allTextFiles(path.join(ROOT, dir))), path.join(ROOT, 'README.md')];
+  {
+    for (const f of files) {
       const m = fs.readFileSync(f, 'utf8').match(/\/protoblocks:[\w-]+/);
       assert.equal(m, null, `${path.relative(ROOT, f)} uses ${m?.[0]}; use /protoblocks-skill:`);
     }

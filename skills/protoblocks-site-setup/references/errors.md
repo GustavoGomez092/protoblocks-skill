@@ -1,5 +1,8 @@
 # Site setup: rules and error codes
 
+Shell variables do not persist between Bash commands: start each command with the `PB=...; THEME=...;` line from SKILL.md (Scripts).
+
+
 ## Step 1 - Theme fork rules
 - A folder whose `style.css` has the `Proto Fork:` marker is always reused, with or without `--force`, and nothing is downloaded (re-runs work offline).
 - `--force` only applies to a foreign (non-fork) folder with the same slug.
