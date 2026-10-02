@@ -126,7 +126,7 @@ export function recordUse(themeDir, block, pageSlug, { purpose, variants } = {})
     entry.usedOn ??= [];
     if (!entry.usedOn.includes(pageSlug)) entry.usedOn.push(pageSlug);
     if (purpose) entry.purpose = purpose;
-    if (variants) entry.variants = variants;
+    if (variants) entry.variants = [...new Set([...(entry.variants ?? []), ...variants])];
   });
   return entry;
 }

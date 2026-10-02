@@ -268,3 +268,11 @@ test('listLibrary lists a block that only has <name>.json', () => {
   fs.writeFileSync(path.join(d, 'legacy.json'), '{"name":"proto-blocks/legacy","title":"L"}');
   assert.equal(listLibrary(listOf('legacy'), t)[0].title, 'L');
 });
+
+test('recordUse merges variants with the existing ones (deduped, order kept) instead of replacing them', () => {
+  const t = theme();
+  recordUse(t, 'media-text', 'home', { variants: ['imagePosition'] });
+  recordUse(t, 'media-text', 'about', { variants: ['tone', 'imagePosition'] });
+  recordUse(t, 'media-text', 'contact');
+  assert.deepEqual(loadState(t).library['media-text'].variants, ['imagePosition', 'tone']);
+});
