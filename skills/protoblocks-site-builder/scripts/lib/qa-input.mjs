@@ -180,13 +180,15 @@ export function recordVerdict(themeDir, slug, n, verdictFile) {
         lib.baselines = lib.baselines.filter((x) => !(x.page === slug && x.anchor === section.anchor && x.breakpoint === b.name));
         lib.baselines.push({ page: slug, anchor: section.anchor, breakpoint: b.name, file: dest, width: frame.width ?? STANDARD_WIDTHS[b.name], scale: frame.scale ?? 1 });
       }
-    } else {
-      section.status = 'building';
+    } else if (!isError) {
+      section.status = 'building'; // a script/environment error keeps 'verifying': re-run the check, don't rebuild
     }
     const max = s.site.qa?.maxIterations ?? DEFAULT_QA.maxIterations;
-    // Attempts = distinct failed iterations that were real checks; script-error iterations can't be fixed by editing the block.
+    // Attempts = distinct failed iterations since the last pass that were real checks; script-error iterations can't be fixed by editing the block.
     const errorIters = new Set(section.qa.filter((q) => q.status === 'error' && q.mode === 'error').map((q) => q.iteration));
-    const failedIters = new Set(section.qa.filter((q) => q.pass === false && !errorIters.has(q.iteration)).map((q) => q.iteration));
+    // The budget restarts after a passing iteration (e.g. re-verifying after a shared block edit).
+    const lastPass = Math.max(0, ...section.qa.filter((q) => q.pass === true).map((q) => q.iteration));
+    const failedIters = new Set(section.qa.filter((q) => q.pass === false && q.iteration > lastPass && !errorIters.has(q.iteration)).map((q) => q.iteration));
     result = { pass: verdict.pass, iteration, capReached: !verdict.pass && !isError && failedIters.size >= max, status: section.status };
   });
   return result;

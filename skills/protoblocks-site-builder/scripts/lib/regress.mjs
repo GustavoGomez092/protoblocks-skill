@@ -45,7 +45,7 @@ export async function regress(themeDir, block, { browser } = {}) {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   }
-  return { block, results, pass: results.every((r) => r.pass) };
+  return { block, checked: baselines.length, ...(baselines.length ? {} : { note: 'no baselines' }), results, pass: results.every((r) => r.pass) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {

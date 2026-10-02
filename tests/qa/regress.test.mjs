@@ -96,3 +96,22 @@ qtest('regress leaves a caller-supplied browser open and fails (not crashes) on 
     } finally { await browser.close(); }
   });
 });
+
+qtest('regress reports checked count, and a note when there are no baselines', async () => {
+  const { regress } = await import(`${LIB}/regress.mjs`);
+  await withFixture(async ({ theme, url, snap, updateState }) => {
+    const good = await snap('#pb-s1', 'base1.png');
+    updateState(theme, (s) => {
+      s.pages.push({ slug: 'fx', status: 'building', url, sections: [] });
+      s.library.hero = { usedOn: ['fx'], baselines: [base(good)] };
+      s.library.empty = { usedOn: [] };
+    });
+    const r = await regress(theme, 'hero');
+    assert.equal(r.checked, 1);
+    assert.equal('note' in r, false);
+    const e = await regress(theme, 'empty');
+    assert.deepEqual([e.pass, e.checked, e.note, e.results.length], [true, 0, 'no baselines', 0]);
+    const u = await regress(theme, 'unknown');
+    assert.deepEqual([u.pass, u.checked, u.note], [true, 0, 'no baselines']);
+  });
+});

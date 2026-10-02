@@ -183,7 +183,8 @@ test('error verdicts are recorded but never consume an iteration (cap ignores th
   const theme = setup(2);
   const dir1 = path.dirname(prepareCheck(theme, 'home', 1).input);
   const r1 = recordVerdict(theme, 'home', 1, writeV(dir1, errVerdict()));
-  assert.deepEqual([r1.pass, r1.capReached, r1.status, r1.iteration], [false, false, 'building', 1]);
+  assert.deepEqual([r1.pass, r1.capReached, r1.status, r1.iteration], [false, false, 'verifying', 1]);
+  assert.equal(loadState(theme).pages[0].sections[0].status, 'verifying');
   const q = loadState(theme).pages[0].sections[0].qa;
   assert.equal(q.length, 1);
   assert.equal(q[0].status, 'error');
@@ -254,4 +255,14 @@ test('prepareCheck never overwrites an existing input.json: bumps k', () => {
   assert.ok(b.input.includes('iter-2'));
   assert.equal(JSON.parse(fs.readFileSync(b.input, 'utf8')).iterDir, path.dirname(b.input));
   assert.equal(loadState(theme).pages[0].sections[0].status, 'verifying');
+});
+
+test('cap budget restarts after a passing iteration (fail, fail, pass, fail with max=2)', () => {
+  const theme = setup(2);
+  const run = (v) => { const d = path.dirname(prepareCheck(theme, 'home', 1).input); return recordVerdict(theme, 'home', 1, writeV(d, v)); };
+  assert.equal(run(verdict(false)).capReached, false);
+  assert.equal(run(verdict(false)).capReached, true);
+  assert.equal(run(verdict(true)).pass, true);
+  assert.equal(run(verdict(false)).capReached, false);
+  assert.equal(run(verdict(false)).capReached, true);
 });
