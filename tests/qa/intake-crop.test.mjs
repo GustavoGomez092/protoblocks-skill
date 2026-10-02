@@ -15,6 +15,12 @@ qtest('cropSections records crops in state', async () => {
   const secs = loadState(theme).pages[0].sections;
   assert.deepEqual(secs.map((s) => s.anchor), ['pb-s1', 'pb-s2']);
   assert.ok(fs.existsSync(secs[1].crops.desktop));
+  assert.deepEqual(secs.map((x) => x.ranges), [{ desktop: { y0: 0, y1: 300 } }, { desktop: { y0: 300, y1: 600 } }]);
+  // A re-crop updates its breakpoint's range and keeps the other breakpoints'.
+  const { updateState } = await import('../../skills/protoblocks-site-builder/scripts/lib/state.mjs');
+  updateState(theme, (st) => { st.pages[0].sections[0].ranges.mobile = { y0: 0, y1: 50 }; });
+  await cropSections(theme, 'home', { desktop: [{ n: 1, y0: 0, y1: 280 }] });
+  assert.deepEqual(loadState(theme).pages[0].sections[0].ranges, { desktop: { y0: 0, y1: 280 }, mobile: { y0: 0, y1: 50 } });
 });
 
 qtest('cropSections: a range with part gets the fixed anchor and crop name; an existing anchor is kept on re-crop', async () => {

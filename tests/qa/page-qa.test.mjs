@@ -231,3 +231,22 @@ qtest('pageQa reports document-level violations (html-has-lang on <html>) as blo
     assert.equal(r.pass, false);
   } finally { await srv.close(); }
 });
+
+qtest('pageQa unions design-position masks with masks at the measured render position of each anchor', async () => {
+  const { pageQa, shoot } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    const url = `${srv.url}/section.html`;
+    const design = await designOf(shoot, url, d);
+    // #pb-s2 renders at 400 + 1600 = 2000 CSS px; at 1 design px per CSS px a mask 10px into it lands at y 2010.
+    const frame = { breakpoint: 'desktop', width: 1440, scale: 1, image: design, masks: [{ x: 0, y: 5, w: 20, h: 20 }], sectionMasks: [{ anchor: 'pb-s2', masks: [{ x: 0, y: 10, w: 100, h: 20 }] }, { anchor: 'pb-nowhere', masks: [{ x: 0, y: 0, w: 1, h: 1 }] }], pxPerCss: 1 };
+    const r = await pageQa({ url, frames: [frame], outDir: path.join(d, 'out'), warnings: ['seeded'] });
+    const b = r.breakpoints[0];
+    assert.deepEqual(b.masks, [{ x: 0, y: 5, w: 20, h: 20 }, { x: 0, y: 2010, w: 100, h: 20 }]);
+    assert.equal(b.masksApplied, 2);
+    assert.equal(b.pass, true, JSON.stringify(b));
+    assert.equal(r.warnings[0], 'seeded');
+    assert.ok(r.warnings.some((w) => /#pb-nowhere is not on the page/.test(w)), JSON.stringify(r.warnings));
+  } finally { await srv.close(); }
+});
