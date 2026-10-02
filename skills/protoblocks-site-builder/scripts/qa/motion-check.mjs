@@ -26,6 +26,23 @@ const scrollThrough = (page, sel) => page.evaluate(async (s) => {
   el.scrollIntoView({ block: 'center' });
 }, sel);
 
+// Layout shifts since navigation start (buffered), on the whole page and those with a source node in the anchor.
+// The same observer runs on the reduced-motion page (baseline) and on the motion page.
+const watchCls = (page, sel) => page.evaluate((s) => {
+  const anchorEl = document.querySelector(s);
+  window.__pbCls = 0;
+  window.__pbClsPage = 0;
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      if (e.hadRecentInput) continue;
+      window.__pbClsPage += e.value;
+      if (anchorEl && (e.sources || []).some((x) => x.node && anchorEl.contains(x.node))) window.__pbCls += e.value;
+    }
+  }).observe({ type: 'layout-shift', buffered: true });
+}, sel);
+const readCls = (page) => page.evaluate(() => ({ anchor: window.__pbCls, page: window.__pbClsPage }));
+const round4 = (v) => Math.round(v * 10000) / 10000;
+
 // Wait until every reveal element in the anchor reports done; on timeout return the stragglers (id or preset name).
 async function waitSettled(page, sel) {
   const rs = revealSelector(sel);
@@ -146,22 +163,22 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
   const reduced = path.join(outDir, 'reduced.png');
   const settled = path.join(outDir, 'settled.png');
   try {
-    const shot = await shoot({ url, selector, width, scale, out: reduced, browser: b, imageWaitMs });
+    // Baseline: the reduced-motion page, measured like the motion page (scroll through, settle). Shifts it sees
+    // (font swap, late images, load-time scripts) happen without motion and are not held against it.
+    const shot = await shoot({
+      url, selector, width, scale, out: reduced, browser: b, imageWaitMs,
+      inspect: async (p) => {
+        await watchCls(p, selector);
+        await scrollThrough(p, selector);
+        await p.waitForTimeout(MOTION_THRESHOLDS.settleMs);
+        return readCls(p);
+      },
+    });
     const { page, context, errors } = await openPage(b, { url, width, scale, reducedMotion: false, imageWaitMs });
     try {
-      // cls: shifts with a source node in the anchor (pass/fail). clsPage: every shift on the page (information only).
-      await page.evaluate((sel) => {
-        const anchorEl = document.querySelector(sel);
-        window.__pbCls = 0;
-        window.__pbClsPage = 0;
-        new PerformanceObserver((list) => {
-          for (const e of list.getEntries()) {
-            if (e.hadRecentInput) continue;
-            window.__pbClsPage += e.value;
-            if (anchorEl && (e.sources || []).some((s) => s.node && anchorEl.contains(s.node))) window.__pbCls += e.value;
-          }
-        }).observe({ type: 'layout-shift', buffered: true });
-      }, selector);
+      // cls (pass/fail): anchor-sourced shifts on the motion page minus the reduced page's (clsBaseline).
+      // clsPage: every shift on the motion page (information only).
+      await watchCls(page, selector);
       await scrollThrough(page, selector);
       const unsettled = await waitSettled(page, selector);
       await page.waitForTimeout(MOTION_THRESHOLDS.settleMs);
@@ -176,7 +193,11 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
       await page.evaluate((sel) => { if (window.pbMotion && window.pbMotion.rest) window.pbMotion.rest(document.querySelector(sel)); }, selector);
       await page.waitForTimeout(150);
       await loc.screenshot({ path: settled });
-      const { cls, clsPage } = await page.evaluate(() => ({ cls: Math.round(window.__pbCls * 10000) / 10000, clsPage: Math.round(window.__pbClsPage * 10000) / 10000 }));
+      const measured = await readCls(page);
+      const clsMotion = round4(measured.anchor);
+      const clsBaseline = round4(shot.inspected.anchor);
+      const cls = round4(Math.max(0, measured.anchor - shot.inspected.anchor));
+      const clsPage = round4(measured.page);
 
       const hasTaxi = await page.evaluate(() => !!(window.protoTaxi && window.protoTaxi.core && window.ScrollTrigger));
       const taxi = hasTaxi ? await taxiCheck(page, url, selector) : { checked: false };
@@ -192,6 +213,8 @@ export async function motionCheck({ url, anchor, width = 1440, scale = 1, outDir
         settledMismatch: d.mismatch,
         settledHeightDelta: d.heightDelta,
         cls,
+        clsMotion,
+        clsBaseline,
         clsPage,
         pageErrors,
         imageErrors,

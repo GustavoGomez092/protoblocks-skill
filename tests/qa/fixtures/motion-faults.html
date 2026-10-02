@@ -18,6 +18,8 @@
        stuck  an empty (invisible) reveal element whose tween is delayed 30s, so it never reports done
        hang-motion  same stalled image, but only added when motion is on, so the reduced-motion shot (shoot) sees
               nothing and only motionCheck's own settled-frame image check can catch it (anchor pb-hang)
+       load-shift  a block at the top of the section grows 300ms after load in BOTH loads (motion and reduced): a
+              load-time shift, not caused by motion, so the reduced-page baseline cancels it
        hang   a lazy image far down the page, in its own section #pb-hang, whose request never answers
               (outside #pb-s1: a page-wide warning; with anchor pb-hang: an anchor image error) -->
   <div id="shim"></div>
@@ -34,6 +36,11 @@
     (function () {
       var fault = new URLSearchParams(location.search).get('fault');
       var motion = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (fault === 'load-shift') {
+        var grow = document.createElement('div'); grow.id = 'grow'; grow.style.height = '0';
+        var host = document.getElementById('pb-s1'); host.insertBefore(grow, host.firstChild);
+        setTimeout(function () { grow.style.height = '200px'; }, 300);
+      }
       if (fault === 'stuck') document.getElementById('stuck').setAttribute('data-pb-delay', '30');
       if (fault === 'error') setTimeout(function () { throw new Error('motion-fault-boom'); }, 0);
       if (fault === 'hang' || fault === 'hang-motion') {

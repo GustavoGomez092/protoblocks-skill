@@ -162,6 +162,15 @@ qtest('motionCheck: CLS counts only shifts inside the anchor; page-wide CLS is i
   assert.equal(r.pass, true, JSON.stringify(r, null, 2));
 }));
 
+// Load-time shifts happen with or without motion; the reduced-motion page's anchor CLS (same observer) is the baseline.
+qtest('motionCheck: an anchor shift that also happens without motion is baseline, not motion CLS', () => withChecker(async (check) => {
+  const r = await check('motion-faults.html?fault=load-shift');
+  assert.ok(r.clsBaseline > 0.01, `the reduced page saw the load shift: ${JSON.stringify(r)}`);
+  assert.ok(r.clsMotion >= r.clsBaseline, JSON.stringify(r));
+  clean(r);
+  assert.equal(r.pass, true, JSON.stringify(r, null, 2));
+}));
+
 qtest('motionCheck: CLS fault inside the anchor is also reported page-wide', () => withChecker(async (check) => {
   const r = await check('motion-faults.html?fault=cls');
   assert.ok(r.clsPage >= r.cls && r.cls > 0.01, JSON.stringify({ cls: r.cls, clsPage: r.clsPage }));

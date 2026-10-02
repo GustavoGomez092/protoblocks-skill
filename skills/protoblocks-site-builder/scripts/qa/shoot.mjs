@@ -35,7 +35,9 @@ export async function hideChrome(loc) {
   });
 }
 
-export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser, imageWaitMs }) {
+// inspect(page, loc): optional hook run on the open page once the selector is scrolled into view, before the image
+// checks and the screenshot; its return value is reported as `inspected` (the motion check measures CLS with it).
+export async function shoot({ url, selector, width, height = 900, scale = 1, reducedMotion = true, fullPage = false, out, browser, imageWaitMs, inspect }) {
   const own = !browser;
   const b = browser ?? await launchBrowser();
   try {
@@ -45,6 +47,7 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
       let box = null;
       let imageErrors = errors.images;
       let pageImageWarnings = [];
+      let inspected;
       if (selector) {
         const loc = page.locator(selector).first();
         if (await loc.count() === 0) {
@@ -53,6 +56,7 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
           throw e;
         }
         await loc.scrollIntoViewIfNeeded();
+        if (inspect) inspected = await inspect(page, loc);
         ({ errors: imageErrors, warnings: pageImageWarnings } = await anchorImages(loc));
         await hideChrome(loc);
         await page.waitForTimeout(150);
@@ -61,7 +65,7 @@ export async function shoot({ url, selector, width, height = 900, scale = 1, red
       } else {
         await page.screenshot({ path: out, fullPage });
       }
-      return { out, url, selector: selector ?? null, width, scale, box, status, consoleErrors: errors.console, pageErrors: errors.page, imageErrors, pageImageWarnings };
+      return { out, url, selector: selector ?? null, width, scale, box, status, consoleErrors: errors.console, pageErrors: errors.page, imageErrors, pageImageWarnings, ...(inspect ? { inspected } : {}) };
     } catch (e) {
       throw withDiagnostics(e, errors, status);
     } finally {
