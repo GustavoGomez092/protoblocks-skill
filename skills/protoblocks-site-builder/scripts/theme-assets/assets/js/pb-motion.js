@@ -14,7 +14,13 @@
   var DEFAULTS = { duration: 0.7, ease: 'power2.out', stagger: 0.08, distance: 24 };
   var SEL = '[data-pb-motion]';
   var seen = new WeakSet();
-  var owned = []; // { el, kill: fn }
+  // Cleanups per element, split in two: kill stops motion (tweens, triggers, observers) and changes nothing visible;
+  // revert restores the authored DOM and styles (SplitText markup, counter text, cleared transforms).
+  var owned = []; // { el, kill: fn, revert: fn }
+  // Reverts left behind by a kill-only teardown, keyed by element: run just before that element is initialised again
+  // (only happens when the DOM survived the teardown). Discarded DOM takes its entries with it.
+  var pending = new WeakMap();
+  function noop() {}
 
   var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   var profile = Object.assign({}, DEFAULTS, window.pbMotionProfile || {});
@@ -37,13 +43,25 @@
       try { el.dispatchEvent(new CustomEvent('proto-blocks:reveal', { bubbles: true })); } catch (e) {}
     }
   }
-  function own(el, kill) { owned.push({ el: el, kill: kill }); }
-  // Run and drop every cleanup registered for one element, newest first (kill the tween before reverting the
-  // DOM it animates). Used when a preset fails part-way through init.
-  function release(el) {
-    var mine = [];
-    owned = owned.filter(function (o) { if (o.el === el) { mine.push(o); return false; } return true; });
-    for (var i = mine.length - 1; i >= 0; i--) { try { mine[i].kill(); } catch (e) {} }
+  function own(el, kill, revert) { owned.push({ el: el, kill: kill || noop, revert: revert || noop }); }
+  // Stop every entry first (kill a tween before reverting the DOM it animates), then revert, newest first.
+  function finishEntries(list, revert) {
+    var i;
+    for (i = list.length - 1; i >= 0; i--) { try { list[i].kill(); } catch (e) {} }
+    if (revert) { for (i = list.length - 1; i >= 0; i--) { try { list[i].revert(); } catch (e) {} } }
+  }
+  function take(match) {
+    var out = [];
+    owned = owned.filter(function (o) { if (match(o)) { out.push(o); return false; } return true; });
+    return out;
+  }
+  // Run and drop every cleanup registered for one element, revert included. Used when a preset fails part-way.
+  function release(el) { finishEntries(take(function (o) { return o.el === el; }), true); }
+  function flushPending(el) {
+    var list = pending.get(el);
+    if (!list) return;
+    pending.delete(el);
+    for (var i = list.length - 1; i >= 0; i--) { try { list[i](); } catch (e) {} }
   }
 
   function parseCounter(text) {
@@ -80,7 +98,7 @@
         if (!window.SplitText) return g.fromTo(el, { opacity: 0 }, Object.assign({ opacity: 1 }, base));
         var lines = name === 'split-lines';
         var split = new window.SplitText(el, lines ? { type: 'lines', mask: 'lines' } : { type: 'chars' });
-        own(el, function () { split.revert(); });
+        own(el, null, function () { split.revert(); });
         var targets = lines ? split.lines : split.chars;
         return g.fromTo(targets, lines ? { yPercent: 100 } : { opacity: 0, y: o.distance / 2 },
           Object.assign(lines ? { yPercent: 0 } : { opacity: 1, y: 0 }, { stagger: lines ? o.stagger : o.stagger / 4, onComplete: function () { split.revert(); } }, base));
@@ -94,7 +112,7 @@
         if (!c) return g.fromTo(el, { opacity: 0 }, Object.assign({ opacity: 1 }, base));
         var state = { v: 0 };
         var finish = function () { el.textContent = original; el.removeAttribute('aria-label'); };
-        own(el, finish);
+        own(el, null, finish);
         el.setAttribute('aria-label', original); // screen readers get the real value while the visible text counts up
         el.textContent = formatCounter(c, 0);
         return g.to(state, Object.assign({ v: c.value, duration: Math.max(1, o.duration * 2), onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish }, { ease: o.ease, delay: o.delay }));
@@ -158,13 +176,13 @@
     var o = opts(el);
     if (name === 'parallax') {
       var t = g.to(el, { yPercent: -10 * o.speed, ease: 'none', scrollTrigger: { trigger: el, start: 'top bottom', end: 'bottom top', scrub: true } });
-      own(el, function () { if (t.scrollTrigger) t.scrollTrigger.kill(); t.kill(); g.set(el, { clearProps: 'transform' }); });
+      own(el, function () { if (t.scrollTrigger) t.scrollTrigger.kill(); t.kill(); }, function () { g.set(el, { clearProps: 'transform' }); });
     } else if (name === 'marquee') {
       var track = el.firstElementChild;
       if (!track) return;
       if (!track.getAttribute('data-pb-cloned')) { cloneForLoop(track); track.setAttribute('data-pb-cloned', '1'); }
       var m = g.to(track, { xPercent: -50, ease: 'none', duration: 20 / o.speed, repeat: -1 });
-      own(el, function () { m.kill(); g.set(track, { clearProps: 'transform' }); });
+      own(el, function () { m.kill(); }, function () { g.set(track, { clearProps: 'transform' }); });
     }
   }
 
@@ -174,6 +192,7 @@
     Array.prototype.forEach.call(els, function (el) {
       if (seen.has(el)) return;
       seen.add(el);
+      flushPending(el);
       var name = el.getAttribute('data-pb-motion');
       var isReveal = REVEAL.indexOf(name) >= 0;
       if (reduced || !gsapReady()) { if (isReveal || el.hasAttribute('data-proto-animate')) done(el); return; }
@@ -196,12 +215,20 @@
     });
   }
 
-  function teardown(root) {
-    owned = owned.filter(function (o) {
-      if (root && !root.contains(o.el)) return true;
-      try { o.kill(); } catch (e) {}
+  // Stop motion inside root (all of it without root): kill tweens, triggers and observers, and forget the elements so
+  // a later init starts them again. Nothing visible changes: on proto:page-leave the leaving view is still on screen
+  // (Taxi fades it out, then discards it). opts.revert: also restore the authored DOM now, for DOM that stays.
+  // Without it, the reverts wait for the element's next init, which only happens when that DOM survived.
+  function teardown(root, opts) {
+    var revert = !!(opts && opts.revert);
+    var mine = take(function (o) { return !root || root.contains(o.el); });
+    finishEntries(mine, revert);
+    mine.forEach(function (o) {
       seen.delete(o.el);
-      return false;
+      if (revert) return;
+      var list = pending.get(o.el) || [];
+      list.push(o.revert);
+      pending.set(o.el, list);
     });
     if (root && root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(SEL), function (el) { seen.delete(el); });
   }
@@ -210,16 +237,16 @@
   // its runtime copies removed. Reveal tweens are untouched and nothing is marked for re-init. Used by the motion
   // check, which judges continuous presets at rest (they never settle; a mid-motion frame is not a residue).
   function rest(root) {
-    owned = owned.filter(function (o) {
+    var mine = take(function (o) {
       var name = o.el.getAttribute && o.el.getAttribute('data-pb-motion');
-      if (CONTINUOUS.indexOf(name) < 0 || (root && !root.contains(o.el))) return true;
-      try { o.kill(); } catch (e) {}
-      var track = name === 'marquee' ? o.el.firstElementChild : null;
-      if (track) {
-        Array.prototype.forEach.call(track.querySelectorAll('[data-pb-clone]'), function (n) { if (n.parentNode === track) track.removeChild(n); });
-        track.removeAttribute('data-pb-cloned');
-      }
-      return false;
+      return CONTINUOUS.indexOf(name) >= 0 && (!root || root.contains(o.el));
+    });
+    finishEntries(mine, true);
+    mine.forEach(function (o) {
+      var track = o.el.getAttribute('data-pb-motion') === 'marquee' ? o.el.firstElementChild : null;
+      if (!track) return;
+      Array.prototype.forEach.call(track.querySelectorAll('[data-pb-clone]'), function (n) { if (n.parentNode === track) track.removeChild(n); });
+      track.removeAttribute('data-pb-cloned');
     });
   }
 

@@ -150,9 +150,53 @@ qtest('counter: original text survives teardown/re-init and is exposed via aria-
   assert.equal(cb.label, null, 'aria-label removed once done');
 }));
 
-qtest('teardown restores the counter text', () => withPage('motion-extra.html', {}, async (page) => {
-  assert.equal(await page.evaluate(() => { window.pbMotion.teardown(document.body); return document.getElementById('cb').textContent; }), '500');
+qtest('teardown with revert restores the counter text (DOM that stays on the page)', () => withPage('motion-extra.html', {}, async (page) => {
+  assert.equal(await page.evaluate(() => { window.pbMotion.teardown(document.body, { revert: true }); return document.getElementById('cb').textContent; }), '500');
   assert.equal((await state(page, '#cb')).label, null);
+}));
+
+// Taxi discards the leaving view after a fade-out: page-leave must stop motion (tweens, triggers) without reverting
+// anything the visitor can still see (marquee position, a counter mid-count, a split heading).
+qtest('page-leave kills tweens and triggers with no visual change to the leaving view', () => withPage('motion-extra.html', {}, async (page) => {
+  await page.waitForTimeout(400); // marquee has moved
+  await page.evaluate(() => document.getElementById('cb').scrollIntoView({ block: 'center' }));
+  await page.waitForFunction(() => { const t = document.getElementById('cb').textContent; return t !== '0' && t !== '500'; }, null, { timeout: 3000, polling: 'raf' });
+  const r = await page.evaluate(() => {
+    const snap = () => ({
+      track: getComputedStyle(document.getElementById('track')).transform,
+      trackKids: document.getElementById('track').childNodes.length,
+      cb: document.getElementById('cb').textContent,
+      cbLabel: document.getElementById('cb').getAttribute('aria-label'),
+      sp: document.getElementById('sp').innerHTML,
+      spOpacity: getComputedStyle(document.getElementById('sp')).opacity,
+    });
+    const before = snap();
+    document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } }));
+    return { before, after: snap(), triggers: window.ScrollTrigger.getAll().length };
+  });
+  assert.notEqual(r.before.track, 'none', 'precondition: marquee moved');
+  assert.match(r.before.sp, /<div/, 'precondition: heading is split, waiting on its delay');
+  assert.deepEqual(r.after, r.before, 'no visual change on leave');
+  assert.equal(r.triggers, 0, 'triggers killed');
+  await page.waitForTimeout(300);
+  const later = await page.evaluate(() => ({ track: getComputedStyle(document.getElementById('track')).transform, cb: document.getElementById('cb').textContent, sp: document.getElementById('sp').innerHTML }));
+  assert.deepEqual(later, { track: r.before.track, cb: r.before.cb, sp: r.before.sp }, 'tweens killed: nothing moves after leave');
+}));
+
+qtest('re-init on the same DOM after a page-leave starts clean (split reverted once, counter from its text)', () => withPage('motion-extra.html', {}, async (page) => {
+  const r = await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('proto:page-leave', { detail: { container: document.body } }));
+    document.dispatchEvent(new CustomEvent('proto:page-ready', { detail: { container: document.body } }));
+    const sp = document.getElementById('sp');
+    return { nested: sp.querySelectorAll('div div div').length, text: sp.textContent, cbLabel: document.getElementById('cb').getAttribute('aria-label'), clones: document.querySelectorAll('#track [data-pb-clone]').length };
+  });
+  assert.equal(r.text, 'Split heading waiting on its delay');
+  assert.equal(r.nested, 0, 'no split inside a split');
+  assert.equal(r.cbLabel, '500');
+  assert.equal(r.clones, 3, 'marquee copies not duplicated');
+  await page.evaluate(() => document.getElementById('sp').scrollIntoView({ block: 'center' }));
+  assert.ok(await allDone(page), 'revealed after re-init');
+  assert.equal(await page.$eval('#sp', (e) => e.innerHTML), 'Split heading waiting on its delay');
 }));
 
 qtest('marquee: clone copy is hidden from AT, inert, and has no duplicate ids', () => withPage('motion-extra.html', {}, async (page) => {
