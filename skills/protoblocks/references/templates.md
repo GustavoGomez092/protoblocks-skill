@@ -51,6 +51,46 @@ alias. Full guide: the plugin's `docs/animation.md`.
 .my-block[data-proto-animate="done"]    { opacity: 1; transform: none; transition: opacity .6s, transform .6s; }
 ```
 
+### When your own `view.js` drives it (`"manual"`)
+
+**CSS hides. JavaScript only raises opacity.** Hiding in JavaScript always
+flashes: a view script runs in the footer, so the browser has already painted
+the section at full size and full opacity before the script can touch it. The
+reader sees the finished layout, it vanishes, then it animates in.
+
+So keep the hidden state in CSS, scoped so it stops applying the moment your
+script owns the element, and set the attribute in the same tick you start the
+animation:
+
+```css
+.my-block[data-proto-animate="manual"] [data-my-reveal] { opacity: 0; visibility: hidden; }
+```
+```js
+gsap.fromTo(els, { autoAlpha: 0 }, { autoAlpha: 1, stagger: 0.08 });
+section.setAttribute('data-proto-animate', 'done');   // same tick
+```
+
+`visibility` alongside `opacity` because `autoAlpha` sets both, and opacity
+alone leaves the text selectable and reachable by find-in-page while invisible.
+
+Two traps, both of which have shipped:
+
+- **Do not key the hidden state on an attribute you do not exclusively own.**
+  `data-proto-animate` has two authors: the plugin's reveal runtime force-reveals
+  a `"manual"` section 1500ms after it enters view, whatever your script is
+  doing. A rule keyed on it lifts early on a slow load, shows the content, and
+  only then does your script hide it to animate. Scope to your own block's class
+  as above, or to a marker only your script writes.
+- **The plugin's no-JS fallback can leak into the live document.** It is printed
+  inside `<noscript>`, which Taxi parses as real elements (it parses with
+  scripting disabled), so a page merge can promote it into the DOM where its
+  `!important` overrides everything. `proto-blocks-theme` ships a guard for this;
+  on a theme without one, strip any loose `<style>` matching
+  `[data-proto-animate]:not([data-proto-animate="done"])`.
+
+Reproduce both by **navigating** rather than reloading, with the cache disabled.
+A warm reload hides them.
+
 ## The `data-proto-*` system
 
 | Attribute | Binds | Required usage |

@@ -22,6 +22,73 @@ el.addEventListener('proto-blocks:reveal', () => { /* animate now */ });
 
 See `references/templates.md` and the plugin's `docs/animation.md`.
 
+## The page-transition lifecycle (read before writing any `view.js`)
+
+On a theme with Taxi page transitions — the `proto-blocks-theme` default — a
+`view.js` does **not** run once per visit. Proto-Blocks stamps every block view
+script with `data-taxi-reload`, so Taxi **re-executes the whole file on every
+navigation**.
+
+Two consequences, and both have shipped as bugs.
+
+**The `readyState` guard is correct; do not "fix" it to `proto:page-ready`.**
+
+```js
+if (document.readyState !== 'loading') init();
+else document.addEventListener('DOMContentLoaded', init, { once: true });
+```
+
+`DOMContentLoaded` never fires again after the first load, but the re-execution
+calls `init()` directly, so a navigated-to page is initialised. This pattern is
+fine *for a block view script*. It is broken for a **theme** script, which is not
+stamped and therefore not re-run — those must listen for `proto:page-ready`,
+which the theme dispatches on first load and after every navigation.
+
+**Anything registered outside the element must be unregistered.** Re-execution
+re-registers it, and the copy belonging to the view that just left is never
+removed, so listeners accumulate for the whole visit. Measured on a real site
+before this was fixed: `proto:page-ready` listeners went 4 → 5 → 6 → 7 over three
+navigations, and window `resize` 11 → 15 → 23 → 27. A block that re-bound a
+document listener had its init running once per navigation ever made.
+
+Element-scoped listeners (`el.addEventListener`) are fine — they leave with the
+element. It is `window` and `document` that need care:
+
+```js
+function setUp(el) {
+  var onResize = function () { measure(el); };
+
+  window.addEventListener('resize', onResize);
+
+  // Taxi dispatches this with the outgoing container.
+  document.addEventListener('proto:page-leave', function off(e) {
+    var container = e && e.detail && e.detail.container;
+
+    if (container && !container.contains(el)) return;   // not ours
+
+    window.removeEventListener('resize', onResize);
+    document.removeEventListener('proto:page-leave', off);
+  });
+}
+```
+
+Check the leaving container actually holds your element, or one block's
+page-leave tears down another's.
+
+If you must register a document-level listener once for the whole visit rather
+than per element, guard it so re-execution cannot add a second:
+
+```js
+if (!window.__myBlockBound) {
+  window.__myBlockBound = true;
+  document.addEventListener('proto:page-ready', initAll);
+}
+```
+
+**Auditing this.** Wrap `addEventListener` / `removeEventListener` before the
+page loads, count by type, and navigate a few times. A count that climbs is a
+leak; one that is flat or oscillates with which blocks are mounted is correct.
+
 ## 1. Plain JavaScript
 
 `block.json`:
