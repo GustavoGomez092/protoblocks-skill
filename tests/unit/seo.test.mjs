@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createWp } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
-import { validateSeo, buildYoastSpec, applySeo, recordAudit, renderTitle, socialTitle } from '../../skills/protoblocks-site-builder/scripts/lib/seo.mjs';
+import { validateSeo, buildYoastSpec, applySeo, recordAudit, renderTitle, socialTitle, seoGet, pngSize } from '../../skills/protoblocks-site-builder/scripts/lib/seo.mjs';
 
 const SEO_CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'protoblocks-site-builder', 'scripts', 'lib', 'seo.mjs');
 const desc = 'Licensed emergency plumbers in Austin available 24/7. Upfront pricing, same-day repairs and a 1-year guarantee on every job we do.';
@@ -79,25 +80,38 @@ test('buildYoastSpec maps fields and falls back for social titles', () => {
 });
 
 // ---- applySeo with a scripted WP-CLI ----
-function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Acme Plumbing', sep: '-' }, applyReply = null, siteFails = null } = {}) {
+const LIVE_KEYS = ['focuskw', 'title', 'metadesc', 'opengraph-title', 'opengraph-description', 'opengraph-image-id', 'twitter-title', 'twitter-description', 'twitter-image-id', 'schema_page_type', 'jsonld'];
+const emptyLive = () => Object.fromEntries(LIVE_KEYS.map((k) => [k, '']));
+const DEFAULT_ORG = { represents: 'company', name: 'Existing Co', logoId: 5 };
+function harness({ jsonldSupported = true, indexCode = 0, site = { siteName: 'Acme Plumbing', sep: '-', organization: DEFAULT_ORG }, applyReply = null, siteFails = null, live = {} } = {}) {
   const calls = [];
   const specs = [];
+  const imports = [];
+  // Simulated Yoast post meta: what `get` reads and `apply` writes (the PHP readback is the stored values).
+  const store = { ...emptyLive(), ...live };
   const exec = (cmd, args) => {
     calls.push(args);
     if (args[0] === 'eval') return { code: 0, stdout: jsonldSupported ? '1' : '0', stderr: '' };
     if (args[0] === 'yoast') return { code: indexCode, stdout: '', stderr: indexCode ? 'boom' : '' };
-    if (args[0] === 'eval-file' && args[1].endsWith('media.php')) return { code: 0, stdout: '{"id":77,"url":"u","alt":"a","mime":"image/png","reused":true}\n', stderr: '' };
+    if (args[0] === 'eval-file' && args[1].endsWith('media.php')) {
+      imports.push(JSON.parse(Buffer.from(args[3], 'base64url').toString('utf8')));
+      return { code: 0, stdout: '{"id":77,"url":"u","alt":"a","mime":"image/png","reused":true}\n', stderr: '' };
+    }
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site' && siteFails === 'untyped') return { code: 1, stdout: '', stderr: 'Fatal: no WPSEO_Option_Titles' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site' && siteFails === 'typed') return { code: 0, stdout: '{"error":{"code":"EYOAST","message":"Yoast SEO is not active."}}\n', stderr: '' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'site') return { code: 0, stdout: `${JSON.stringify(site)}\n`, stderr: '' };
+    if (args[0] === 'eval-file' && args[1].endsWith('yoast.php') && args[2] === 'get') return { code: 0, stdout: `${JSON.stringify({ postId: Number(args[3]), ...store, organizationName: '', thumbnailId: 0 })}\n`, stderr: '' };
     if (args[0] === 'eval-file' && args[1].endsWith('yoast.php')) {
       if (applyReply) return { code: 0, stdout: `${JSON.stringify(applyReply)}\n`, stderr: '' };
-      specs.push(JSON.parse(fs.readFileSync(args[3], 'utf8')));
-      return { code: 0, stdout: '{"postId":9,"written":["focuskw"],"featuredImageSet":false,"organization":"skipped"}\n', stderr: '' };
+      const spec = JSON.parse(fs.readFileSync(args[3], 'utf8'));
+      specs.push(spec);
+      for (const [k, v] of Object.entries(spec.meta ?? {})) if (v !== null && v !== '') store[k] = String(v);
+      if ('jsonld' in spec) store.jsonld = spec.jsonld?.length ? JSON.stringify(spec.jsonld, null, 4) : '';
+      return { code: 0, stdout: `${JSON.stringify({ postId: 9, written: ['focuskw'], featuredImageSet: false, organization: 'skipped', stored: { ...store } })}\n`, stderr: '' };
     }
     return { code: 1, stdout: '', stderr: `unexpected ${args.join(' ')}` };
   };
-  return { wp: createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec }), calls, specs };
+  return { wp: createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec }), calls, specs, imports, store };
 }
 function project(pages = [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [] }]) {
   const theme = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-seo-unit-'));
@@ -105,8 +119,17 @@ function project(pages = [{ slug: 'home', title: 'Home', status: 'seo', postId: 
   updateState(theme, (s) => { s.pages.push(...pages); });
   return theme;
 }
-const png = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-seo-img-')), 'og.png');
-fs.writeFileSync(png, 'x');
+// A real 1200x630 PNG (all black): supplied OG images of the right size are imported as they are.
+const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = (buf) => { let c = ~0; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (~c) >>> 0; };
+const pngChunk = (type, data) => { const body = Buffer.concat([Buffer.from(type), data]); const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const sum = Buffer.alloc(4); sum.writeUInt32BE(crc32(body)); return Buffer.concat([len, body, sum]); };
+function writePng(file, width, height) {
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  fs.writeFileSync(file, Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', zlib.deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]));
+  return file;
+}
+const png = writePng(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-seo-img-')), 'og.png'), 1200, 630);
 
 test('applySeo: invalid SEO throws ESEO before any WP call', () => {
   const { wp, calls } = harness();
@@ -409,4 +432,161 @@ test('validateSeo rejects flat leaves without a value key', () => {
   assert.ok(validateSeo({ ...base, ogImage: { file: 'og.png', inferred: false } }).includes('ogImage: needs {value, inferred}'));
   assert.ok(validateSeo({ ...base, organization: { name: 'Acme', inferred: false } }).includes('organization: needs {value, inferred}'));
   assert.deepEqual(validateSeo({ ...base, ogImage: { value: { file: 'og.png' }, inferred: false } }), []);
+});
+
+// ---- final-review fix wave ----
+const meta = (h) => h.specs.at(-1).meta;
+const appliedPage = (appliedValues, extra = {}) => [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, url: 'http://x.test/home/', sections: [], seo: { ...seo, applied: APPLIED, appliedValues }, ...extra }];
+
+test('buildYoastSpec omits schema_page_type when the leaf is absent', () => {
+  const { schemaPageType: _p, ...noType } = seo;
+  assert.equal('schema_page_type' in buildYoastSpec({ postId: 9, seo: noType }).meta, false);
+  assert.equal(buildYoastSpec({ postId: 9, seo }).meta.schema_page_type, 'WebPage');
+});
+
+test('applySeo: an explicit empty schema on an unsupported theme reports unsupported and does not delete the meta', () => {
+  const empty = { ...seo, schema: { value: [], inferred: false } };
+  const off = harness({ jsonldSupported: false });
+  assert.equal(applySeo(off.wp, project(), 'home', empty, { index: false }).jsonld, 'unsupported');
+  assert.equal('jsonld' in off.specs[0], false);
+  const on = harness();
+  assert.equal(applySeo(on.wp, project(), 'home', empty, { index: false }).jsonld, 'cleared');
+  assert.deepEqual(on.specs[0].jsonld, []);
+});
+
+test('applySeo: applies through evalFilePayload (yoast.php apply <payload.json>) and leaves no temp file', () => {
+  const h = harness();
+  applySeo(h.wp, project(), 'home', seo, { index: false });
+  const call = h.calls.find((a) => a[1]?.endsWith('yoast.php') && a[2] === 'apply');
+  assert.match(path.basename(path.dirname(call[3])), /^pb-payload-/);
+  assert.equal(fs.existsSync(call[3]), false);
+});
+
+test('applySeo: an Organization that will be kept does not import its logo', () => {
+  const withOrg = { ...seo, organization: { value: { name: 'New Co', logo: { file: png } }, inferred: false } };
+  const kept = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'company', name: 'Existing Co', logoId: 5 } } });
+  const r = applySeo(kept.wp, project(), 'home', withOrg, { index: false });
+  assert.deepEqual(r.media, []);
+  assert.equal(kept.imports.length, 0, 'no attachment for a logo Yoast will not use');
+  assert.equal(kept.specs[0].organization.logoId, null);
+  const person = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'person', name: '', logoId: 0 } } });
+  applySeo(person.wp, project(), 'home', withOrg, { index: false });
+  assert.equal(person.imports.length, 0, 'a Person site keeps its Organization');
+  const empty = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'company', name: '', logoId: 0 } } });
+  assert.deepEqual(applySeo(empty.wp, project(), 'home', withOrg, { index: false }).media, [{ role: 'organizationLogo', id: 77, reused: true }]);
+  const forced = harness();
+  applySeo(forced.wp, project(), 'home', withOrg, { index: false, forceOrganization: true });
+  assert.equal(forced.imports.length, 1, 'forced: the logo is used');
+});
+
+test('applySeo: an Organization without a logo warns that Yoast prints no Organization piece', () => {
+  const noLogo = { ...seo, organization: { value: { name: 'New Co' }, inferred: false } };
+  const h = harness({ site: { siteName: 'Acme', sep: '-', organization: { represents: 'company', name: '', logoId: 0 } } });
+  const r = applySeo(h.wp, project(), 'home', noLogo, { index: false });
+  assert.ok(r.warnings.some((w) => /no logo/.test(w) && /no Organization/.test(w)), JSON.stringify(r.warnings));
+  const kept = applySeo(harness().wp, project(), 'home', noLogo, { index: false });
+  assert.equal('warnings' in kept, false, 'kept: Yoast keeps its own organization and logo');
+});
+
+test('pngSize reads PNG dimensions and returns null for other files', () => {
+  assert.deepEqual(pngSize(png), { width: 1200, height: 630 });
+  const other = path.join(path.dirname(png), 'x.jpg');
+  fs.writeFileSync(other, 'not a png');
+  assert.equal(pngSize(other), null);
+});
+
+test('applySeo: a supplied 1200x630 OG image is imported as it is (resized: false)', () => {
+  const h = harness();
+  const r = applySeo(h.wp, project(), 'home', { ...seo, ogImage: { value: { file: png }, inferred: false } }, { index: false });
+  assert.equal(h.imports[0].file, fs.realpathSync(png));
+  assert.deepEqual(r.ogImage, { file: png, resized: false, source: { width: 1200, height: 630 } });
+});
+
+test('applySeo stores the values it applied (the Yoast readback) in page.seo.appliedValues', () => {
+  const h = harness();
+  const theme = project();
+  applySeo(h.wp, theme, 'home', seo, { index: false });
+  const a = loadState(theme).pages[0].seo.appliedValues;
+  assert.equal(a.metadesc, desc);
+  assert.equal(a.focuskw, 'emergency plumber');
+  assert.equal(a.schema_page_type, 'WebPage');
+  assert.deepEqual(JSON.parse(a.jsonld), [{ '@type': 'Service', name: 'Emergency plumbing' }]);
+  assert.equal('opengraph-image-id' in a, false, 'not written: no og image');
+});
+
+test('seoGet returns the live Yoast values, the values last applied and which fields were edited since', () => {
+  const h = harness({ live: { metadesc: 'Hand edited', focuskw: 'emergency plumber', jsonld: '[{"@type":"Thing"}]' } });
+  const theme = project(appliedPage({ metadesc: desc, focuskw: 'emergency plumber' }));
+  const r = seoGet(h.wp, theme, 'home');
+  assert.equal(r.postId, 9);
+  assert.equal(r.values.metadesc, 'Hand edited');
+  assert.equal(r.values.jsonld, '[{"@type":"Thing"}]', 'the JSON-LD as the stored string');
+  assert.equal(r.appliedValues.metadesc, desc);
+  assert.deepEqual(r.edited.map((e) => e.field).sort(), ['jsonld', 'metadesc']);
+  assert.throws(() => seoGet(h.wp, theme, 'nope'), code('ENOPAGE'));
+});
+
+test('applySeo: a value edited in wp-admin since the last apply is EEDITED (live and applied listed); nothing is imported or written', () => {
+  const h = harness({ live: { metadesc: 'Hand edited in wp-admin', focuskw: 'emergency plumber' } });
+  const theme = project(appliedPage({ metadesc: desc, focuskw: 'emergency plumber' }));
+  const withOg = { ...seo, ogImage: { value: { file: png }, inferred: false } };
+  assert.throws(() => applySeo(h.wp, theme, 'home', withOg, { index: false }), (e) => e.code === 'EEDITED'
+    && /metadesc/.test(e.message) && e.message.includes('Hand edited in wp-admin') && e.message.includes(desc) && /--force/.test(e.message)
+    && e.fields.length === 1 && e.fields[0].field === 'metadesc' && e.fields[0].live === 'Hand edited in wp-admin' && e.fields[0].applied === desc);
+  assert.equal(h.imports.length, 0);
+  assert.equal(h.specs.length, 0);
+  assert.equal(loadState(theme).pages[0].seo.appliedValues.metadesc, desc, 'state untouched');
+});
+
+test('applySeo with force overwrites edited values and reports them', () => {
+  const h = harness({ live: { metadesc: 'Hand edited in wp-admin' } });
+  const theme = project(appliedPage({ metadesc: desc }));
+  const r = applySeo(h.wp, theme, 'home', seo, { index: false, force: true });
+  assert.equal(meta(h).metadesc, desc);
+  assert.deepEqual(r.overwritten, [{ field: 'metadesc', live: 'Hand edited in wp-admin', applied: desc }]);
+  assert.equal(loadState(theme).pages[0].seo.appliedValues.metadesc, desc);
+});
+
+test('applySeo: on a first apply, existing non-empty Yoast values are EEDITED unless forced; equal or empty ones are not', () => {
+  const first = harness({ live: { focuskw: 'typed by hand', title: seo.title.value } });
+  assert.throws(() => applySeo(first.wp, project(), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields.map((f) => f.field).join() === 'focuskw' && e.fields[0].applied === null);
+  assert.equal(first.specs.length, 0);
+  const forced = harness({ live: { focuskw: 'typed by hand' } });
+  applySeo(forced.wp, project(), 'home', seo, { index: false, force: true });
+  assert.equal(meta(forced).focuskw, 'emergency plumber');
+  const same = harness({ live: { focuskw: 'emergency plumber', metadesc: desc } });
+  assert.doesNotThrow(() => applySeo(same.wp, project(), 'home', seo, { index: false }), 'the developer value is the one being applied');
+});
+
+test('applySeo: unchanged live values (equal to the last apply) never block a re-apply with new values', () => {
+  const h = harness({ live: { metadesc: desc, focuskw: 'emergency plumber' } });
+  const theme = project(appliedPage({ metadesc: desc, focuskw: 'emergency plumber' }));
+  const newer = { ...seo, focusKeyword: { value: 'austin plumber', inferred: false } };
+  applySeo(h.wp, theme, 'home', newer, { index: false });
+  assert.equal(meta(h).focuskw, 'austin plumber');
+});
+
+test('applySeo: hand-edited JSON-LD is EEDITED; formatting differences are not', () => {
+  const applied = JSON.stringify([{ '@type': 'Service', name: 'Emergency plumbing' }]);
+  const pretty = harness({ live: { jsonld: JSON.stringify(JSON.parse(applied), null, 4) } });
+  assert.doesNotThrow(() => applySeo(pretty.wp, project(appliedPage({ jsonld: applied })), 'home', seo, { index: false }));
+  const edited = harness({ live: { jsonld: '[{"@type":"Service","name":"Edited by hand"}]' } });
+  assert.throws(() => applySeo(edited.wp, project(appliedPage({ jsonld: applied })), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields[0].field === 'jsonld');
+});
+
+test('applySeo: a page applied before appliedValues existed compares against its stored seo', () => {
+  const legacy = [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [], seo: { ...seo, applied: APPLIED, ogImageId: null } }];
+  const same = harness({ live: { metadesc: desc, focuskw: 'emergency plumber', title: seo.title.value, schema_page_type: 'WebPage' } });
+  assert.doesNotThrow(() => applySeo(same.wp, project(legacy), 'home', seo, { index: false }));
+  const edited = harness({ live: { metadesc: 'Hand edited' } });
+  assert.throws(() => applySeo(edited.wp, project(legacy), 'home', seo, { index: false }), (e) => e.code === 'EEDITED' && e.fields[0].applied === desc);
+});
+
+test('CLI: unknown flags print usage and exit 64', () => {
+  for (const args of [['apply', '/t', 'home', 'f.json', '--forse'], ['record-audit', '/t', 'home', 'a.json', '--force'], ['get', '/t', 'home', '--x']]) {
+    const r = cli(...args);
+    assert.equal(r.status, 64, args.join(' '));
+    assert.match(r.stderr, /Usage/);
+  }
+  assert.equal(cli('get', '/t').status, 64);
 });

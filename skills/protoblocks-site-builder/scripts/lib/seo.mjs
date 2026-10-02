@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
 import { loadState, updateState } from './state.mjs';
@@ -72,7 +73,8 @@ export function buildYoastSpec({ postId, seo, ogImageId = null, organizationLogo
       'twitter-title': socialTitle(title),
       'twitter-description': desc,
       'twitter-image-id': ogImageId,
-      schema_page_type: val(seo.schemaPageType) ?? 'WebPage',
+      // Absent leaf: leave the page type alone (Yoast falls back to its post-type default).
+      ...(seo.schemaPageType ? { schema_page_type: val(seo.schemaPageType) } : {}),
     },
     jsonld: val(seo.schema) ? normalizeJsonld(val(seo.schema)) : null,
     featuredImageId: ogImageId,
@@ -87,18 +89,98 @@ function requireFile(file, what) {
   if (!ok) throw fail('EFILE', `${what}: cannot read ${file}`);
 }
 
+const YOAST_PHP = path.join(WP_SCRIPTS_DIR, 'yoast.php');
+const OG_IMAGE_CLI = path.join(WP_SCRIPTS_DIR, '..', 'qa', 'og-image.mjs');
+const OG = { width: 1200, height: 630 };
+
 function yoastError(wp, args) {
-  const out = wp.evalFile(path.join(WP_SCRIPTS_DIR, 'yoast.php'), args);
+  const out = wp.evalFile(YOAST_PHP, args);
   if (out?.error) throw fail(out.error.code ?? 'EYOAST', out.error.message ?? 'Yoast writer failed');
   return out;
 }
 
-export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, index = true } = {}) {
-  const errors = validateSeo(seo);
-  if (errors.length) throw fail('ESEO', `Invalid SEO:\n- ${errors.join('\n- ')}`);
+/** The Yoast values the skill writes, as `yoast.php get` reads them back (raw post meta; '' when unset). */
+export const LIVE_KEYS = ['focuskw', 'title', 'metadesc', 'opengraph-title', 'opengraph-description', 'opengraph-image-id', 'twitter-title', 'twitter-description', 'twitter-image-id', 'schema_page_type', 'jsonld'];
+const pickLive = (o) => Object.fromEntries(LIVE_KEYS.map((k) => [k, o?.[k] == null ? '' : String(o[k])]));
+const parseJson = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
+// JSON-LD is compared as data (PHP pretty-prints it); everything else as trimmed text (Yoast trims on save).
+function sameValue(field, a, b) {
+  if (a == null || b == null) return a == b; // eslint-disable-line eqeqeq
+  if (field === 'jsonld') {
+    if (String(a).trim() === '' || String(b).trim() === '') return String(a).trim() === String(b).trim();
+    const x = parseJson(a); const y = parseJson(b);
+    return x !== undefined && y !== undefined ? JSON.stringify(x) === JSON.stringify(y) : String(a).trim() === String(b).trim();
+  }
+  return String(a).trim() === String(b).trim();
+}
+
+// What a page applied before appliedValues were stored would have written (its seo leaves through buildYoastSpec).
+function legacyApplied(pageSeo) {
+  let spec;
+  try { spec = buildYoastSpec({ postId: 0, seo: pageSeo, ogImageId: pageSeo.ogImageId ?? null }); } catch { return {}; }
+  const out = {};
+  const has = { title: !!val(pageSeo.title), 'opengraph-title': !!val(pageSeo.title), 'twitter-title': !!val(pageSeo.title) };
+  for (const [k, v] of Object.entries(spec.meta)) if (v !== null && v !== undefined && v !== '' && has[k] !== false) out[k] = String(v);
+  if (spec.jsonld?.length) out.jsonld = JSON.stringify(spec.jsonld);
+  return out;
+}
+const appliedOf = (page) => (page.seo ? (page.seo.appliedValues ?? legacyApplied(page.seo)) : {});
+
+function findPage(themeDir, slug) {
   const page = loadState(themeDir).pages.find((p) => p.slug === slug);
   if (!page) throw fail('ENOPAGE', `No page "${slug}" in state.`);
   if (!Number.isInteger(page.postId) || page.postId <= 0) throw fail('ENOPAGE', `Page "${slug}" has no postId; build it first.`);
+  return page;
+}
+
+// Live values that differ from what the skill last applied (or, on a first apply, any non-empty live value).
+function editedFields(live, applied, fields = LIVE_KEYS, next = {}) {
+  return fields
+    .filter((f) => String(live[f] ?? '').trim() !== '' && !sameValue(f, live[f], applied[f] ?? '') && !(f in next && next[f] !== undefined && sameValue(f, live[f], next[f])))
+    .map((f) => ({ field: f, live: live[f], applied: applied[f] ?? null }));
+}
+
+/** `seo.mjs get`: the page's live Yoast values (as wp-admin left them), the values the skill last applied, and the difference. */
+export function seoGet(wp, themeDir, slug) {
+  const page = findPage(themeDir, slug);
+  const values = pickLive(yoastError(wp, ['get', String(page.postId)]));
+  const applied = page.seo ? appliedOf(page) : null;
+  return { slug, postId: page.postId, values, appliedValues: applied, edited: editedFields(values, applied ?? {}) };
+}
+
+/** Width and height from a PNG header; null when the file is not a PNG. */
+export function pngSize(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(24);
+    if (fs.readSync(fd, b, 0, 24, 0) < 24 || b.readUInt32BE(0) !== 0x89504e47 || b.toString('latin1', 12, 16) !== 'IHDR') return null;
+    return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  } catch { return null; } finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
+// A supplied OG image that is not 1200x630 is cover-fitted (top-aligned, like generated ones) by og-image.mjs --fit.
+function fitSuppliedOgImage(file, themeDir, slug) {
+  const size = pngSize(file);
+  if (size && size.width === OG.width && size.height === OG.height) return { file, resized: false, source: size };
+  const out = path.join(themeDir, '.protoblocks', 'artifacts', slug, 'og-supplied.png');
+  const r = spawnSync(process.execPath, [OG_IMAGE_CLI, '--fit', path.resolve(file), '--out', out], { encoding: 'utf8', timeout: 120000 });
+  let res;
+  try { res = r.status === 0 ? JSON.parse(r.stdout) : null; } catch { res = null; }
+  if (!res) {
+    throw fail('EOGIMAGE', `Cannot check or resize the supplied OG image ${file} to ${OG.width}x${OG.height}: ${(r.stderr || r.error?.message || r.stdout || '').trim().split('\n')[0].slice(0, 300)}. Install the QA tools (npm install in scripts/qa) or supply a ${OG.width}x${OG.height} image.`);
+  }
+  return res.resized ? { file: res.out, resized: true, source: res.source } : { file, resized: false, source: res.source };
+}
+
+/**
+ * Applies seo.json to the page through Yoast. Refuses (EEDITED) when a live Yoast value it would overwrite was edited
+ * outside the skill since its last apply (or exists before its first apply), unless force.
+ */
+export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, force = false, index = true } = {}) {
+  const errors = validateSeo(seo);
+  if (errors.length) throw fail('ESEO', `Invalid SEO:\n- ${errors.join('\n- ')}`);
+  const page = findPage(themeDir, slug);
   // Validate every input before the first import so a bad path cannot leave a half-applied run.
   const ogFile = val(seo.ogImage)?.file;
   if (ogFile !== undefined) requireFile(ogFile, 'ogImage.file');
@@ -107,57 +189,87 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   // The rendered <title> must be <= 60, so check it with this site's real name and separator before any import.
   const warnings = [];
   let ctx;
+  let siteOrg;
   try {
     const site = yoastError(wp, ['site']);
     ctx = { siteName: String(site.siteName ?? ''), sep: String(site.sep ?? '-') };
+    siteOrg = site.organization;
   } catch (e) {
     // The lookup is an extra check; losing it must not block the SEO. The context-free title check already passed.
     warnings.push(`site context unavailable: ${String(e.message).split('\n')[0].slice(0, 300)}`);
   }
   const siteErrors = ctx ? validateSeo(seo, ctx) : [];
   if (siteErrors.length) throw fail('ESEO', `Invalid SEO:\n- ${siteErrors.join('\n- ')}`);
+
+  // What this run will write, before any import: the meta (image ids are known only after import) and the JSON-LD.
+  const spec = buildYoastSpec({ postId: page.postId, seo, ogImageId: val(seo.ogImage)?.id ?? (ogFile ? -1 : null), forceOrganization });
+  let supported;
+  const isSupported = () => (supported ??= jsonldSupported(wp));
+  let jsonld = 'none';
+  if (!seo.schema) {
+    // A schema the skill applied earlier would otherwise linger on the page after it was dropped from the SEO.
+    // Only when the theme supports JSON-LD; otherwise the meta is not ours to touch.
+    delete spec.jsonld;
+    if (page.seo?.schema) {
+      if (isSupported()) { spec.jsonld = []; jsonld = 'cleared'; } else jsonld = 'unsupported';
+    }
+  } else if (!isSupported()) { delete spec.jsonld; jsonld = 'unsupported'; } else jsonld = spec.jsonld.length ? 'written' : 'cleared';
+
+  const next = {};
+  for (const [k, v] of Object.entries(spec.meta)) if (v !== null && v !== undefined && v !== '') next[k] = v === -1 ? undefined : String(v);
+  if ('jsonld' in spec) next.jsonld = spec.jsonld.length ? JSON.stringify(spec.jsonld) : '';
+  const live = pickLive(yoastError(wp, ['get', String(page.postId)]));
+  const edited = editedFields(live, appliedOf(page), Object.keys(next), next);
+  if (edited.length && !force) {
+    const list = edited.map((e) => `- ${e.field}: live ${JSON.stringify(e.live)}; ${e.applied === null ? 'never applied by the skill' : `last applied ${JSON.stringify(e.applied)}`}`).join('\n');
+    throw Object.assign(fail('EEDITED', `Yoast values for page "${slug}" were set outside the skill (wp-admin?) and would be overwritten:\n${list}\nRead them with seo.mjs get and treat them as provided (put them in seo.json), or re-run with --force to overwrite them.`), { fields: edited });
+  }
+
   const media = [];
   let ogImageId = val(seo.ogImage)?.id ?? null;
+  let ogImage;
   if (ogFile) {
-    const m = importMedia(wp, ogFile, { alt: page.title ?? slug });
+    ogImage = fitSuppliedOgImage(ogFile, themeDir, slug);
+    const m = importMedia(wp, ogImage.file, { alt: page.title ?? slug });
     ogImageId = m.id;
     media.push({ role: 'ogImage', id: m.id, reused: m.reused });
   }
+  // Yoast keeps a configured Organization unless forced: do not import a logo it will not use.
+  const orgKept = siteOrg && !forceOrganization ? !(siteOrg.represents === 'company' && !siteOrg.name) : false;
   let organizationLogoId = org?.logo?.id ?? null;
-  if (org?.logo?.file) {
+  if (org?.logo?.file && !orgKept) {
     const m = importMedia(wp, org.logo.file, { alt: `${org.name} logo` });
     organizationLogoId = m.id;
     media.push({ role: 'organizationLogo', id: m.id, reused: m.reused });
   }
-  const spec = buildYoastSpec({ postId: page.postId, seo, ogImageId, organizationLogoId, forceOrganization });
-  // No schema leaf leaves the page's existing JSON-LD untouched; an explicit empty array clears it.
-  let jsonld = 'none';
-  if (!spec.jsonld) {
-    // A schema the skill applied earlier would otherwise linger on the page after it was dropped from the SEO.
-    // Only when the theme supports JSON-LD; otherwise the meta is not ours to touch.
-    if (page.seo?.schema) {
-      if (jsonldSupported(wp)) { spec.jsonld = []; jsonld = 'cleared'; } else { delete spec.jsonld; jsonld = 'unsupported'; }
-    } else delete spec.jsonld;
-  } else if (spec.jsonld.length > 0) {
-    jsonld = jsonldSupported(wp) ? 'written' : 'unsupported';
-    if (jsonld === 'unsupported') delete spec.jsonld;
+  if (orgKept) organizationLogoId = null;
+  if (org && !orgKept && !org.logo?.file && !org.logo?.id) {
+    warnings.push('organization has no logo: Yoast prints no Organization schema piece without one (it needs a company name and a logo). Add organization.logo or ask the developer for the logo file.');
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-seo-'));
-  const file = path.join(dir, 'spec.json');
-  fs.writeFileSync(file, JSON.stringify(spec));
-  let result;
-  try { result = yoastError(wp, ['apply', file]); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  for (const k of ['opengraph-image-id', 'twitter-image-id']) if (k in spec.meta) spec.meta[k] = ogImageId;
+  spec.featuredImageId = ogImageId;
+  if (spec.organization) spec.organization.logoId = organizationLogoId;
+
+  const result = wp.evalFilePayload(YOAST_PHP, 'apply', spec);
+  if (result?.error) throw fail(result.error.code ?? 'EYOAST', result.error.message ?? 'Yoast writer failed');
   if (index) {
     const idx = wp.run(['yoast', 'index', '--skip-confirmation']);
     result.index = idx.code === 0 ? 'ok' : `failed: ${(idx.stderr || idx.stdout).trim().slice(0, 300)}`;
   } else result.index = 'skipped';
   result.jsonld = jsonld;
   result.media = media;
+  if (ogImage) result.ogImage = ogImage;
+  if (edited.length) result.overwritten = edited;
   if (warnings.length) result.warnings = warnings;
+  const stored = pickLive(result.stored);
+  delete result.stored;
+  const written = Object.keys(next);
   updateState(themeDir, (s) => {
     const p = s.pages.find((x) => x.slug === slug);
     if (!p) return;
-    p.seo = { ...seo, applied: new Date().toISOString(), ogImageId };
+    const appliedValues = { ...appliedOf(p) };
+    for (const k of written) appliedValues[k] = stored[k];
+    p.seo = { ...seo, applied: new Date().toISOString(), ogImageId, appliedValues };
     if (p.status === 'done') p.status = 'seo'; // the old audit no longer applies
   });
   return result;
@@ -201,17 +313,22 @@ export function recordAudit(themeDir, slug, auditFile) {
   return { pass: audit.pass, status };
 }
 
-const USAGE = 'Usage: node seo.mjs apply <themeDir> <slug> <seo.json> [--force-organization]\n       node seo.mjs record-audit <themeDir> <slug> <audit.json>\n';
+const USAGE = 'Usage: node seo.mjs apply <themeDir> <slug> <seo.json> [--force] [--force-organization]\n       node seo.mjs get <themeDir> <slug>\n       node seo.mjs record-audit <themeDir> <slug> <audit.json>\n';
+const FLAGS = { apply: ['--force', '--force-organization'], get: [], 'record-audit': [] };
+const ARITY = { apply: 3, get: 2, 'record-audit': 3 };
 
 function main(argv) {
   const flags = argv.filter((a) => a.startsWith('--'));
-  const [cmd, themeDir, slug, file] = argv.filter((a) => !a.startsWith('--'));
-  if (!['apply', 'record-audit'].includes(cmd) || !themeDir || !slug || !file) { process.stderr.write(USAGE); process.exit(64); }
+  const pos = argv.filter((a) => !a.startsWith('--'));
+  const [cmd, themeDir, slug, file] = pos;
+  const usage = () => { process.stderr.write(USAGE); process.exit(64); };
+  if (!Object.hasOwn(FLAGS, cmd) || pos.length !== ARITY[cmd] + 1 || flags.some((f) => !FLAGS[cmd].includes(f))) usage();
   const out = (r) => process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
   if (cmd === 'record-audit') return out(recordAudit(themeDir, slug, file));
+  if (cmd === 'get') return out(seoGet(createWp(loadRuntime(themeDir)), themeDir, slug));
   let seo;
   try { seo = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw fail('EINPUT', `Cannot read ${file}: ${e.message.split('\n')[0]}`); }
-  return out(applySeo(createWp(loadRuntime(themeDir)), themeDir, slug, seo, { forceOrganization: flags.includes('--force-organization') }));
+  return out(applySeo(createWp(loadRuntime(themeDir)), themeDir, slug, seo, { force: flags.includes('--force'), forceOrganization: flags.includes('--force-organization') }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {

@@ -100,3 +100,71 @@ qtest('og-image CLI exits 64 with usage when arguments are missing', async () =>
   assert.equal(res.status, 64);
   assert.match(res.stderr, /Usage/);
 });
+
+// ---- supplied OG images (final-review fix wave) ----
+const SCRIPTS = path.resolve(QA_DIR, '..');
+
+qtest('fitOgImage cover-fits a supplied image to 1200x630, top-aligned', async () => {
+  const { fitOgImage, loadRaw } = await load();
+  const { makeImage } = await import('./helpers.mjs');
+  const d = tmpDir();
+  // 800x800: a red band on top, green below; cover-fit scales to 1200x1200 and keeps the top 630 rows.
+  const src = await makeImage({ width: 800, height: 800, bg: [0x16, 0xa3, 0x4a], rects: [{ x: 0, y: 0, w: 800, h: 100, color: [0xdc, 0x26, 0x26] }] }, path.join(d, 'square.png'));
+  const r = await fitOgImage(src, path.join(d, 'fit.png'));
+  assert.deepEqual([r.resized, r.source.width, r.source.height], [true, 800, 800]);
+  const raw = await loadRaw(r.out);
+  assert.deepEqual([raw.width, raw.height], [1200, 630]);
+  assert.deepEqual(px(raw, 600, 5), [0xdc, 0x26, 0x26], 'top kept');
+  assert.deepEqual(px(raw, 600, 140), [0xdc, 0x26, 0x26], 'scaled 1.5x: the 100px band is 150px');
+  assert.deepEqual(px(raw, 600, 629), [0x16, 0xa3, 0x4a]);
+  const exact = await makeImage({ width: 1200, height: 630 }, path.join(d, 'exact.png'));
+  const same = await fitOgImage(exact, path.join(d, 'unused.png'));
+  assert.equal(same.resized, false);
+  assert.equal(fs.existsSync(path.join(d, 'unused.png')), false, 'a 1200x630 image is not rewritten');
+});
+
+qtest('og-image CLI --fit prints the fit result as JSON', async () => {
+  const { makeImage } = await import('./helpers.mjs');
+  const d = tmpDir();
+  const src = await makeImage({ width: 640, height: 480 }, path.join(d, 'in.png'));
+  const res = spawnSync(process.execPath, [path.join(QA_DIR, 'og-image.mjs'), '--fit', src, '--out', path.join(d, 'o.png')], { encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  const r = JSON.parse(res.stdout);
+  assert.equal(r.resized, true);
+  assert.equal(r.out, path.join(d, 'o.png'));
+  assert.equal(spawnSync(process.execPath, [path.join(QA_DIR, 'og-image.mjs'), '--fit', src], { encoding: 'utf8' }).status, 64);
+});
+
+qtest('applySeo resizes a supplied non-1200x630 OG image into the page artifacts before import', async () => {
+  const { makeImage } = await import('./helpers.mjs');
+  const { applySeo } = await import(path.join(SCRIPTS, 'lib', 'seo.mjs'));
+  const { createWp } = await import(path.join(SCRIPTS, 'lib', 'wp.mjs'));
+  const { initState, updateState, loadState } = await import(path.join(SCRIPTS, 'lib', 'state.mjs'));
+  const { loadRaw } = await load();
+  const theme = tmpDir('pb-og-theme-');
+  initState(theme, { url: 'http://x.test', path: '/x' });
+  updateState(theme, (s) => { s.pages.push({ slug: 'home', title: 'Home', status: 'seo', postId: 9, sections: [] }); });
+  const supplied = await makeImage({ width: 1000, height: 1000 }, path.join(tmpDir(), 'supplied.png'));
+  const imports = [];
+  const exec = (cmd, args) => {
+    if (args[0] === 'eval') return { code: 0, stdout: '1', stderr: '' };
+    if (args[1]?.endsWith('media.php')) { imports.push(JSON.parse(Buffer.from(args[3], 'base64url').toString('utf8')).file); return { code: 0, stdout: '{"id":77,"url":"u","alt":"a","mime":"image/png","reused":false}\n', stderr: '' }; }
+    if (args[2] === 'site') return { code: 0, stdout: '{"siteName":"Acme","sep":"-"}\n', stderr: '' };
+    if (args[2] === 'get') return { code: 0, stdout: '{}\n', stderr: '' };
+    if (args[2] === 'apply') return { code: 0, stdout: '{"postId":9,"written":[],"stored":{}}\n', stderr: '' };
+    return { code: 1, stdout: '', stderr: 'unexpected' };
+  };
+  const seo = {
+    focusKeyword: { value: 'emergency plumber', inferred: false },
+    title: { value: 'Emergency Plumber %%sep%% %%sitename%%', inferred: false },
+    description: { value: 'Licensed emergency plumbers in Austin available 24/7. Upfront pricing, same-day repairs and a 1-year guarantee on every job we do.', inferred: false },
+    ogImage: { value: { file: supplied }, inferred: false },
+  };
+  const r = applySeo(createWp({ wp: 'wp', mode: 'local-wrapper', publicPath: '/s' }, { exec }), theme, 'home', seo, { index: false });
+  const out = path.join(theme, '.protoblocks', 'artifacts', 'home', 'og-supplied.png');
+  assert.deepEqual(r.ogImage, { file: out, resized: true, source: { width: 1000, height: 1000 } });
+  assert.deepEqual(imports, [fs.realpathSync(out)], 'the resized copy is imported, not the original');
+  const raw = await loadRaw(out);
+  assert.deepEqual([raw.width, raw.height], [1200, 630]);
+  assert.equal(loadState(theme).pages[0].seo.ogImage.value.file, supplied, 'seo.json keeps the developer\'s file');
+});

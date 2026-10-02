@@ -43,10 +43,30 @@ export async function ogImage({ url, selector, out, browser, imageWaitMs }) {
   }
 }
 
+/**
+ * A developer-supplied image that is not 1200x630: cover-fit it (scale to cover, crop centred and top-aligned, the
+ * top kept as in generated images) into `out`. A 1200x630 image is left alone: { resized: false } and nothing written.
+ */
+export async function fitOgImage(input, out) {
+  const meta = await sharp(input).metadata();
+  const source = { width: meta.width ?? 0, height: meta.height ?? 0 };
+  if (source.width === OG_SIZE.width && source.height === OG_SIZE.height) return { resized: false, source };
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  await sharp(input).resize(OG_SIZE.width, OG_SIZE.height, { fit: 'cover', position: 'top' }).png().toFile(out);
+  return { resized: true, out, source, width: OG_SIZE.width, height: OG_SIZE.height };
+}
+
+const USAGE = "Usage: node og-image.mjs --url U --selector '#pb-s1' --out og.png\n       node og-image.mjs --fit <supplied image> --out og-supplied.png\n";
+
 async function main(argv) {
   const a = {};
   for (let i = 0; i < argv.length; i += 2) a[argv[i].replace(/^--/, '')] = argv[i + 1];
-  if (!a.url || !a.selector || !a.out) { process.stderr.write("Usage: node og-image.mjs --url U --selector '#pb-s1' --out og.png\n"); process.exit(64); }
+  if (a.fit !== undefined) {
+    if (!a.fit || !a.out) { process.stderr.write(USAGE); process.exit(64); }
+    process.stdout.write(`${JSON.stringify(await fitOgImage(a.fit, a.out), null, 2)}\n`);
+    return;
+  }
+  if (!a.url || !a.selector || !a.out) { process.stderr.write(USAGE); process.exit(64); }
   process.stdout.write(`${JSON.stringify(await ogImage({ url: a.url, selector: a.selector, out: a.out }), null, 2)}\n`);
 }
 
