@@ -2,8 +2,12 @@
 // build -> per-section numeric QA -> motion -> header/footer part move (adopt, rebuild, re-verify) -> page QA -> Yoast
 // SEO -> done -> ask-more-pages, driving the script surface only (no LLM judgement), on the Local test site.
 //
-// SAFETY (the developer's real site). Run it only through the site lock:
+// SAFETY (the developer's real site). Run it only through the site lock (it skips unless PB_SITE_LOCK=1, which the
+// lock script exports; tests/README.md):
 //   /private/tmp/claude-501/pb-site-test.sh <worktree> test:e2e
+// - Options: setupSite runs only when the plugins are active and the options ensurePlugins would write are already
+//   in their target state (else skip). Theme-switch options (theme_mods_<original>, sidebars_widgets,
+//   theme_switched, current_theme) and those setup options are snapshotted and restored; theme_mods_<fork> is deleted.
 // - Theme: a unique fork pb-e2e-<hex>. The original stylesheet is recorded first (and in tests/.tmp/original-theme.txt
 //   for crash recovery); `finally` re-activates it, then deletes only that exact fork folder (directly inside the
 //   themes dir, basename = the unique slug, fork marker or build.json present, original theme active again).
@@ -28,7 +32,11 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { haveSite, PUBLIC, TEST_SITE, SITE_URL, ORIGINAL_THEME, testWp, restoreTheme } from '../integration/helpers.mjs';
+import {
+  PUBLIC, TEST_SITE, SITE_URL, ORIGINAL_THEME, testWp, restoreTheme, siteSkipReason, setupWriteReason, SETUP_OPTION_NAMES,
+  themeOptionNames, snapshotOptions as snapshotWpOptions, restoreOptions as restoreWpOptions, dropThemeMods, leakedThemeMods,
+  snapshotTailwind, restoreTailwind,
+} from '../integration/helpers.mjs';
 import { haveQaDeps, QA_DIR } from '../qa/helpers.mjs';
 import { setupSite } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
 import { forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
@@ -56,7 +64,6 @@ const BLOCKS = path.join(HERE, 'blocks');
 const BLOCK_NAMES = ['site-header', 'hero-split', 'feature-grid', 'cta-band', 'site-footer'];
 const THEMES = PUBLIC ? path.join(PUBLIC, 'wp-content', 'themes') : '';
 const DEV_THEME = THEMES ? path.join(THEMES, 'proto-blocks-theme') : '';
-const TW_DIR = PUBLIC ? path.join(PUBLIC, 'wp-content', 'uploads', 'proto-blocks', 'tailwind') : '';
 const OPTIONS_PHP = path.join(REPO, 'tests', 'integration', 'yoast-options.php');
 // Same crash-recovery file as tests/integration/yoast.test.mjs: one snapshot at a time, never overwritten.
 const SNAPSHOT_FILE = path.join(TMP, 'yoast-options-snapshot.json');
@@ -64,7 +71,6 @@ const RESTORE_COMMAND = `${path.join(TMP, 'wp-test-site')} eval-file ${OPTIONS_P
 const PARTS = [154, 159]; // the developer's header/footer template parts: read only
 const MENU_ID = 15; // the developer's navigation menu: read only
 const NAV_CLI = path.join(REPO, 'skills', 'protoblocks-site-builder', 'scripts', 'lib', 'navigation.mjs');
-const REQUIRED_PLUGINS = ['proto-blocks', 'wordpress-seo', 'safe-svg', 'duplicate-post'];
 // The pipeline must stop and clean up well inside the 10-minute window the lock script runs in.
 const BUDGET_MS = 420000;
 
@@ -162,6 +168,10 @@ function siteFingerprint(wp) {
   };
 }
 
+// The theme_mods_* rows (name and a hash of the value), for the before/after comparison.
+const themeModsList = (wp) => JSON.parse(wp.check(['option', 'list', '--search=theme_mods_*', '--fields=option_name,option_value', '--format=json']))
+  .map((o) => ({ name: o.option_name, value: sha(String(o.option_value)) })).sort((a, b) => a.name.localeCompare(b.name));
+
 const leftovers = (wp) => ({
   themes: fs.readdirSync(THEMES).filter((n) => n.startsWith('pb-e2e-')),
   menus: JSON.parse(wp.check(['post', 'list', '--post_type=wp_navigation', '--post_status=any', '--fields=ID,post_name', '--format=json']))
@@ -177,31 +187,6 @@ function restoreOptions(wp, snapshot) {
   try { return wp.evalFile(OPTIONS_PHP, ['restore', f]); } finally { fs.rmSync(f, { force: true }); }
 }
 const rawOption = (wp, name) => wp.run(['option', 'get', name, '--format=json']).stdout.trim();
-
-function snapshotTailwind(wp) {
-  const files = {};
-  if (fs.existsSync(TW_DIR)) {
-    for (const e of fs.readdirSync(TW_DIR, { withFileTypes: true })) if (e.isFile()) files[e.name] = fs.readFileSync(path.join(TW_DIR, e.name));
-  }
-  const opt = wp.run(['option', 'get', 'proto_blocks_tailwind', '--format=json']);
-  return { files, option: opt.code === 0 ? opt.stdout.trim() : null };
-}
-function restoreTailwind(wp, snap) {
-  if (fs.existsSync(TW_DIR)) {
-    for (const e of fs.readdirSync(TW_DIR, { withFileTypes: true })) {
-      // Only plain files directly in the cache dir that did not exist before this run.
-      if (e.isFile() && !Object.hasOwn(snap.files, e.name)) fs.rmSync(path.join(TW_DIR, e.name));
-    }
-  }
-  for (const [name, buf] of Object.entries(snap.files)) fs.writeFileSync(path.join(TW_DIR, name), buf);
-  if (snap.option !== null && rawOption(wp, 'proto_blocks_tailwind') !== snap.option) {
-    wp.check(['option', 'update', 'proto_blocks_tailwind', snap.option, '--format=json']);
-  }
-  const now = snapshotTailwind(wp);
-  const same = now.option === snap.option && Object.keys(now.files).length === Object.keys(snap.files).length
-    && Object.entries(snap.files).every(([n, b]) => now.files[n] && Buffer.compare(now.files[n], b) === 0);
-  return same;
-}
 
 // The verdict a scripted (no-LLM) visual QA writes: copied field by field from check-section's result.json, so
 // recordVerdict's cross-check against result.json/input.json sees exactly the measured numbers.
@@ -223,8 +208,8 @@ function verdictFromResult(result) {
 }
 
 function skipReason() {
+  if (siteSkipReason()) return siteSkipReason(); // first: without the lock nothing may talk to the site
   if (!haveQaDeps) return 'QA deps missing: run npm install in skills/protoblocks-site-builder/scripts/qa';
-  if (!haveSite) return `start the Local site "${TEST_SITE}"`;
   if (!SITE_URL) return 'WP-CLI could not read siteurl (is the Local site running?)';
   if (!ORIGINAL_THEME || ORIGINAL_THEME.startsWith('pb-')) return 'the original theme is unknown (site left on a pb-* theme; set PB_TEST_THEME)';
   return '';
@@ -234,9 +219,10 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   const why = skipReason();
   if (why) { t.skip(why); return; }
   const wp = testWp();
-  const plugins = JSON.parse(wp.check(['plugin', 'list', '--fields=name,status', '--format=json']));
-  const inactive = REQUIRED_PLUGINS.filter((p) => !plugins.some((x) => x.name === p && x.status === 'active'));
-  if (inactive.length) { t.skip(`setupSite would install/activate plugins (${inactive.join(', ')}); this test never writes to plugins`); return; }
+  // setupSite (ensurePlugins) installs/activates plugins and writes options unless they are already in their target
+  // state; this test never lets it write: skip instead.
+  const setupWhy = setupWriteReason(wp);
+  if (setupWhy) { t.skip(setupWhy); return; }
   try {
     const { launchBrowser } = await import(path.join(QA_DIR, 'browser.mjs'));
     await (await launchBrowser()).close();
@@ -250,6 +236,7 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   const before = siteFingerprint(wp);
   assert.equal(before.stylesheet, ORIGINAL_THEME, 'the active theme is the recorded original');
   const leftoversBefore = leftovers(wp);
+  const themeModsBefore = themeModsList(wp);
 
   const { shoot } = await import(path.join(QA_DIR, 'shoot.mjs'));
   const { findCuts } = await import(path.join(QA_DIR, 'segment.mjs'));
@@ -274,10 +261,13 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   let lapAt = Date.now();
   const lap = (name) => { report.timings[name] = Date.now() - lapAt; lapAt = Date.now(); };
 
+  // Every snapshot is taken before the Yoast crash file is written, so a crash file always means "options taken".
+  const tailwindBefore = snapshotTailwind(wp);
+  const wpOptionNames = [...themeOptionNames(), ...SETUP_OPTION_NAMES];
+  const wpOptionsBefore = snapshotWpOptions(wp, wpOptionNames);
   const yoastBefore = snapshotOptions(wp);
   const yoastRawBefore = { wpseo_titles: rawOption(wp, 'wpseo_titles'), wpseo_social: rawOption(wp, 'wpseo_social') };
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(yoastBefore, null, 2));
-  const tailwindBefore = snapshotTailwind(wp);
 
   let err;
   let pageId = null;
@@ -539,6 +529,15 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
         wp.check(['post', 'delete', String(id), '--force']);
       }
     });
+    // Attachments: the ones applySeo reported (not reused), plus the OG image by its exact unique name in case
+    // applySeo threw after the import (then it reported nothing).
+    step('find og attachment', () => {
+      const name = `pb-e2e-og-${hex}`;
+      for (const id of wp.check(['post', 'list', '--post_type=attachment', '--post_status=any', `--name=${name}`, '--format=ids']).trim().split(/\s+/).filter(Boolean)) {
+        if (wp.check(['post', 'get', id, '--field=post_name']).trim() !== name) continue;
+        if (!ownedMedia.some((m) => m.id === Number(id))) ownedMedia.push({ id: Number(id), reused: false, found: 'by-name' });
+      }
+    });
     for (const m of ownedMedia) {
       if (m.reused) continue; // an existing attachment the dedupe reused is not ours
       step(`delete attachment ${m.id}`, () => {
@@ -559,6 +558,10 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       if (deletable) fs.rmSync(real, { recursive: true, force: true });
       else problems.push(`left in place for inspection (not provably this run's fork, or the original theme is not active): ${themeDir}`);
     });
+    // Theme-switch and setup options back to their snapshot; then exactly the fork's theme_mods_ row goes.
+    const wpOptionsLeft = step('restore theme/setup options', () => restoreWpOptions(wp, wpOptionsBefore));
+    if (wpOptionsLeft?.length) problems.push(`options not restored: ${wpOptionsLeft.join(', ')}`);
+    const themeModsDropped = step('delete fork theme mods', () => (fs.existsSync(themeDir) ? false : dropThemeMods(wp, themeSlug)));
     const tailwindRestored = step('restore tailwind cache', () => restoreTailwind(wp, tailwindBefore));
     if (tailwindRestored === false) problems.push('Proto-Blocks Tailwind cache/option differ from the snapshot after restore');
     // Yoast options: always restore; keep the snapshot file if anything differs.
@@ -570,6 +573,9 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
     // Leftover check.
     const after = step('fingerprint site', () => siteFingerprint(wp));
     const left = step('leftovers', () => leftovers(wp));
+    const wpOptionsAfter = step('read options', () => snapshotWpOptions(wp, wpOptionNames));
+    const themeModsAfter = step('theme mods list', () => themeModsList(wp));
+    const leakedMods = step('leaked theme mods', () => leakedThemeMods(wp));
     report.leftovers = {
       activeTheme: after?.stylesheet ?? null,
       activeThemeRestored: after?.stylesheet === before.stylesheet && after?.template === before.template,
@@ -584,6 +590,13 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
       menusAfter: after ? { classic: after.menus, navigations: after.navigations, menu15: after.menu15 } : null,
       pluginsSame: after ? after.plugins === before.plugins : null,
       devThemeSame: after ? isDeepStrictEqual(after.devTheme, before.devTheme) : null,
+      themeModsDropped: themeModsDropped === true,
+      themeModsBefore,
+      themeModsAfter: themeModsAfter ?? null,
+      leakedThemeMods: leakedMods ?? null,
+      optionsSame: wpOptionsAfter ? isDeepStrictEqual(wpOptionsAfter, wpOptionsBefore) : null,
+      optionsBefore: wpOptionsBefore,
+      optionsAfter: wpOptionsAfter ?? null,
       problems,
     };
     report.finishedAt = new Date().toISOString();
@@ -607,4 +620,8 @@ test('e2e: design.html becomes a done landing page on the Local test site (scrip
   assert.equal(L.menusSame, true, 'menus unchanged');
   assert.equal(L.pluginsSame, true, 'plugins unchanged');
   assert.equal(L.devThemeSame, true, 'developer theme checkout untouched');
+  assert.equal(L.themeModsDropped, true, `theme_mods_${themeSlug} was created by the switch and deleted`);
+  assert.deepEqual(L.leakedThemeMods.filter((n) => n.startsWith('theme_mods_pb-e2e-')), [], 'no theme_mods_pb-e2e-* row left');
+  assert.deepEqual(L.themeModsAfter, L.themeModsBefore, 'theme_mods_* rows identical to before the run');
+  assert.equal(L.optionsSame, true, 'theme-switch and setup options identical to before the run');
 });

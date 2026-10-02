@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { itest, testWp, restoreTheme, ORIGINAL_THEME, PUBLIC, TEST_SITE } from './helpers.mjs';
+import { itest, testWp, restoreTheme, ORIGINAL_THEME, PUBLIC, TEST_SITE, takeThemeSnapshot, dropThemeMods, leakedThemeMods, setupWriteReason, snapshotOptions, SETUP_OPTION_NAMES } from './helpers.mjs';
 import { setupSite } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
 import { MANAGED_START } from '../../skills/protoblocks-site-builder/scripts/lib/theme-assets.mjs';
 import { loadState, statePath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
@@ -20,6 +20,10 @@ const gitStatus = (dir) => spawnSync('git', ['status', '--porcelain'], { cwd: di
 
 itest('setupSite forks, activates and records state; a second run reuses the fork', async (t) => {
   const wp = testWp();
+  // setupSite writes plugins/options unless they are already in their target state: skip rather than write.
+  const why = setupWriteReason(wp);
+  if (why) { t.skip(why); return; }
+  const optionsBefore = snapshotOptions(wp, SETUP_OPTION_NAMES);
   const slug = `pb-itest-setup-${crypto.randomBytes(4).toString('hex')}`;
   const themeDir = path.join(THEMES, slug);
   const origDir = path.join(THEMES, ORIGINAL_THEME);
@@ -32,6 +36,7 @@ itest('setupSite forks, activates and records state; a second run reuses the for
   fs.writeFileSync(path.join(REPO, 'tests', '.tmp', 'original-theme.txt'), before);
   let err;
   const problems = [];
+  takeThemeSnapshot(wp);
   try {
     const opts = { cwd: PUBLIC, site: TEST_SITE, name: 'PB Itest Setup', slug };
     const first = await setupSite(opts);
@@ -72,6 +77,8 @@ itest('setupSite forks, activates and records state; a second run reuses the for
       if (deletable) fs.rmSync(real, { recursive: true, force: true });
       else problems.push(`left in place for inspection (not provably this test's fork, or the original theme is not active): ${themeDir}`);
     }
+    // The switch created theme_mods_<slug>; delete exactly that row once the fork is gone.
+    if (!fs.existsSync(themeDir)) { try { dropThemeMods(wp, slug); } catch (e) { problems.push(`theme mods: ${e.message}`); } }
     t.diagnostic(`themes: ${fs.readdirSync(THEMES).join(', ')}`);
     t.diagnostic(`plugins before: ${pluginsBefore.trim()}`);
     t.diagnostic(`plugins after: ${wp.run(['plugin', 'list', '--fields=name,status,version', '--format=json']).stdout.trim()}`);
@@ -82,6 +89,8 @@ itest('setupSite forks, activates and records state; a second run reuses the for
   assert.equal(wp.check(['option', 'get', 'stylesheet']).trim(), before);
   assert.equal(fs.existsSync(themeDir), false);
   assert.deepEqual(fs.readdirSync(THEMES).filter((n) => n.startsWith('pb-itest-setup-')), []);
+  assert.deepEqual(leakedThemeMods(wp).filter((n) => n === `theme_mods_${slug}`), [], 'no theme_mods_ row left for the fork');
+  assert.deepEqual(snapshotOptions(wp, SETUP_OPTION_NAMES), optionsBefore, 'setupSite wrote no option');
   assert.equal(wp.check(['plugin', 'list', '--fields=name,status,version', '--format=json']), pluginsBefore, 'plugins unchanged');
   if (origGitBefore !== null) assert.equal(gitStatus(origDir), origGitBefore, 'developer theme checkout must be unmodified');
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { itest, testWp, PUBLIC, restoreTheme, ORIGINAL_THEME } from './helpers.mjs';
+import { itest, testWp, PUBLIC, restoreTheme, ORIGINAL_THEME, takeThemeSnapshot, dropThemeMods, leakedThemeMods } from './helpers.mjs';
 import { forkTheme, fetchThemeZip, forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 
 // SAFETY: creates only pb-itest-fork-<hex> (a fork) and pb-itest-foreign-<hex> (a foreign folder), restores
@@ -21,6 +21,7 @@ itest('forkTheme forks, activates, reuses (even with force), and refuses foreign
   const foreignDir = path.join(themesDir, foreign);
   const { zipFile, forkedFrom, cleanup } = await fetchThemeZip();
   let err;
+  takeThemeSnapshot(wp);
   try {
     const first = forkTheme({ wp, themesDir, name: 'PB Itest', slug, zipFile, forkedFrom });
     assert.equal(first.reused, false);
@@ -54,9 +55,12 @@ itest('forkTheme forks, activates, reuses (even with force), and refuses foreign
       if (ok) fs.rmSync(d, { recursive: true, force: true });
       else problems.push(`left in place for inspection: ${d}`);
     }
+    // The switch created theme_mods_<slug>; delete exactly that row (the foreign folder was never activated).
+    if (!fs.existsSync(dir)) { try { dropThemeMods(wp, slug); } catch (e) { problems.push(`theme mods: ${e.message}`); } }
     if (problems.length) console.error(problems.join('\n'));
     if (!err && problems.length) err = new Error(problems.join('\n'));
   }
   if (err) throw err;
   assert.deepEqual(fs.readdirSync(themesDir).filter((n) => n.includes(hex)), []);
+  assert.deepEqual(leakedThemeMods(wp).filter((n) => n.includes(hex)), [], 'no theme_mods_ row left for the fork');
 });
