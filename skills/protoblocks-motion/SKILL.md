@@ -7,9 +7,7 @@ description: Use when adding scroll/entrance animation to a verified Proto-Block
 
 Adds GSAP motion to a section that already passed visual QA. The theme runtime `pb-motion.js` does the work from `data-pb-*` attributes; sections only add attributes. Motion never changes the end state: the settled frame must equal the reduced-motion frame.
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
 `THEME` is the fork directory. Failures print `[CODE] message` on stderr (`EPROFILE`, `EMOTION`, `ENOSECTION`: `protoblocks-site-setup/references/errors.md`).
 

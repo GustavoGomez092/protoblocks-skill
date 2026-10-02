@@ -9,9 +9,7 @@ Builds one section of an approved plan, then verifies it against its design crop
 
 ## Scripts and state
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
 `THEME` is the fork directory (`<site.path>/wp-content/themes/<site.theme.slug>`). `WP` is the WP-CLI command preflight resolved (`report.wp`). Failures print `[CODE] message` on stderr; error codes for setup tools are in `protoblocks-site-setup/references/errors.md`.
 

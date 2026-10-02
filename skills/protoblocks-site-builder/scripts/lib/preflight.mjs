@@ -111,15 +111,15 @@ export function runPreflight({
     let pbInfo = null;
     if (pb.code === 0) { try { pbInfo = JSON.parse(pb.stdout); } catch { pbInfo = null; } }
     if (pb.code !== 0) {
-      add('proto-blocks', 'warn', 'Proto-Blocks is not installed', 'Run /protoblocks:setup-site (installs the latest release).');
+      add('proto-blocks', 'warn', 'Proto-Blocks is not installed', 'Run /protoblocks-skill:setup-site (installs the latest release).');
     } else if (!pbInfo || pbInfo.status !== 'active') {
-      add('proto-blocks', 'warn', `Proto-Blocks is ${pbInfo?.status ?? 'in an unknown state'}`, 'Run /protoblocks:setup-site (activates it).');
+      add('proto-blocks', 'warn', `Proto-Blocks is ${pbInfo?.status ?? 'in an unknown state'}`, 'Run /protoblocks-skill:setup-site (activates it).');
     } else {
       const ver = String(pbInfo.version ?? '').trim();
       if (!ver) {
-        add('proto-blocks', 'warn', 'Proto-Blocks active (version unknown)', 'Run /protoblocks:setup-site to ensure the latest version.');
+        add('proto-blocks', 'warn', 'Proto-Blocks active (version unknown)', 'Run /protoblocks-skill:setup-site to ensure the latest version.');
       } else if (compareVersions(ver, MIN_PROTO_BLOCKS) < 0) {
-        add('proto-blocks', 'warn', `Proto-Blocks ${ver} < ${MIN_PROTO_BLOCKS}`, 'Run /protoblocks:setup-site to update to the latest release.');
+        add('proto-blocks', 'warn', `Proto-Blocks ${ver} < ${MIN_PROTO_BLOCKS}`, 'Run /protoblocks-skill:setup-site to update to the latest release.');
       } else {
         add('proto-blocks', 'pass', `Proto-Blocks ${ver} active`);
       }
@@ -127,15 +127,15 @@ export function runPreflight({
 
     const yoast = wp('plugin', 'get', 'wordpress-seo', '--field=status');
     if (yoast.code === 0 && yoast.stdout.trim() === 'active') add('yoast', 'pass', 'Yoast SEO active');
-    else add('yoast', 'warn', 'Yoast SEO not active', 'Run /protoblocks:setup-site (installs Yoast SEO).');
+    else add('yoast', 'warn', 'Yoast SEO not active', 'Run /protoblocks-skill:setup-site (installs Yoast SEO).');
 
     const perma = wp('option', 'get', 'permalink_structure');
     if (perma.code === 0 && perma.stdout.trim()) add('permalinks', 'pass', perma.stdout.trim());
-    else add('permalinks', 'warn', 'Plain permalinks', 'Run /protoblocks:setup-site (sets /%postname%/).');
+    else add('permalinks', 'warn', 'Plain permalinks', 'Run /protoblocks-skill:setup-site (sets /%postname%/).');
 
     const bt = wp('eval', 'echo wp_is_block_theme() ? "1" : "0";');
     if (bt.code === 0 && bt.stdout.trim() === '1') add('block-theme', 'pass', 'Active theme is a block theme');
-    else add('block-theme', 'warn', 'Active theme is not a block theme', 'Run /protoblocks:setup-site (installs the proto-blocks-theme fork).');
+    else add('block-theme', 'warn', 'Active theme is not a block theme', 'Run /protoblocks-skill:setup-site (installs the proto-blocks-theme fork).');
   }
 
   // 5. Playwright (only needed for QA stages)

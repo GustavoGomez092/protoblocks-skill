@@ -5,13 +5,11 @@ description: Use when a Proto-Blocks page is complete and needs SEO, or when ask
 
 # Proto-Blocks SEO
 
-Writes a built page's SEO through Yoast, then audits the rendered page. Work only on the site preflight resolved. Every tool prints JSON on stdout; failures print `[CODE] message` on stderr.
+Writes a built page's SEO through Yoast, then audits the rendered page. Work only on the preflight site. Tools print JSON; failures print `[CODE] message` on stderr.
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
-`THEME` is the fork's directory (`protoblocks-site-setup` result). Look the page up by `slug` in state: `node "$PB/lib/state.mjs" get "$THEME" pages` (never assume a position). Its `url` is the live page; `postId` must exist (the page was built). Status `seo` means all sections are done or skipped.
+`THEME` is the fork directory. Look the page up by `slug` in state: `node "$PB/lib/state.mjs" get "$THEME" pages` (never assume a position). Its `url` is the live page; `postId` must exist (the page was built). Status `seo` means all sections are done or skipped.
 
 ## When
 
@@ -20,7 +18,7 @@ PB="${CLAUDE_SKILL_DIR}/../protoblocks-site-builder/scripts"
 
 ## Step 1 - Gather
 
-First read what Yoast already holds for the page (the developer may have filled it in wp-admin):
+First read what Yoast already holds for the page:
 
 ```bash
 node "$PB/lib/seo.mjs" get "$THEME" <page>

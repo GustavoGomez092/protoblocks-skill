@@ -247,3 +247,40 @@ test('section-loop and breakdown docs keep the stage-4 loop rules', () => {
   // overlay header guidance
   assert.match(bd, /Overlay header on a full-bleed photo hero[^\n]*mask the photo region[^\n]*context of the hero/);
 });
+
+// Cross-cutting path rules. Each Bash tool call starts a fresh shell, and ${CLAUDE_PLUGIN_ROOT} /
+// ${CLAUDE_SKILL_DIR} are substituted only in SKILL.md / command / agent bodies, never in references.
+test('references/*.md never rely on ${CLAUDE_SKILL_DIR} or ${CLAUDE_PLUGIN_ROOT}', () => {
+  for (const { file } of DOCS.filter((d) => d.file.includes(`${path.sep}references${path.sep}`))) {
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /\$\{CLAUDE_(SKILL_DIR|PLUGIN_ROOT)\}/, `${path.relative(ROOT, file)} uses a substituted variable`);
+  }
+});
+
+test('every SKILL.md that uses $PB states that shell variables do not persist', () => {
+  let n = 0;
+  for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join(SKILLS, s, 'SKILL.md')))) {
+    const text = fs.readFileSync(path.join(SKILLS, skill, 'SKILL.md'), 'utf8');
+    if (!text.includes('$PB')) continue;
+    n++;
+    assert.match(text, /Shell variables do not persist between Bash commands\. Start every command with `PB="[^"\n]+"; THEME="[^"\n]+";`/, `${skill}/SKILL.md must state the persistence rule`);
+  }
+  assert.ok(n >= 6, `expected >= 6 skills using $PB, found ${n}`);
+});
+
+function allTextFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === 'node_modules' ? [] : allTextFiles(p);
+    return /\.(md|mjs|js|json)$/.test(e.name) ? [p] : [];
+  });
+}
+
+test('no doc, command, agent or script uses the wrong /protoblocks: prefix (plugin name is protoblocks-skill)', () => {
+  for (const dir of ['skills', 'commands', 'agents']) {
+    for (const f of allTextFiles(path.join(ROOT, dir))) {
+      const m = fs.readFileSync(f, 'utf8').match(/\/protoblocks:[\w-]+/);
+      assert.equal(m, null, `${path.relative(ROOT, f)} uses ${m?.[0]}; use /protoblocks-skill:`);
+    }
+  }
+});

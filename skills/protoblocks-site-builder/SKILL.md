@@ -9,13 +9,11 @@ description: Use when turning a design (image, screenshot, PDF, Figma, Penpot, o
 
 Builds WordPress landing pages from a design, one Proto-Blocks section at a time, each checked against the design. It works on **local sites only** (Local by Flywheel, or a native local install). It forks the base theme `proto-blocks-theme` and uses the Proto-Blocks plugin (>= 2.10.1). Everything is resumable from the build state `build.json`: this skill says WHEN each step runs, the phase skills say HOW.
 
-Commands: `/protoblocks:setup-site`, `/protoblocks:build-page`, `/protoblocks:seo`, `/protoblocks:resume`.
+Commands: `/protoblocks-skill:setup-site`, `/protoblocks-skill:build-page`, `/protoblocks-skill:seo`, `/protoblocks-skill:resume`.
 
 ## Scripts
 
-```bash
-PB="${CLAUDE_SKILL_DIR}/scripts"
-```
+Shell variables do not persist between Bash commands. Start every command with `PB="${CLAUDE_SKILL_DIR}/scripts"; THEME="<fork dir>";` (literal paths), or use full paths.
 
 (Other agents: this skill's base directory + `/scripts`; plugin commands: `${CLAUDE_PLUGIN_ROOT}/skills/protoblocks-site-builder/scripts`.)
 
