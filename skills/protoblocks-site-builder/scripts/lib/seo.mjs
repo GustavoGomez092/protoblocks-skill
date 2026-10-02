@@ -163,6 +163,15 @@ export function applySeo(wp, themeDir, slug, seo, { forceOrganization = false, i
   return result;
 }
 
+const sameUrl = (a, b) => {
+  const n = (u) => { try { const x = new URL(String(u)); return `${x.origin}${x.pathname.replace(/\/+$/, '')}${x.search}`; } catch { return null; } };
+  return n(a) !== null && n(a) === n(b);
+};
+
+/**
+ * Records a seo-audit result. The audit must be of this page's URL, with the applied focus keyword, and newer than
+ * the last apply (EAUDITSTALE otherwise); only a page in status `seo` is promoted to `done` (ESTATUS otherwise).
+ */
 export function recordAudit(themeDir, slug, auditFile) {
   const file = path.resolve(auditFile);
   let audit;
@@ -172,7 +181,20 @@ export function recordAudit(themeDir, slug, auditFile) {
   updateState(themeDir, (s) => {
     const p = s.pages.find((x) => x.slug === slug);
     if (!p) throw fail('ENOPAGE', `No page "${slug}" in state.`);
-    p.seo = { ...(p.seo ?? {}), audit: { pass: audit.pass, file, at: new Date().toISOString() } };
+    if (p.status !== 'seo') {
+      throw fail('ESTATUS', `Page "${slug}" is "${p.status}", not "seo": ${p.status === 'done' ? 'it already has a recorded audit; re-apply its SEO (seo.mjs apply) to audit it again' : 'it is not ready for an SEO audit until every section is done or skipped and its SEO is applied'}.`);
+    }
+    const applied = p.seo?.applied;
+    const kw = p.seo?.focusKeyword?.value;
+    if (!applied || !kw) throw fail('EAUDITSTALE', `Page "${slug}" has no applied SEO; run seo.mjs apply first, then audit.`);
+    const rerun = 'Re-run seo-audit.mjs for this page after the last apply, then record that file.';
+    if (audit.focusKeyword !== kw) throw fail('EAUDITSTALE', `${file} audited keyword "${audit.focusKeyword ?? ''}", but the applied focus keyword is "${kw}". ${rerun}`);
+    if (!p.url) throw fail('EAUDITSTALE', `Page "${slug}" has no url in state; build it first (page.mjs build).`);
+    if (!sameUrl(audit.url, p.url)) throw fail('EAUDITSTALE', `${file} audited url ${audit.url ?? '(none)'}, but the page is ${p.url}. ${rerun}`);
+    const at = Date.parse(audit.at);
+    if (typeof audit.at !== 'string' || Number.isNaN(at)) throw fail('EAUDITSTALE', `${file} has no valid "at" time; it was not written by this seo-audit.mjs. ${rerun}`);
+    if (at <= Date.parse(applied)) throw fail('EAUDITSTALE', `${file} was audited at ${audit.at}, before the last SEO apply at ${applied}. ${rerun}`);
+    p.seo = { ...p.seo, audit: { pass: audit.pass, file, at: audit.at } };
     if (audit.pass) p.status = 'done';
     status = p.status;
   });

@@ -62,13 +62,7 @@ node "$PB/lib/seo.mjs" apply "$THEME" <page> seo.json [--force-organization]
 
 `apply` validates first. `[ESEO]` lists every problem: fix the values and re-run (nothing was written). Rules: the title rendered with the site's real name and Yoast separator is at most 60 chars; keyword is 1-4 lowercase words without `%`, `<`, `>`; description is 120-156 chars with no newline; schema page type is a supported one; organization socials are https. Missing files (`[EFILE]`) and a missing page or postId (`[ENOPAGE]`) also stop it before any import.
 
-Result fields to read and relay:
-
-- `jsonld`: `written`, `unsupported` (theme lacks the extension), `none` (no schema leaf; page JSON-LD untouched) or `cleared` (a schema applied earlier was dropped from `seo.json`, so it was removed).
-- `organization`: `set`, `kept` or `skipped` (no organization leaf).
-- `media`: imported OG image and logo `{role, id, reused}`; `index`: `ok`, `skipped` or `failed: ...`; `warnings`: for example site context unavailable.
-
-Organization policy: Yoast's site Organization is written only when the site is an unconfigured Company (no company name). A Person site or an existing company is `kept`. Report `organization: kept` to the developer with what Yoast holds; never pass `--force-organization` unless they explicitly ask for the overwrite (it replaces name, logo and socials).
+Read and relay the result fields (`jsonld`, `organization`, `media`, `index`, `warnings`): meanings and the Organization policy are in `references/apply.md`. Never pass `--force-organization` unless the developer explicitly asks for the overwrite.
 
 ## Step 6 - Audit and fix
 
@@ -76,8 +70,9 @@ Organization policy: Yoast's site Organization is written only when the site is 
 node "$PB/qa/seo-audit.mjs" --url <url> --keyword "<keyword>" --out "$THEME/.protoblocks/artifacts/<page>/seo-audit.json"
 ```
 
-`pass` means no `fail` check; `warn` checks are reported, not blocking. Each failing check has a `fix`.
+`pass` means no `fail` check; `warn` checks are reported, not blocking. Each failing check has a `fix`. Exit `1` means a check failed (file written); exit `2` means the audit could not run (`[EHTTP]`: the page answered HTTP 400+; no file). Codes and fields: `references/apply.md`.
 
+- `robots-noindex` (warn) or a `canonical` warning naming noindex: "Discourage search engines" is on or the page is noindex. Tell the developer; never toggle it yourself.
 - Meta checks (`kw-title`, `kw-description`, `title-length`, `description-length`, `og-tags`, `og-image`, `canonical`, `jsonld-parse`, `jsonld-required`): edit `seo.json` and re-apply.
 - Content checks (`h1-count`, `heading-order`, `kw-h1`, `kw-first-paragraph`, `img-alt`; warn-only `kw-slug`, `internal-link`): change the section's attrs or template through the `protoblocks-section-loop` skill's Build and Verify steps, rebuild with `node "$PB/lib/page.mjs" build "$THEME" <page>`, and re-run visual QA for every section whose markup changed (`qa-input.mjs prepare`, the visual-qa agent, `qa-input.mjs record`). Do not duplicate those steps here.
 - Slug changes (`kw-slug`) only with the developer's OK.
@@ -90,7 +85,7 @@ Repeat up to 3 rounds, then report what remains.
 node "$PB/lib/seo.mjs" record-audit "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/seo-audit.json"
 ```
 
-Prints `{pass, status}`; a passing audit sets the page `done`.
+Prints `{pass, status}`; a passing audit sets a page in status `seo` to `done`. `[EAUDITSTALE]`: the audit is for another keyword or URL, or older than the last apply; re-run Step 6 and record that file. `[ESTATUS]`: the page is not in status `seo`. Details: `references/apply.md`.
 
 ## Step 8 - Report
 
@@ -107,4 +102,5 @@ A table: field | value | provided or inferred | why. Then the audit summary with
 ## References
 
 - `references/inference.md` - `seo.json` shape, inference formulas, worked example.
+- `references/apply.md` - apply result fields, Organization policy, audit exit codes and record-audit errors.
 - `references/schema.md` - how the theme merges JSON-LD, recipes per section type.

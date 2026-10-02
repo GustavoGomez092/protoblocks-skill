@@ -193,20 +193,25 @@ test('applySeo: forceOrganization is passed through only when set', () => {
 
 // ---- recordAudit ----
 const auditFile = (obj) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pb-audit-')), 'audit.json'); fs.writeFileSync(f, typeof obj === 'string' ? obj : JSON.stringify(obj)); return f; };
+const APPLIED = '2026-10-01T10:00:00.000Z';
+const PAGE_URL = 'http://x.test/home/';
+const seoPage = (extra = {}) => [{ slug: 'home', title: 'Home', status: 'seo', postId: 9, url: PAGE_URL, sections: [], seo: { focusKeyword: seo.focusKeyword, applied: APPLIED }, ...extra }];
+const audit = (extra = {}) => ({ pass: true, checks: [], url: PAGE_URL, focusKeyword: 'emergency plumber', at: '2026-10-01T10:05:00.000Z', ...extra });
 
 test('recordAudit: a passing audit sets the page to done and stores the absolute path', () => {
-  const theme = project();
-  const f = auditFile({ pass: true, checks: [] });
+  const theme = project(seoPage());
+  const f = auditFile(audit());
   assert.deepEqual(recordAudit(theme, 'home', f), { pass: true, status: 'done' });
   const p = loadState(theme).pages[0];
   assert.equal(p.status, 'done');
   assert.equal(p.seo.audit.pass, true);
   assert.equal(p.seo.audit.file, path.resolve(f));
+  assert.equal(p.seo.audit.at, '2026-10-01T10:05:00.000Z', 'the audit time, not the record time');
 });
 
 test('recordAudit: a failing audit keeps the status and stores pass:false; relative paths become absolute', () => {
-  const theme = project();
-  const f = auditFile({ pass: false, checks: [] });
+  const theme = project(seoPage());
+  const f = auditFile(audit({ pass: false }));
   const rel = path.relative(process.cwd(), f);
   assert.deepEqual(recordAudit(theme, 'home', rel), { pass: false, status: 'seo' });
   const p = loadState(theme).pages[0];
@@ -216,21 +221,58 @@ test('recordAudit: a failing audit keeps the status and stores pass:false; relat
 });
 
 test('recordAudit: keeps existing seo fields', () => {
-  const theme = project([{ slug: 'home', status: 'seo', postId: 9, sections: [], seo: { focusKeyword: seo.focusKeyword } }]);
-  recordAudit(theme, 'home', auditFile({ pass: true }));
+  const theme = project(seoPage());
+  recordAudit(theme, 'home', auditFile(audit()));
   assert.equal(loadState(theme).pages[0].seo.focusKeyword.value, 'emergency plumber');
+  assert.equal(loadState(theme).pages[0].seo.applied, APPLIED);
 });
 
 test('recordAudit: missing page is ENOPAGE; unreadable or invalid audit is EINPUT and changes nothing', () => {
-  const theme = project();
-  assert.throws(() => recordAudit(theme, 'nope', auditFile({ pass: true })), code('ENOPAGE'));
+  const theme = project(seoPage());
+  assert.throws(() => recordAudit(theme, 'nope', auditFile(audit())), code('ENOPAGE'));
   assert.throws(() => recordAudit(theme, 'home', path.join(os.tmpdir(), 'pb-no-such-audit.json')), code('EINPUT'));
   assert.throws(() => recordAudit(theme, 'home', auditFile('{not json')), code('EINPUT'));
   assert.throws(() => recordAudit(theme, 'home', auditFile('[1,2]')), code('EINPUT'));
   assert.throws(() => recordAudit(theme, 'home', auditFile({ checks: [] })), code('EINPUT'));
   const p = loadState(theme).pages[0];
   assert.equal(p.status, 'seo');
-  assert.equal(p.seo, undefined);
+  assert.equal(p.seo.audit, undefined);
+});
+
+test('recordAudit: an audit of another keyword, another URL, or from before the last apply is EAUDITSTALE and changes nothing', () => {
+  const theme = project(seoPage());
+  const stale = (extra, re) => assert.throws(() => recordAudit(theme, 'home', auditFile(audit(extra))), (e) => e.code === 'EAUDITSTALE' && re.test(e.message), JSON.stringify(extra));
+  stale({ focusKeyword: 'plumber' }, /keyword "plumber".*"emergency plumber"/);
+  stale({ focusKeyword: undefined }, /keyword/);
+  stale({ url: 'http://x.test/other/' }, /http:\/\/x\.test\/other\/.*http:\/\/x\.test\/home\//);
+  stale({ url: undefined }, /url/i);
+  stale({ at: '2026-10-01T09:59:59.000Z' }, /before.*apply/);
+  stale({ at: APPLIED }, /before.*apply/);
+  stale({ at: undefined }, /at/);
+  stale({ at: 'yesterday' }, /at/);
+  const p = loadState(theme).pages[0];
+  assert.equal(p.status, 'seo');
+  assert.equal(p.seo.audit, undefined);
+});
+
+test('recordAudit: the page URL matches with or without a trailing slash', () => {
+  const theme = project(seoPage());
+  assert.equal(recordAudit(theme, 'home', auditFile(audit({ url: 'http://x.test/home' }))).status, 'done');
+});
+
+test('recordAudit: SEO never applied is EAUDITSTALE', () => {
+  const theme = project([{ slug: 'home', title: 'Home', status: 'seo', postId: 9, url: PAGE_URL, sections: [] }]);
+  assert.throws(() => recordAudit(theme, 'home', auditFile(audit())), (e) => e.code === 'EAUDITSTALE' && /seo\.mjs apply/.test(e.message));
+});
+
+test('recordAudit: only a page in status seo is promoted; any other status is ESTATUS and changes nothing', () => {
+  for (const status of ['planning', 'building', 'done']) {
+    const theme = project(seoPage({ status }));
+    assert.throws(() => recordAudit(theme, 'home', auditFile(audit())), (e) => e.code === 'ESTATUS' && e.message.includes(`"${status}"`), status);
+    const p = loadState(theme).pages[0];
+    assert.equal(p.status, status);
+    assert.equal(p.seo.audit, undefined);
+  }
 });
 
 // ---- CLI ----
@@ -251,11 +293,11 @@ test('CLI: unparseable seo.json is a one-line EINPUT with exit 1', () => {
 });
 
 test('CLI: record-audit works end to end', () => {
-  const theme = project();
-  const r = cli('record-audit', theme, 'home', auditFile({ pass: true }));
+  const theme = project(seoPage());
+  const r = cli('record-audit', theme, 'home', auditFile(audit()));
   assert.equal(r.status, 0);
   assert.equal(JSON.parse(r.stdout).status, 'done');
-  const bad = cli('record-audit', theme, 'nope', auditFile({ pass: true }));
+  const bad = cli('record-audit', theme, 'nope', auditFile(audit()));
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /^\[ENOPAGE\]/);
 });
