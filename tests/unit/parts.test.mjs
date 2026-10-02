@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -167,4 +168,14 @@ test('recovery commands use the preflight WP-CLI path, shell-quoted', async () =
   const wp = fakeWp();
   assert.throws(() => removeOverride(wp, 'pb-itest', 'header', { wpCmd: wrapper }), (e) => e.code === 'ECONFIRM' && e.message.includes(`${wrapper} eval 'wp_untrash_post(5);'`));
   assert.deepEqual(removeOverride(fakeWp(), 'pb-itest', 'header', { confirm: true, expectId: 5, wpCmd: wrapper }).recovery, [recoveryCommand(5, wrapper)]);
+});
+
+test('parts CLI prints usage and exits 64 on missing or unknown arguments', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs');
+  for (const args of [[], ['__pbx__', '/tmp'], ['write', '/tmp'], ['remove-override', '/tmp']]) {
+    const r = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 64, args.join(' '));
+    assert.match(r.stderr, /Usage: node parts\.mjs/);
+  }
 });

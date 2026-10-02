@@ -88,17 +88,21 @@ const USAGE = 'Usage: node parts.mjs write <themeDir> <slug> <markupFile> | over
 
 function main(argv) {
   const [cmd, themeDir, slug, file] = argv;
-  const theme = themeDir ? path.basename(path.resolve(themeDir)) : '';
-  const out = (v) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
-  if (!['write', 'overrides', 'remove-override'].includes(cmd) || !themeDir) {
+  const usage = () => {
     process.stderr.write(USAGE);
     process.exit(64);
-  }
+  };
+  if (!['write', 'overrides', 'remove-override'].includes(cmd) || !themeDir) return usage();
+  if (cmd === 'write' && (!slug || !file)) return usage();
+  if (cmd === 'remove-override' && !slug) return usage();
+  const theme = themeDir ? path.basename(path.resolve(themeDir)) : '';
+  const out = (v) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
   const rt = loadThemeRuntime(themeDir);
   if (cmd === 'write') return out({ written: writePart(themeDir, slug, fs.readFileSync(file, 'utf8')) });
   const wp = createWp(rt);
   if (cmd === 'overrides') return out(listOverrides(wp, theme));
-  return out(removeOverride(wp, theme, slug, { confirm: argv.includes('--confirm'), expectId: idArg(argv), wpCmd: wpShellCommand(rt) }));
+  if (cmd === 'remove-override') return out(removeOverride(wp, theme, slug, { confirm: argv.includes('--confirm'), expectId: idArg(argv), wpCmd: wpShellCommand(rt) }));
+  return usage();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
