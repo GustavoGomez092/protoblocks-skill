@@ -4,3 +4,4 @@ node_modules/
 tests/.site/
 tests/.tmp/
 skills/protoblocks-site-builder/scripts/node_modules/
+skills/protoblocks-site-builder/scripts/qa/node_modules/

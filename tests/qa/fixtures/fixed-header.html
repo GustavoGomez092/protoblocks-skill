@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>fixed header</title>
+<style>
+  body { margin: 0; }
+  #pb-header { position: fixed; top: 0; left: 0; right: 0; height: 80px; background: rgb(220, 38, 38); z-index: 10; }
+  #subnav { position: sticky; top: 80px; height: 40px; background: rgb(22, 163, 74); z-index: 9; }
+  .intro { height: 600px; background: #ffffff; }
+  #pb-tall { height: 1400px; background: rgb(30, 58, 138); }
+  .after { height: 600px; background: #ffffff; }
+</style></head>
+<body>
+  <header id="pb-header"></header>
+  <div class="intro"></div>
+  <nav id="subnav"></nav>
+  <section id="pb-tall"></section>
+  <div class="after"></div>
+</body></html>
