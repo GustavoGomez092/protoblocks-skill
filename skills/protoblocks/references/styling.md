@@ -43,6 +43,31 @@ How it works — the plugin has **two compile engines, auto-selected by environm
 - **Browser engine** — compiles Tailwind v4 **in the browser** (in wp-admin), then saves the CSS via PHP. **No binary, no `exec()`.** Used automatically on hosts that disable shell functions — **WP Engine and most managed WordPress hosts**. This is why Tailwind "just works" there with no setup.
 - The engine is chosen by a setting (`engine`: `auto` (default — picks CLI when a shell exists, else browser), `cli`, or `browser`). Output is identical either way (both produce the same scoped, flattened CSS).
 - A scanner reads all blocks' templates for Tailwind classes, compiles CSS, and caches the output to `wp-content/uploads/proto-blocks/tailwind/`.
+
+### The scanner reads only the block's own template file
+
+It reads `<block>/template.php` and `<block>/<block-name>.php`. It does **not**
+walk subdirectories. A class written in an included partial — `parts/card.php`,
+`includes/row.php` — is never compiled, so the element silently renders at the
+browser's default instead of the size you wrote. Nothing errors: the PHP
+includes fine, the markup is correct, and only the styling is missing, which
+makes it an expensive bug to chase.
+
+So when two arrangements in one template share markup, keep it DRY with a
+**closure defined in `template.php`**, not an include:
+
+```php
+$card = static function ( array $item ): void { ?>
+    <h3 class="text-[22px] font-bold leading-[1.25]"><?php echo esc_html( $item['title'] ?? '' ); ?></h3>
+<?php };
+
+// then, in each arrangement:
+<?php $card( $item ); ?>
+```
+
+The markup stays in one place and every class stays where the scanner can see
+it. Use a closure rather than a named function: two instances of the block on
+one page would redeclare a named one.
 - The compiled CSS is **scoped to `.proto-blocks-scope`** so block utilities don't leak into the rest of the site. Selectors are rewritten (e.g. `.rounded-full` → `.proto-blocks-scope.rounded-full, .proto-blocks-scope .rounded-full`). Global at-rules (`:root`, keyframes, font-face, etc.) are not scoped.
 
 ### Two compilation modes (dev vs prod)
