@@ -213,7 +213,75 @@ but the stored value is always the bare key. A key whose post was deleted stays
 visible as a bare token so it can be removed, and simply yields no row in the
 query.
 
-### Gallery
+### Repeater (sidebar)
+
+A repeatable group of controls in the **sidebar**, for repeated *configuration*
+rather than repeated content.
+
+Proto-Blocks has two repeaters and they are not interchangeable. The repeater
+**field** renders its editing UI into the canvas, beside the thing being edited,
+which is right when the repeated thing is content the visitor reads — milestones,
+cards, a row of logos. The repeater **control** is for a set of tabs, a list of
+breakpoints, a table pasted as CSV: things the template consumes rather than
+prints, which have no natural place on the canvas. Put those in a field and the
+block's markup carries editing furniture — or the value cannot be edited at all,
+because a field needs an element carrying its `data-proto-field` and a parsed
+value has none.
+
+```json
+"tabs": {
+  "type": "repeater",
+  "label": "Tabs",
+  "itemLabel": "label",
+  "min": 1,
+  "max": 12,
+  "fields": {
+    "label":   { "type": "text", "label": "Tab name" },
+    "csv":     { "type": "textarea", "label": "Table (CSV)" },
+    "csvFile": { "type": "file", "label": "Or a CSV file", "allowedTypes": ["text/csv"] }
+  }
+}
+```
+
+`fields` is required. `itemLabel` names the field that titles a row (defaults to
+the first). `min` blocks removal below it; `max` stops adding.
+
+The value is an array of flat objects — no item ids, the order is the identity:
+
+```php
+foreach (($attributes['tabs'] ?? []) as $tab) {
+    $label = (string) ($tab['label'] ?? '');
+}
+```
+
+A row may hold any control type except `repeater` and `gallery`. Rows do not
+nest; validation rejects it rather than rendering something unusable.
+
+## File
+
+Any attachment, not only an image or a video. `image` and `video` filter the
+media library to their own kind, which leaves no way to pick a CSV, a PDF, a
+font or a caption track.
+
+```json
+"data": { "type": "file", "label": "Data file", "allowedTypes": ["text/csv"] }
+```
+
+Stores `{ id, url, filename, mime }`; empty array when unset.
+
+**Read by id, never by fetching the URL** — otherwise rendering a page depends on
+a network round trip, and on whatever host the URL names after an edit:
+
+```php
+$id   = (int) ($attributes['data']['id'] ?? 0);
+$path = $id ? get_attached_file($id) : '';
+$body = $path && is_readable($path) ? (string) file_get_contents($path) : '';
+```
+
+Cache a file that is parsed on every render, keyed on its modified time so a
+re-upload invalidates it: `'blk_' . $id . '_' . get_post_modified_time('U', true, $id)`.
+
+## Gallery
 
 `gallery` stores an **ordered list of images**: the multiple-value counterpart
 to the `image` control, storing that same `{ id, url, alt }` shape per item.

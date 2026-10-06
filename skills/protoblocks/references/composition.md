@@ -92,3 +92,23 @@ You probably have too many fields if:
 - A repeater item's only sub-field is an **image** → that is a `gallery` control, not a repeater. The repeater's add/remove/drag chrome renders *inside* the block, so the canvas shows furniture the page does not; any layout derived from the item count or each item's position then cannot be judged in the editor at all.
 
 Fewer, richer regions = a block that's easier to author, restyle, and evolve.
+
+## Repeated things: field or control?
+
+Both exist. They are not interchangeable, and the choice is about who looks at
+the thing being edited.
+
+**Repeater field** — repeated *content* the visitor reads: milestones, cards, a
+row of logos, testimonials. Its editing UI renders into the canvas, beside what
+it changes, which is where an author wants it.
+
+**Repeater control** — repeated *configuration*: a set of tabs, a list of
+breakpoints, a table pasted as CSV, a mapping the template looks values up in.
+It lives in the sidebar.
+
+The test is whether the value is **printed or consumed**. Printed values belong
+in a field: there is an element on the page to bind to and an author edits it in
+place. Consumed values — parsed, passed to a `style` attribute, used to select
+an icon — have no element at all, so a field gives them nowhere to be edited and
+the block ships unauthorable. See the authoring-workflow reference for the check
+that catches this.
