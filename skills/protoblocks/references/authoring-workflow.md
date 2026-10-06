@@ -96,6 +96,56 @@ wp proto-blocks cache clear          # after template edits
 ```
 Then check the block in the **editor** (fields editable? controls update the preview?) and on the **frontend** (renders correctly? interactivity works?).
 
+### Every declared field must be reachable
+
+A field is only editable if some element carries its `data-proto-field`. Checking
+that each element you wrote has one is not the same thing, and misses the case
+that actually bites: a field whose value is **not displayed** has no element to
+carry it, so nothing in the front-end markup will ever be its input.
+
+That is any field the template consumes rather than prints — a CSV that is
+parsed into a table, a colour fed to a `style` attribute, a key that selects an
+icon, an identifier for an embed. The block renders perfectly and cannot be
+authored at all.
+
+Run this in the block's folder before you call it done:
+
+```bash
+python3 - <<'CHECK'
+import json, re
+b = json.load(open('block.json'))
+pb = b.get('protoBlocks', {})
+fields = dict(pb.get('fields') or {})
+names = set(fields)
+for name, f in fields.items():                      # repeater subfields count too
+    if f.get('type') == 'repeater':
+        names |= set((f.get('fields') or {}).keys())
+tpl = open('template.php').read()
+bound = set(re.findall(r'data-proto-field="([^"]+)"', tpl))
+bound |= set(re.findall(r'data-proto-repeater="([^"]+)"', tpl))
+bound |= {n for n, f in fields.items() if f.get('type') in ('inner-blocks', 'innerblocks')
+          and 'data-proto-inner-blocks' in tpl}
+missing = sorted(names - bound)
+print('unbound fields:', ', '.join(missing) if missing else 'none')
+CHECK
+```
+
+Anything listed cannot be edited. Give it an **editor-only authoring region**:
+render the bound element behind `$is_preview`, labelled, with the hint the
+author needs, and keep it out of the front end.
+
+```php
+<?php if ($is_preview) : ?>
+    <div class="my-block__authoring">
+        <label>Table (CSV)</label>
+        <div data-proto-field="csv"><?php echo wp_kses_post($csv); ?></div>
+    </div>
+<?php endif; ?>
+```
+
+Then open the editor and type into it. A block that renders and cannot be
+authored is not finished.
+
 ## Quick-start checklist
 
 - [ ] Folder under `theme/proto-blocks/<slug>/`, lowercase-hyphen name
@@ -106,4 +156,5 @@ Then check the block in the **editor** (fields editable? controls update the pre
 - [ ] Repeaters: `data-proto-repeater` + `data-proto-repeater-item` + preview seeding
 - [ ] Inner blocks: `"inner-blocks"` + `data-proto-inner-blocks` + `$innerBlocksContent`
 - [ ] Styling chosen (vanilla `style.css` or `useTailwind: true`)
-- [ ] Validated, cache cleared, tested in editor + frontend
+- [ ] Every field in `block.json` is bound somewhere (run the unbound-fields check); a field the template parses rather than prints gets an editor-only authoring region
+- [ ] Validated, cache cleared, tested in editor + frontend — including typing into every field

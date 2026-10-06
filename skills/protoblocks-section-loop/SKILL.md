@@ -43,15 +43,16 @@ Details and checklist: `references/build.md`.
    - `reuse`: no block changes; set attrs only.
 3. Assets cropped from the design: `node "$PB/lib/media.mjs" import "$THEME" <file> --alt "<text>"`. Alt is required. Put the printed `attr` object into `section.attrs`. A re-import reuses the attachment and keeps its existing alt (`altKept: true`, `attr.alt` is the kept text); add `--force-alt` only when the developer wants it replaced.
 4. Write `block`, `attrs` and `inner` with `state.mjs set` (recipe in `references/build.md`).
-5. Gates until `ok: true`; a failing step names the cause. They read `block` and `attrs` from state (never hand-copy JSON into the shell):
+5. Before the gates, confirm the block can be **authored**, not only rendered: every field in `block.json` must be bound in `template.php`, including any the template parses rather than prints, which have no element in the rendered markup and so no input at all. `protoblocks` `references/authoring-workflow.md` has the check; unbound fields get an editor-only authoring region behind `$is_preview`.
+6. Gates until `ok: true`; a failing step names the cause. They read `block` and `attrs` from state (never hand-copy JSON into the shell):
    `node "$PB/lib/gates.mjs" "$THEME" --from-state <page> <n>`
-6. Assemble the page (creates it on first run, then rewrites it):
+7. Assemble the page (creates it on first run, then rewrites it):
    `node "$PB/lib/page.mjs" build "$THEME" <page>`
    `EEDITED`, `ESLUGTAKEN`, `EFOREIGN` mean the builder refused to overwrite something. Show the developer the message, ask, and only with their OK re-run with `--force` (it backs up first). `ENOTPAGE` (the stored `postId` is not a page) is not fixable with `--force`: tell the developer, then clear `pages.<i>.postId` to `null` (by-slug recipe in `references/build.md`) and build again. `ESTALE`: the page changed during the build; just re-run the build, never `--force`. `ENOPLAN`: no approved plan; go back to the plan gate. Relay `warnings` (kept developer title/slug/status).
-7. Record the block in the library:
+8. Record the block in the library:
    `node "$PB/lib/library.mjs" record "$THEME" <block> <page> --purpose "<one line>" [--variants a,b]` (variants are added to the recorded ones)
-8. `extend`, or any edit to a block whose `usedOn` (`library.mjs list`) lists other pages: `node "$PB/lib/regress.mjs" "$THEME" <block>`. `checked: 0` with a `note` means no baselines yet (fine). Failures: fix the block until earlier pages are unchanged.
-9. Commit in the theme fork (skip if nothing changed):
+9. `extend`, or any edit to a block whose `usedOn` (`library.mjs list`) lists other pages: `node "$PB/lib/regress.mjs" "$THEME" <block>`. `checked: 0` with a `note` means no baselines yet (fine). Failures: fix the block until earlier pages are unchanged.
+10. Commit in the theme fork (skip if nothing changed):
    `git -C "$THEME" add -A && git -C "$THEME" commit -m "feat(block): <block>"`
 
 ## Verify

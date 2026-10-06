@@ -138,6 +138,7 @@ wp proto-blocks export <name> --output=<path>
 1. **Always escape output**: `esc_html()`, `esc_attr()`, `esc_url()`, `wp_kses_post()` (for wysiwyg/HTML).
 2. **Always provide defaults**: `$attributes['x'] ?? ''` — attributes can be missing.
 3. **Mark editable elements even when empty.** A field is only editable in the editor if its element carries `data-proto-field`. Render the element (with the attribute) even when the value is empty, or it can't be edited.
+3b. **Every declared field must be bound somewhere — including the ones you never print.** A field the template *consumes* rather than displays (a CSV parsed into a table, a colour fed to a `style` attribute, a key that picks an icon) has no element in the front-end markup, so nothing will ever be its input: the block renders perfectly and cannot be authored. Give it an editor-only authoring region behind `$is_preview`. `references/authoring-workflow.md` has a check that lists unbound fields.
 4. **`data-proto-repeater` name must match the repeater field name** in `block.json`.
 5. **Inner blocks:** type must be hyphenated **`"inner-blocks"`** (plain `innerblocks` is silently skipped), bind with **`data-proto-inner-blocks`**, echo **`$innerBlocksContent ?? ''`** (not `$content`), and only **one per block**.
 6. **`select` and `multiselect` controls must define `options`** (use `{ "key", "label" }` pairs) **or** an `optionsSource` (server-loaded options — see `references/controls.md`). Either type with neither fails validation.
@@ -169,6 +170,7 @@ Load these as needed — do not read all of them up front.
 |---------|-------|-----|
 | Block missing from inserter | No `block.json` or no template file; folder not under a discovered path | Ensure `block.json` + `template.php` in `theme/proto-blocks/{name}/` |
 | Field not editable in editor | Element lacks `data-proto-field`, or element not rendered when value empty | Always render the element with the attribute (see Iron Rule 3) |
+| A field has **no interface at all**, and the sidebar shows only the controls | The field's value is parsed or passed through rather than printed, so no element carries its `data-proto-field` | Add an editor-only authoring region behind `$is_preview` (Iron Rule 3b); run the unbound-fields check in `references/authoring-workflow.md` |
 | Template edits don't show | Template output cached | `wp proto-blocks cache clear` |
 | Repeater items don't render/add | Missing `data-proto-repeater` / `data-proto-repeater-item`, or name mismatch | Match container `data-proto-repeater="x"` to field `x`; one `data-proto-repeater-item` per item |
 | Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
