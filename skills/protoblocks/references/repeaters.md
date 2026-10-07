@@ -65,6 +65,11 @@ foreach ($attributes['items'] as $item) {
 Focusing a row opens a panel at the top of the block's sidebar, titled with the
 row's `itemLabel`. The block's own settings stay below it.
 
+Two ways back out, because focusing a row is easy to do by accident: the **"Back
+to block settings"** link at the top of the panel, or **clicking the block
+anywhere that is not a row** (its padding, its heading, the space around the
+list). Clicking a different row swaps the panel rather than closing it.
+
 **A repeater inside `itemControls` is rejected** — rows do not nest. Item
 controls are validated as controls and reported by path (`items.tone`).
 
