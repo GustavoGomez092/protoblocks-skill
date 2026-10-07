@@ -112,3 +112,28 @@ place. Consumed values — parsed, passed to a `style` attribute, used to select
 an icon — have no element at all, so a field gives them nowhere to be edited and
 the block ships unauthorable. See the authoring-workflow reference for the check
 that catches this.
+
+
+## A repeater row's two halves
+
+A row is not all one thing. What it **prints** is a field, edited on the canvas
+beside what it changes. What it **consumes** — a phone number read into a `data-`
+attribute for a dialog, a flag that picks an icon, a colour passed to a `style` —
+is an `itemControl`, edited in the sidebar when that row is focused.
+
+```jsonc
+"reps": {
+  "type": "repeater",
+  "itemLabel": "name",
+  "fields":       { "logo": …, "name": …, "territory": … },
+  "itemControls": { "phone": …, "email": …, "address": … }
+}
+```
+
+The test is the same one as everywhere else in this file: **if removing the value
+changes nothing visible in the row's markup, it is not content.** Putting it in
+`fields` anyway forces you to render it somewhere it does not belong purely to
+make it editable, and the canvas stops matching the frame.
+
+Both halves write to the same attribute, so the template reads a row unchanged.
+Requires plugin 2.13.0+. Detail in `references/repeaters.md`.

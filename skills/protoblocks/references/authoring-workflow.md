@@ -158,3 +158,24 @@ authored is not finished.
 - [ ] Styling chosen (vanilla `style.css` or `useTailwind: true`)
 - [ ] Every field in `block.json` is bound somewhere (run the unbound-fields check); a field the template parses rather than prints gets an editor-only authoring region
 - [ ] Validated, cache cleared, tested in editor + frontend — including typing into every field
+
+
+### Where an unbound field belongs
+
+The check lists declared fields that nothing binds. A name in that list cannot be
+edited by anyone. It does **not** mean "add markup" — it means the value has the
+wrong home:
+
+| The value lives… | Declare it as |
+|---|---|
+| inside a repeater row, and the row consumes it | that repeater's `itemControls` (2.13.0+) |
+| at block level, and the template consumes it | a control |
+| genuinely printed, you simply forgot the binding | a field, with `data-proto-field` on the element |
+
+Only when none of those fit does an editor-only region behind `$is_preview` earn
+its place — it puts editing furniture into the block's own markup, so it is the
+last answer, not the first.
+
+Note the check reads a repeater's `fields` only. `itemControls` are edited in the
+sidebar and are never expected on the canvas, so they are correctly absent from
+the bound set.

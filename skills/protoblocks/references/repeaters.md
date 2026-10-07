@@ -14,9 +14,71 @@ A repeater field is a repeatable list of sub-fields — the way to build accordi
   "fields": {
     "title":   { "type": "text", "tagName": "span", "label": "Title" },
     "content": { "type": "wysiwyg", "label": "Content" }
+  },
+  "itemControls": {
+    "tone": { "type": "select", "label": "Tone", "options": [
+      { "key": "light", "label": "Light" }, { "key": "dark", "label": "Dark" }
+    ] }
   }
 }
 ```
+
+| Key | Meaning |
+|---|---|
+| `fields` | **Required.** Edited on the canvas. Each needs an element carrying its `data-proto-field`. |
+| `itemControls` | Optional, 2.13.0+. Edited in the sidebar when a row is focused, for values the template *consumes* rather than prints. |
+| `itemLabel` | Which field titles the row, in the item list and in the sidebar panel. |
+| `min` / `max` | Rows below `min` cannot be removed; adding stops at `max`. |
+
+## fields or itemControls — the decision
+
+**A field is editable only when an element carries its `data-proto-field`.** That
+works for anything the row prints. It is impossible for anything the row
+consumes — a phone number read into a `data-` attribute for a dialog, a CSV
+parsed into a table, a colour passed to a `style` — because no element is
+produced, so nothing can be bound, so there is **nowhere to type it**.
+
+Those belong in `itemControls`.
+
+| The value is… | Put it in |
+|---|---|
+| printed in the row's markup | `fields` |
+| consumed — read into an attribute, parsed, passed to a style | `itemControls` |
+| a choice from a list (`select`, `toggle`, `range`, `color`) | `itemControls` |
+
+**The test: if removing the value changes nothing visible in the row's markup, it
+belongs in `itemControls`.**
+
+Do **not** render a value on the canvas purely to make it editable. That was the
+only workaround before 2.13.0 and it puts editing furniture into the block's own
+markup — the thing the frame does not draw.
+
+Both halves write into the same attribute, so the template is unchanged:
+
+```php
+foreach ($attributes['items'] as $item) {
+    $title = $item['title'] ?? '';   // fields
+    $tone  = $item['tone'] ?? '';    // itemControls
+}
+```
+
+Focusing a row opens a panel at the top of the block's sidebar, titled with the
+row's `itemLabel`. The block's own settings stay below it.
+
+**A repeater inside `itemControls` is rejected** — rows do not nest. Item
+controls are validated as controls and reported by path (`items.tone`).
+
+## Three repeaters, and which is which
+
+| | Edited | For |
+|---|---|---|
+| repeater **field** (`fields`) | canvas | repeated **content** — the row's markup |
+| field's **itemControls** | sidebar, per row | values a row consumes, not prints |
+| repeater **control** (`controls`) | sidebar | repeated **configuration**, never content |
+
+A list of milestones is a field. The phone number each milestone carries into a
+dialog is an itemControl. A set of tabs whose CSV the template parses is a
+control.
 
 | Option | Meaning |
 |--------|---------|

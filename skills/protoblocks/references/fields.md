@@ -307,3 +307,24 @@ add_action('proto_blocks_init', function ($plugin) {
 ```
 
 The `FieldInterface` contract: `getAttributeSchema()`, `updateElement()`, `extractDefault()`, `sanitize()`, `validate()`. A matching editor (React) component handles the editing UI for the type.
+
+
+## When a field cannot be bound
+
+A field is editable only if some element carries its `data-proto-field`. A value
+the template consumes rather than prints produces no element, so it can never be
+bound and has no input at all.
+
+Three homes, in order of preference:
+
+1. **Inside a repeater row** → the repeater's `itemControls` (2.13.0+). Edited in
+   the sidebar when the row is focused, titled with the row's `itemLabel`.
+2. **At block level** → a control rather than a field.
+3. **Neither fits** → an editor-only region behind `$is_preview`. Last resort: it
+   puts editing furniture into the block's own markup.
+
+Run the unbound-fields check in `references/authoring-workflow.md` before the
+gates, every time. It lists any declared field that nothing binds; a name in that
+list is a field nobody can edit.
+
+See `references/repeaters.md` for the full decision table.

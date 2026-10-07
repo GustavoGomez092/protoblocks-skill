@@ -105,3 +105,28 @@ Quick rule of thumb: **classes do nothing at all** → no first compile yet (ste
 3. `wp proto-blocks cache clear` — stale output?
 4. Check every editable element has `data-proto-field` and is always rendered.
 5. Check escaping (`wp_kses_post` for HTML) and `?? ''` defaults.
+
+
+## A repeater sub-field has nowhere to be typed
+
+**Symptom.** The row renders correctly on the front end, but the editor offers no
+input for one of its values — and the sidebar shows only the block's controls.
+
+**Cause.** The template consumes that value rather than printing it (into a
+`data-` attribute, a parsed string, a `style`), so no element carries its
+`data-proto-field` and nothing can bind it.
+
+**Fix.** Move it from the repeater's `fields` to its `itemControls` (plugin
+2.13.0+). It is then edited in the sidebar whenever that row is focused, and the
+template reads it from the same row object as before:
+
+```jsonc
+"reps": {
+  "type": "repeater",
+  "fields":       { "name": { "type": "text" } },
+  "itemControls": { "phone": { "type": "text", "label": "Phone" } }
+}
+```
+
+Do not render the value on the canvas purely to make it editable — that puts
+editing furniture into markup the frame does not draw.
