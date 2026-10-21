@@ -30,6 +30,35 @@ qtest('pageQa passes a page against its own full-page render and reports a11y', 
   } finally { await srv.close(); }
 });
 
+qtest('pageQa runs a 1920 wide pass: a section narrower than the viewport (a boxed main) fails the page, full-bleed sections pass', async () => {
+  const { pageQa, shoot, WIDE_CHECK } = await load();
+  // A page whose theme caps main at 1440px: every frame-width diff passes, the sections are boxed at 1920.
+  const boxed = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>boxed</title><style>body{margin:0} main{max-width:1440px;margin:0 auto;padding:0 40px;box-sizing:border-box} section{height:300px} #pb-header{background:#0f172a} #pb-s2{background:#f1f5f9} #pb-footer{background:#1e293b}</style></head><body><main><section id="pb-header"></section><section id="pb-s2"></section><section id="pb-footer"></section></main></body></html>';
+  const srv = await serveFixtures({ '/boxed.html': { type: 'text/html', body: boxed } });
+  try {
+    const d = tmpDir();
+    assert.deepEqual(WIDE_CHECK, { name: 'wide', width: 1920 });
+    const url = `${srv.url}/boxed.html`;
+    const design = await designOf(shoot, url, d);
+    const r = await pageQa({ url, frames: [{ breakpoint: 'desktop', width: 1440, scale: 1, image: design }], outDir: path.join(d, 'out'), anchors: ['pb-header', 'pb-s2', 'pb-footer', 'pb-s9'] });
+    assert.equal(r.breakpoints[0].pass, true, 'the 1440 diff alone passes (the box is as wide as the frame)');
+    assert.deepEqual([r.wide.name, r.wide.width, r.wide.viewport, r.wide.pass], ['wide', 1920, 1920, false]);
+    assert.deepEqual(r.wide.boxed, ['pb-header', 'pb-s2', 'pb-footer']);
+    assert.deepEqual(r.wide.missing, ['pb-s9']);
+    assert.deepEqual(r.wide.sections.map((s) => [s.anchor, s.width, s.delta]), [['pb-header', 1360, -560], ['pb-s2', 1360, -560], ['pb-footer', 1360, -560]]);
+    assert.equal(r.pass, false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(d, 'out', 'page-qa.json'), 'utf8')).wide.pass, false);
+    // Full-bleed sections: no anchors given, so every #pb-* section on the page is measured.
+    const ok = await pageQa({ url: `${srv.url}/section.html`, frames: [{ breakpoint: 'desktop', width: 1440, scale: 1, image: await designOf(shoot, `${srv.url}/section.html`, tmpDir()) }], outDir: path.join(d, 'ok') });
+    assert.deepEqual([ok.wide.pass, ok.wide.boxed, ok.wide.sections.map((s) => [s.anchor, s.delta])], [true, [], [['pb-s1', 0], ['pb-s2', 0]]]);
+    assert.equal(ok.pass, true, JSON.stringify(ok));
+    // wide: null skips the pass (no `wide` in the result).
+    const skipped = await pageQa({ url, frames: [{ breakpoint: 'desktop', width: 1440, scale: 1, image: design }], outDir: path.join(d, 'skip'), wide: null });
+    assert.equal(skipped.wide, undefined);
+    assert.equal(skipped.pass, true);
+  } finally { await srv.close(); }
+});
+
 qtest('pageQa shoots the whole document: the body shot is the full document height, header and footer included', async () => {
   const { pageQa, loadRaw } = await load();
   const srv = await serveFixtures();

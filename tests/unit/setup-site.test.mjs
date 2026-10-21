@@ -107,6 +107,39 @@ test('zip cleanup runs when forkTheme throws, and the error propagates', async (
   assert.equal(names(h.calls).includes('assets'), false);
 });
 
+test('--theme-name and --category-title reach forkTheme and are recorded as site.theme.displayName / category', async () => {
+  assert.deepEqual(parseArgs(['--name', 'O-Flex', '--theme-name', 'O-Flex Group', '--category-title', 'O-Flex blocks']),
+    { name: 'O-Flex', themeName: 'O-Flex Group', categoryTitle: 'O-Flex blocks', force: false, updatePlugins: false });
+  for (const argv of [['--name', 'A', '--theme-name'], ['--name', 'A', '--category-title', '--force']]) {
+    assert.throws(() => parseArgs(argv), (e) => e.code === 'EUSAGE', JSON.stringify(argv));
+  }
+  const h = harness();
+  h.deps.forkTheme = (o) => { h.calls.push(['fork', o]); return { themeDir: h.themeDir, slug: 'o-flex', reused: false, forkedFrom: 'proto-blocks-theme@1.4.0', displayName: o.themeName, category: { slug: 'o-flex', title: o.categoryTitle ?? `${o.themeName} blocks` } }; };
+  await setupSite({ name: 'O-Flex', themeName: 'O-Flex Group' }, h.deps);
+  const fork = h.calls.find((c) => c[0] === 'fork')[1];
+  assert.equal(fork.themeName, 'O-Flex Group');
+  assert.equal('categoryTitle' in fork, false, 'not passed when not given (the fork decides the default)');
+  assert.deepEqual(loadState(h.themeDir).site.theme, { slug: 'o-flex', forkedFrom: 'proto-blocks-theme@1.4.0', displayName: 'O-Flex Group', category: { slug: 'o-flex', title: 'O-Flex Group blocks' } });
+  // Without the flags nothing identity-related is passed to forkTheme.
+  const plain = harness();
+  await setupSite({ name: 'Acme' }, plain.deps);
+  const pf = plain.calls.find((c) => c[0] === 'fork')[1];
+  assert.equal('themeName' in pf, false);
+  assert.equal('categoryTitle' in pf, false);
+  assert.deepEqual(loadState(plain.themeDir).site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3' }, 'a fake fork without identity records none');
+});
+
+test('a re-run keeps site.theme.screenshot while refreshing the rest of site.theme', async () => {
+  const h = harness();
+  await setupSite({ name: 'Acme' }, h.deps);
+  const { updateState } = await import('../../skills/protoblocks-site-builder/scripts/lib/state.mjs');
+  updateState(h.themeDir, (s) => { s.site.theme.screenshot = { page: 'home', source: 'frame', writtenAt: 'x' }; });
+  const h2 = harness();
+  h2.deps.forkTheme = () => ({ themeDir: h.themeDir, slug: 'acme', reused: true, renamed: true, forkedFrom: 'proto-blocks-theme@1.2.3', displayName: 'Acme Group', category: { slug: 'acme', title: 'Acme Group blocks' } });
+  await setupSite({ name: 'Acme', themeName: 'Acme Group' }, h2.deps);
+  assert.deepEqual(loadState(h.themeDir).site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3', displayName: 'Acme Group', category: { slug: 'acme', title: 'Acme Group blocks' }, screenshot: { page: 'home', source: 'frame', writtenAt: 'x' } });
+});
+
 test('parseArgs: values, boolean --force, defaults', () => {
   assert.deepEqual(parseArgs(['--name', 'A B', '--slug', 's', '--site', 'Local X', '--cwd', '/d', '--force']),
     { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true, updatePlugins: false });

@@ -19,13 +19,16 @@ const byN = (a, b) => a.n - b.n;
 export const openSections = (page) => [...(page.sections ?? [])].sort(byN).filter((s) => OPEN.has(s.status));
 
 /**
- * Setup steps whose result is not in state yet (tokens, menus, the header part), in setup order. Navigation is done
- * when a menu is recorded, or when the design has none (`site.navigation = {menus: {}, none: true}`). The header part
- * is done when `site.parts.header` is recorded, or when a page's `pb-header` section is already rendered by the part
- * (`inPart`; builds from before `site.parts` was recorded).
+ * Setup steps whose result is not in state yet (the theme screenshot, tokens, menus, the header part), in setup
+ * order. The screenshot is done when `site.theme.screenshot` is recorded (theme-screenshot.mjs, from the first page's
+ * desktop frame). Navigation is done when a menu is recorded, or when the design has none
+ * (`site.navigation = {menus: {}, none: true}`). The header part is done when `site.parts.header` is recorded, or
+ * when a page's `pb-header` section is already rendered by the part (`inPart`; builds from before `site.parts` was
+ * recorded).
  */
 export function setupGaps(state) {
   const gaps = [];
+  if (state.site.theme?.screenshot == null) gaps.push("site.theme.screenshot (theme-screenshot.mjs <page>, once the first page's desktop frame is intaken)");
   const nav = state.site.navigation;
   const menus = nav?.menus;
   const hasMenu = menus != null && typeof menus === 'object' && Object.keys(menus).length > 0;

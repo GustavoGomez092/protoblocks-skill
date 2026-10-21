@@ -52,8 +52,9 @@ import { forkMarker } from '../../skills/protoblocks-site-builder/scripts/lib/th
 import { installMotion, recordMotion, runtimePresets } from '../../skills/protoblocks-site-builder/scripts/lib/motion.mjs';
 import { runApply } from '../../skills/protoblocks-site-builder/scripts/lib/tokens.mjs';
 import { WP_SCRIPTS_DIR } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
-import { runGates, gateInputFromState } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
+import { runGates, gateInputFromState, categorySlug } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
 import { addFrame, cropSections, artifactsDir } from '../../skills/protoblocks-site-builder/scripts/lib/intake.mjs';
+import { themeScreenshot } from '../../skills/protoblocks-site-builder/scripts/lib/theme-screenshot.mjs';
 import { recordPlan } from '../../skills/protoblocks-site-builder/scripts/lib/plan.mjs';
 import { buildPage } from '../../skills/protoblocks-site-builder/scripts/lib/page.mjs';
 import { prepareCheck, recordVerdict } from '../../skills/protoblocks-site-builder/scripts/lib/qa-input.mjs';
@@ -364,12 +365,19 @@ async function e2ePass(t, { globalStyles }) {
     assert.deepEqual(listOverrides(wp, themeSlug), []);
     writePart(themeDir, 'header', partMarkup({ block: 'proto-blocks/site-header', navRef: menuId }));
     writePart(themeDir, 'footer', partMarkup({ block: 'proto-blocks/site-footer' }));
-    assert.equal(nextAction(loadState(themeDir)).action, 'ask-more-pages', 'setup complete, no pages yet');
+    // The theme screenshot is the one setup step left: it needs the first page's desktop frame (intake, below).
+    assert.match(nextAction(loadState(themeDir)).why, /site\.theme\.screenshot/, 'setup waits for the theme screenshot');
     const motionInstall = installMotion(themeDir);
     assert.ok(motionInstall.copied.includes('assets/js/pb-motion.js'));
 
-    // 3. The section blocks into the fork (the Build step's files).
-    for (const b of BLOCK_NAMES) fs.cpSync(path.join(BLOCKS, b), path.join(themeDir, 'proto-blocks', b), { recursive: true });
+    // 3. The section blocks into the fork (the Build step's files), in the inserter category the fork registers.
+    const category = categorySlug(loadState(themeDir));
+    assert.equal(category, themeSlug, 'setup registers the theme slug as the Proto-Blocks category');
+    for (const b of BLOCK_NAMES) {
+      fs.cpSync(path.join(BLOCKS, b), path.join(themeDir, 'proto-blocks', b), { recursive: true });
+      const jsonFile = path.join(themeDir, 'proto-blocks', b, 'block.json');
+      fs.writeFileSync(jsonFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(jsonFile, 'utf8')), category }, null, 2));
+    }
 
     // 4. Intake: the design frame, background bands from findCuts, crops (header/footer get the part anchors).
     budget('intake');
@@ -383,6 +391,12 @@ async function e2ePass(t, { globalStyles }) {
     const ranges = { desktop: cuts.bands.map((b, i) => ({ n: i + 1, y0: b.y0, y1: b.y1, ...(SECTIONS[i].part ? { part: SECTIONS[i].part } : {}) })) };
     const crops = await cropSections(themeDir, pageSlug, ranges);
     assert.deepEqual(crops.map((c) => c.anchor), SECTIONS.map((s) => s.anchor));
+    // Theme screenshot from the frame: the last setup step (site.theme.screenshot), 1200x900 in the fork.
+    const shot = await themeScreenshot(themeDir, pageSlug);
+    assert.deepEqual([shot.width, shot.height, shot.crop.width], [1200, 900, 1440]);
+    assert.ok(fs.existsSync(path.join(themeDir, 'screenshot.png')));
+    assert.equal(loadState(themeDir).site.theme.screenshot.page, pageSlug);
+    report.steps.screenshot = { out: shot.out, source: shot.source, crop: shot.crop };
     lap('intake');
 
     // 5. Plan gate: nothing builds before approval; then the plan, then the section data (the Build step).
@@ -406,7 +420,7 @@ async function e2ePass(t, { globalStyles }) {
     budget('gates');
     report.steps.gates = {};
     for (const def of SECTIONS) {
-      const g = runGates(wp, { ...gateInputFromState(loadState(themeDir), pageSlug, def.n), themeDir });
+      const g = runGates(wp, { ...gateInputFromState(loadState(themeDir), pageSlug, def.n), themeDir, category });
       report.steps.gates[def.block] = g.steps.map((s) => ({ id: s.id, ok: s.ok }));
       assert.ok(g.ok, `gates ${def.block}: ${JSON.stringify(g.steps)}`);
     }

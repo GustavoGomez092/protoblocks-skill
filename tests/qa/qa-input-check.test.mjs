@@ -22,7 +22,7 @@ qtest('buildCheckInput/prepareCheck output is accepted by the real check-section
     const res = await checkSection(JSON.parse((await import('node:fs')).readFileSync(input, 'utf8')));
     // validate() throws EINPUT/EANCHOR before any work; reaching results proves the input shape is accepted
     assert.ok(Array.isArray(res.results));
-    assert.deepEqual(res.results.map((r) => r.breakpoint), ['desktop', 'tablet', 'mobile']);
+    assert.deepEqual(res.results.map((r) => r.breakpoint), ['desktop', 'tablet', 'mobile', 'wide']);
     assert.equal(res.results[0].mode, 'diff');
     assert.ok(res.results.every((r) => r.mode !== 'error'), JSON.stringify(res.results.filter((r) => r.mode === 'error')));
   } finally { await srv.close(); }

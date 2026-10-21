@@ -11,9 +11,16 @@
 
 /* The theme pads `.wp-site-blocks > header/footer` with side gutters and caps them at 1440px. Once the design's header
    and footer blocks live in the template parts (#pb-header, #pb-footer after move-parts) they draw their own full-bleed
-   band and inner container, so the part wrapper must not shrink them. Only the template part: never `main`. */
+   band and inner container, so the part wrapper must not shrink them. Only the parts holding the design's blocks: the
+   theme's stock header/footer parts (`.proto-shell-inner`) keep their cap. */
 body .wp-site-blocks > .wp-block-template-part:has(#pb-header),
 body .wp-site-blocks > .wp-block-template-part:has(#pb-footer) { max-width: none; padding-inline: 0; }
+
+/* The theme caps `main` at 1440px with side gutters too (`.wp-site-blocks main`), so on a wider viewport the whole page
+   renders as a centred 1440px box while visual QA at the frame width (1440) passes. Every Proto-Blocks section is a
+   full-bleed band that carries its own inner container, so `main` must never cap or pad it at any viewport width (QA
+   checks 1920 as `wide`). `.proto-shell-inner` is left alone: only the stock header/footer parts use it. */
+body .wp-site-blocks main { max-width: none; padding-inline: 0; margin-inline: 0; }
 
 /* With global styles on, WordPress puts the root blockGap (24px) between the header part, the page content and the
    footer part. The design has no such gap: sections carry their own spacing. */

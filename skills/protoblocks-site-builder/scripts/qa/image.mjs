@@ -32,3 +32,25 @@ export function cropRaw(raw, { x, y, w, h }) {
   }
   return { data, width: cw, height: ch };
 }
+
+/**
+ * Crops the top of `file` at its full width to the aspect of `width`:`height` (4:3 for a theme screenshot: a
+ * 1440-wide frame gives 1440x1080 from y 0), pads a shorter image with its bottom-left colour, resizes the crop to
+ * exactly `width` x `height` and writes `out` as PNG.
+ */
+export async function cropTopToSize(file, out, { width, height }) {
+  const meta = await sharp(file).metadata();
+  const source = { width: meta.width ?? 0, height: meta.height ?? 0 };
+  const cropHeight = Math.round((source.width * height) / width);
+  let buf;
+  if (source.height >= cropHeight) {
+    buf = await sharp(file).extract({ left: 0, top: 0, width: source.width, height: cropHeight }).png().toBuffer();
+  } else {
+    const raw = await loadRaw(file);
+    const i = (raw.height - 1) * raw.width * 4;
+    const [r, g, b] = raw.data.subarray(i, i + 3);
+    buf = await sharp(file).extend({ top: 0, left: 0, right: 0, bottom: cropHeight - source.height, background: { r, g, b, alpha: 1 } }).png().toBuffer();
+  }
+  await sharp(buf).resize(width, height, { fit: 'fill' }).png().toFile(out);
+  return { out, source, crop: { width: source.width, height: cropHeight }, width, height };
+}

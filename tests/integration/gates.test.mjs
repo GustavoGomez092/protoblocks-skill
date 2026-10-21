@@ -22,7 +22,7 @@ itest('gates pass a good block and stop at render for a warning-emitting block',
   await install(wp, 'pb-gate-bad');
   const ok = runGates(wp, { block: 'pb-gate-ok', attrs: { heading: 'Hello' } });
   assert.equal(ok.ok, true, JSON.stringify(ok, null, 2));
-  assert.deepEqual(ok.steps.map((s) => s.id), ['anchor-support', 'validate', 'cache', 'tailwind', 'render']);
+  assert.deepEqual(ok.steps.map((s) => s.id), ['anchor-support', 'category', 'validate', 'cache', 'tailwind', 'render']);
 
   const bad = runGates(wp, { block: 'pb-gate-bad' });
   assert.equal(bad.ok, false);

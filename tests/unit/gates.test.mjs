@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { WpError } from '../../skills/protoblocks-site-builder/scripts/lib/wp.mjs';
-import { runGates, gateInputFromState } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
+import { runGates, gateInputFromState, categorySlug } from '../../skills/protoblocks-site-builder/scripts/lib/gates.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 function setup({ anchor = true, validate, cache, tailwind = { enabled: false }, compile, render } = {}) {
@@ -40,8 +40,8 @@ test('runs all steps in order for a good block', () => {
   const { wp } = setup();
   const r = runGates(wp, { block: 'b' });
   assert.equal(r.ok, true);
-  assert.deepEqual(ids(r), ['anchor-support', 'validate', 'cache', 'tailwind', 'render']);
-  assert.equal(r.steps[3].detail, 'disabled');
+  assert.deepEqual(ids(r), ['anchor-support', 'category', 'validate', 'cache', 'tailwind', 'render']);
+  assert.equal(r.steps[4].detail, 'disabled');
 });
 
 test('stops at anchor-support without calling wp', () => {
@@ -52,9 +52,39 @@ test('stops at anchor-support without calling wp', () => {
   assert.deepEqual(calls, []);
 });
 
+test('category: block.json must use the slug the theme registers (site.theme.category.slug); the plugin default otherwise', () => {
+  // No category in block.json and none from state: the plugin default proto-blocks on both sides.
+  assert.equal(runGates(setup().wp, { block: 'b' }).ok, true);
+  // The theme registers "acme": a block.json without a category (= proto-blocks) stops at the category step, before wp.
+  const s = setup();
+  const r = runGates(s.wp, { block: 'b', category: 'acme' });
+  assert.equal(r.ok, false);
+  assert.deepEqual(ids(r), ['anchor-support', 'category']);
+  assert.match(r.steps[1].detail, /"category" is "proto-blocks" but the theme registers "acme"/);
+  assert.match(r.steps[1].detail, /set "category": "acme"/);
+  assert.deepEqual(s.calls, []);
+  // The block carries the site's slug: it passes and the detail names it.
+  const t = setup();
+  fs.writeFileSync(path.join(t.theme, 'proto-blocks', 'b', 'block.json'), JSON.stringify({ category: 'acme', supports: { anchor: true } }));
+  const ok = runGates(t.wp, { block: 'b', category: 'acme' });
+  assert.equal(ok.ok, true, JSON.stringify(ok.steps));
+  assert.equal(ok.steps[1].detail, 'category acme');
+  // A block.json with another category fails against the default too.
+  const u = setup();
+  fs.writeFileSync(path.join(u.theme, 'proto-blocks', 'b', 'block.json'), JSON.stringify({ category: 'text', supports: { anchor: true } }));
+  assert.deepEqual(ids(runGates(u.wp, { block: 'b' })), ['anchor-support', 'category']);
+});
+
+test('categorySlug reads site.theme.category.slug and falls back to proto-blocks', () => {
+  assert.equal(categorySlug(null), 'proto-blocks');
+  assert.equal(categorySlug({ site: {} }), 'proto-blocks');
+  assert.equal(categorySlug({ site: { theme: { slug: 'acme' } } }), 'proto-blocks');
+  assert.equal(categorySlug({ site: { theme: { slug: 'acme', category: { slug: 'acme', title: 'Acme blocks' } } } }), 'acme');
+});
+
 test('stops at validate on error status', () => {
   const { wp } = setup({ validate: { code: 0, stdout: '[{"block":"b","status":"error"}]', stderr: '' } });
-  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'validate']);
+  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'category', 'validate']);
 });
 
 test('warning status does not fail validate', () => {
@@ -64,13 +94,13 @@ test('warning status does not fail validate', () => {
 
 test('stops at cache failure', () => {
   const { wp } = setup({ cache: { code: 1, stdout: '', stderr: 'boom' } });
-  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'validate', 'cache']);
+  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'category', 'validate', 'cache']);
 });
 
 test('compiles tailwind when enabled and stops on failure', () => {
   const { wp, calls } = setup({ tailwind: { enabled: true }, compile: { code: 1, stdout: '', stderr: 'tw fail' } });
   const r = runGates(wp, { block: 'b' });
-  assert.deepEqual(ids(r), ['anchor-support', 'validate', 'cache', 'tailwind']);
+  assert.deepEqual(ids(r), ['anchor-support', 'category', 'validate', 'cache', 'tailwind']);
   assert.ok(calls.includes('eval-file ' + path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'skills/protoblocks-site-builder/scripts/wp/tailwind.php') + ' compile'));
 });
 
@@ -89,7 +119,7 @@ test('validate parses JSON that is followed by text on the same line (plugin 2.1
 
 test('validate fails when the block is absent from the JSON rows', () => {
   const { wp } = setup({ validate: { code: 0, stdout: '[]Success\n', stderr: '' } });
-  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'validate']);
+  assert.deepEqual(ids(runGates(wp, { block: 'b' })), ['anchor-support', 'category', 'validate']);
 });
 
 test('a fatal in render-block.php (evalFile throws) is recorded as a failing render step', () => {

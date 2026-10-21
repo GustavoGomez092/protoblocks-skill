@@ -126,6 +126,25 @@ qtest('checkSection fails a section narrower than the breakpoint with widthDelta
   } finally { await srv.close(); }
 });
 
+qtest('the wide sanity breakpoint (1920, no frame) fails a band boxed above the frame width; a full-bleed band passes', async () => {
+  const { checkSection } = await load();
+  const srv = await serveFixtures();
+  try {
+    const d = tmpDir();
+    // 1200px centred band: it spans a 1200 desktop frame exactly (widthDelta 0) and is boxed at 1920.
+    const design = await makeImage({ width: 1200, height: 400, bg: [30, 58, 138] }, path.join(d, 'design.png'));
+    const r = await checkSection({ url: `${srv.url}/narrow.html`, anchor: 'pb-narrow', iterDir: path.join(d, 'i'), qa: QA,
+      breakpoints: [{ name: 'desktop', width: 1200, design }, { name: 'wide', width: 1920, sanityOnly: true }] });
+    assert.deepEqual([r.results[0].mode, r.results[0].widthDelta, r.results[0].numericPass], ['diff', 0, true], 'the frame-width diff alone passes');
+    const wide = r.results[1];
+    assert.deepEqual([wide.breakpoint, wide.mode, wide.widthDelta, wide.numericPass], ['wide', 'sanity', -720, false]);
+    assert.equal(r.numericPass, false, 'the boxed band fails the section');
+    const ok = await checkSection({ url: `${srv.url}/section.html`, anchor: 'pb-s1', iterDir: path.join(d, 'j'), qa: QA,
+      breakpoints: [{ name: 'wide', width: 1920, sanityOnly: true }] });
+    assert.deepEqual([ok.results[0].widthDelta, ok.results[0].numericPass, ok.numericPass], [0, true, true]);
+  } finally { await srv.close(); }
+});
+
 qtest('checkSection error results keep page errors, console errors and HTTP status captured before the throw', async () => {
   const { checkSection } = await load();
   const srv = await serveFixtures();

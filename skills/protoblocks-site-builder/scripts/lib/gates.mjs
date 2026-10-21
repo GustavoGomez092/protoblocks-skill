@@ -3,8 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWp, loadRuntime, WP_SCRIPTS_DIR } from './wp.mjs';
-import { loadState, getSection } from './state.mjs';
+import { loadState, getSection, statePath } from './state.mjs';
 import { assertSlug, parseBlockName } from './slugs.mjs';
+import { DEFAULT_CATEGORY } from './theme-fork.mjs';
+
+/** The inserter category slug the site's theme registers (`site.theme.category.slug`), or the plugin default. */
+export const categorySlug = (state) => state?.site?.theme?.category?.slug ?? DEFAULT_CATEGORY.slug;
 
 // The plugin prints the JSON array and may append text ("Success: ...") on the same line;
 // earlier output may itself contain "[". Try each "[" start until one parses to an array.
@@ -29,9 +33,11 @@ export function gateInputFromState(state, page, n) {
 
 /**
  * themeDir (the CLI's <themeDir>) must be the theme WordPress renders with: the gate reads the block from the active
- * stylesheet directory, so a mismatch would test a different copy of the block (EWRONGTHEME).
+ * stylesheet directory, so a mismatch would test a different copy of the block (EWRONGTHEME). `category` is the
+ * inserter category slug the theme registers (`categorySlug(state)`); block.json must use it (the plugin default
+ * `proto-blocks` when absent) or the block lands in an unregistered category.
  */
-export function runGates(wp, { block: blockName, attrs = {}, themeDir: expectedTheme } = {}) {
+export function runGates(wp, { block: blockName, attrs = {}, themeDir: expectedTheme, category } = {}) {
   // Same block-name rule as plan.mjs/page.mjs: "<slug>" or "proto-blocks/<slug>" (the same block). Gates exercise
   // Proto-Blocks only, so another namespace is refused.
   const { namespace, slug: block } = parseBlockName(blockName, 'block name');
@@ -51,6 +57,9 @@ export function runGates(wp, { block: blockName, attrs = {}, themeDir: expectedT
   let json = null;
   try { json = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); } catch (e) { step('anchor-support', false, `Cannot read ${jsonPath}: ${e.message}`); return done(); }
   if (!step('anchor-support', json?.supports?.anchor === true, json?.supports?.anchor === true ? 'supports.anchor true' : 'block.json must declare "supports": { "anchor": true } (QA targets #pb-s<n>)')) return done();
+  const expectedCategory = category ?? DEFAULT_CATEGORY.slug;
+  const actualCategory = json?.category ?? DEFAULT_CATEGORY.slug;
+  if (!step('category', actualCategory === expectedCategory, actualCategory === expectedCategory ? `category ${expectedCategory}` : `block.json "category" is "${actualCategory}" but the theme registers "${expectedCategory}" (site.theme.category.slug, set by setup-site.mjs): set "category": "${expectedCategory}"`)) return done();
 
   const v = wp.run(['proto-blocks', 'validate', block, '--format=json']);
   const rows = parseJsonArray(v.stdout);
@@ -111,7 +120,8 @@ function main(argv) {
     }
     input = { block, attrs };
   }
-  const r = runGates(createWp(loadRuntime(themeDir)), { ...input, themeDir });
+  const category = categorySlug(fs.existsSync(statePath(themeDir)) ? loadState(themeDir) : null);
+  const r = runGates(createWp(loadRuntime(themeDir)), { ...input, themeDir, category });
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
   if (!r.ok) process.exit(1);
 }

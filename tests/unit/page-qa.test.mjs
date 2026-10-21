@@ -119,6 +119,7 @@ test('buildInputs maps design frames, qa overrides and the artifacts outDir; no 
   assert.deepEqual(r.frames[0], { breakpoint: 'desktop', width: 1440, scale: 2, image: '/abs/d.png' });
   assert.deepEqual(r.frames[1], { breakpoint: 'mobile', width: 390, scale: 1, image: path.join(dir, '.protoblocks', 'artifacts', 'home', 'm.png') });
   assert.deepEqual(r.warnings, []);
+  assert.deepEqual(r.anchors, [], 'no sections: the wide pass measures every #pb-* section on the page');
   assert.throws(() => buildInputs(dir, 'nourl'), (e) => e.code === 'ENOPAGE');
   assert.throws(() => buildInputs(dir, 'ghost'), (e) => e.code === 'ENOPAGE');
 });
@@ -212,6 +213,8 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
     // Warnings that mean the comparison itself is not trustworthy: a truncated screenshot, masks not where the content is.
     truncated: { warnings: [`desktop: ${fitScale(20000, 1).warning}`] },
     maskAnchorMissing: { warnings: ['desktop: #pb-s3 is not on the page; its masks are applied at the design position only.'] },
+    // A section boxed at 1920 is a block or theme defect, never a design difference.
+    boxed: { wide: { name: 'wide', width: 1920, viewport: 1920, sections: [{ anchor: 'pb-s2', width: 1440, delta: -480 }], missing: [], boxed: ['pb-s2'], pass: false } },
   };
   for (const [name, extra] of Object.entries(cases)) {
     const dir = stateWith([qaPage()]);
@@ -223,6 +226,8 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
   assert.match(acceptBlockers(designFail({ warnings: [`desktop: ${fitScale(20000, 1).warning}`] }), [{ breakpoint: 'desktop' }]).join(), /truncated/);
   assert.match(acceptBlockers(designFail({ warnings: ['mobile: #pb-s9 is not on the page; its masks are applied at the design position only.'] }), [{ breakpoint: 'desktop' }]).join(), /#pb-s9/);
   assert.match(acceptBlockers(designFail(), [{ breakpoint: 'desktop' }, { breakpoint: 'mobile' }]).join(), /mobile was not checked/);
+  assert.match(acceptBlockers(designFail({ wide: { name: 'wide', width: 1920, boxed: ['pb-s2', 'pb-footer'], pass: false } }), [{ breakpoint: 'desktop' }]).join(), /wide: #pb-s2, #pb-footer do not span the 1920px viewport \(boxed\)/);
+  assert.deepEqual(acceptBlockers(designFail({ wide: { name: 'wide', width: 1920, boxed: [], pass: true } }), [{ breakpoint: 'desktop' }]), [], 'a passing wide pass does not block');
 });
 
 test('page-qa CLI record: strict flags; --accepted needs a note', () => {
@@ -267,6 +272,14 @@ test('buildInputs passes masks, section masks and design px per CSS px per frame
   assert.deepEqual(r.frames[1], { breakpoint: 'mobile', width: 390, scale: 2, image: '/abs/m.png' });
   assert.equal(r.warnings.length, 1);
   assert.match(r.warnings[0], /^mobile: section 2/);
+  assert.deepEqual(r.anchors, ['pb-s2'], 'the wide pass measures the page\'s sections');
+});
+
+test('buildInputs lists the anchors of every section that is not skipped for the wide pass', () => {
+  const dir = stateWith([{ slug: 'home', url: URL_, status: 'building', design: { frames: [{ breakpoint: 'desktop', width: 1440, image: '/abs/d.png' }] }, sections: [
+    { n: 1, anchor: 'pb-header', status: 'done', inPart: true }, { n: 2, anchor: 'pb-s2', status: 'done' }, { n: 3, anchor: 'pb-s3', status: 'skipped' }, { n: 4, anchor: 'pb-footer', status: 'done' },
+  ] }]);
+  assert.deepEqual(buildInputs(dir, 'home').anchors, ['pb-header', 'pb-s2', 'pb-footer']);
 });
 
 test('renderMasks places section masks at the measured anchor top (CSS px times design px per CSS px)', () => {

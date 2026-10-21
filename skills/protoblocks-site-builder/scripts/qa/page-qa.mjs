@@ -15,6 +15,10 @@ const BLOCKING = ['serious', 'critical'];
 const MAX_SURFACE_PX = 16000;
 const SAFE_NAME = /^[A-Za-z0-9_-]+$/;
 
+// The wide pass: no design frame; every section must span the viewport at a width above any desktop frame, because a
+// theme shell cap boxes the whole page there while every frame-width diff still passes.
+export const WIDE_CHECK = Object.freeze({ name: 'wide', width: 1920 });
+
 const inputError = (message) => Object.assign(new Error(message), { code: 'EINPUT' });
 const pageError = (message) => Object.assign(new Error(message), { code: 'ENOPAGE' });
 const statusError = (message) => Object.assign(new Error(message), { code: 'ESTATUS' });
@@ -73,6 +77,25 @@ async function measurePage(browser, openPage, url, width, anchors = []) {
   } finally { await context.close().catch(() => {}); }
 }
 
+// The width of every section at `width` CSS px, in one load: the anchors from state, or every #pb-* section on the page.
+async function measureSections(browser, openPage, url, width, anchors = []) {
+  const { page, context } = await openPage(browser, { url, width, scale: 1 });
+  try {
+    return await page.evaluate((ids) => {
+      const viewport = document.documentElement.clientWidth;
+      const els = ids.length ? ids.map((id) => document.getElementById(id)) : [...document.querySelectorAll('[id^="pb-s"], #pb-header, #pb-footer')];
+      const sections = [];
+      const missing = [];
+      els.forEach((el, i) => {
+        if (!el) { missing.push(ids[i]); return; }
+        const r = el.getBoundingClientRect();
+        sections.push({ anchor: el.id, width: Math.round(r.width * 100) / 100, delta: Math.round((r.width - viewport) * 100) / 100 });
+      });
+      return { viewport, sections, missing };
+    }, anchors);
+  } finally { await context.close().catch(() => {}); }
+}
+
 /**
  * Section masks at the position the section actually renders: `tops` are the anchors' tops below the top of body (the
  * page shot) in CSS px and `pxPerCss` the frame's design pixels per CSS px (the render is resized to the design width
@@ -89,7 +112,7 @@ export function renderMasks(sectionMasks = [], tops = {}, pxPerCss = 1) {
   return { masks, missing };
 }
 
-export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings = [] }) {
+export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings = [], anchors = [], wide = WIDE_CHECK }) {
   validateInput({ url, frames, outDir });
   outDir = path.resolve(outDir);
   const pageMismatchMax = qa.pageMismatchMax ?? 0.12;
@@ -136,6 +159,12 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
         composite: d.composite,
       });
     }
+    if (wide) {
+      // No frame to diff against: a section narrower (boxed) or wider (overflowing) than the viewport fails the page.
+      const w = await measureSections(b, openPage, url, wide.width, anchors);
+      const boxed = w.sections.filter((s) => Math.abs(s.delta) > 1).map((s) => s.anchor);
+      result.wide = { name: wide.name, width: wide.width, viewport: w.viewport, sections: w.sections, missing: w.missing, boxed, pass: boxed.length === 0 };
+    }
     try {
       const { default: AxeBuilder } = await import('@axe-core/playwright');
       const { page, context, errors } = await openPage(b, { url, width: frames[0].width });
@@ -155,6 +184,7 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
       result.pageErrors.push(...(e?.pageErrors ?? []));
     }
     result.pass = result.breakpoints.length === frames.length && result.breakpoints.every((x) => x.pass)
+      && (!wide || result.wide?.pass === true)
       && result.a11y.error === undefined && result.a11y.blocking.length === 0 && result.pageErrors.length === 0;
   } catch (e) {
     result.pass = false;
@@ -170,7 +200,7 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
 /**
  * Why a failing page-QA result cannot be accepted by the developer: only design differences (a breakpoint over the
  * mismatch or height threshold) can be; errors, a11y, broken media, HTTP errors, full masks, missing breakpoints, a
- * truncated screenshot and masks whose anchor is not on the page cannot.
+ * truncated screenshot, masks whose anchor is not on the page and a boxed section in the wide pass cannot.
  */
 export function acceptBlockers(r, frames = []) {
   const out = [];
@@ -185,6 +215,7 @@ export function acceptBlockers(r, frames = []) {
   }
   const bps = Array.isArray(r.breakpoints) ? r.breakpoints : [];
   for (const f of frames) if (!bps.some((b) => b?.name === f.breakpoint)) out.push(`breakpoint ${f.breakpoint} was not checked`);
+  if (r.wide && r.wide.pass !== true) out.push(`${r.wide.name ?? 'wide'}: ${(r.wide.boxed ?? []).map((a) => `#${a}`).join(', ') || 'sections'} do not span the ${r.wide.width}px viewport (boxed): the band must be full-bleed at any width`);
   for (const b of bps) {
     if (b?.status >= 400) out.push(`${b.name}: HTTP ${b.status}`);
     if (b?.fullyMasked === true) out.push(`${b.name}: fully masked, nothing compared`);
@@ -283,7 +314,9 @@ export function buildInputs(themeDir, slug) {
     }
     return frame;
   });
-  return { url: p.url, frames, qa: s.site.qa ?? {}, outDir: path.join(stateDir(themeDir), 'artifacts', slug, 'page-qa'), warnings };
+  // The wide pass measures these sections (skipped ones are not on the page).
+  const anchors = (p.sections ?? []).filter((x) => x.status !== 'skipped' && typeof x.anchor === 'string' && SAFE_NAME.test(x.anchor)).map((x) => x.anchor);
+  return { url: p.url, frames, qa: s.site.qa ?? {}, outDir: path.join(stateDir(themeDir), 'artifacts', slug, 'page-qa'), warnings, anchors };
 }
 
 const USAGE = 'Usage: node page-qa.mjs run <themeDir> <slug> | record <themeDir> <slug> <page-qa.json> [--accepted "<note>"]\n';

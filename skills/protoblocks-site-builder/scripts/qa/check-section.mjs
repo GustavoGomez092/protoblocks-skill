@@ -57,7 +57,8 @@ export async function checkSection(input) {
         const widthDelta = Math.abs(rawDelta) > 1 ? Math.round(rawDelta * 100) / 100 : 0;
         if (bp.sanityOnly || !bp.design) {
           const s = await sanity({ url, selector, width: bp.width, browser, imageWaitMs });
-          // sanity issues never flip numericPass (the subagent judges them); page errors and in-anchor image errors do
+          // sanity issues never flip numericPass (the subagent judges them); page errors and in-anchor image errors do.
+          // widthDelta does: the `wide` breakpoint (1920, no frame) is how a band boxed above the frame width is caught.
           results.push({ breakpoint: bp.name, mode: 'sanity', ok: s.ok, issues: s.issues, widthDelta, numericPass: clean && widthDelta === 0, status: shot.status ?? null, render, consoleErrors: shot.consoleErrors, pageErrors: shot.pageErrors, imageErrors: shot.imageErrors, pageImageWarnings: shot.pageImageWarnings, stalledRequests: shot.stalledRequests ?? [] });
           continue;
         }

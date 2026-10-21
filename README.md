@@ -133,7 +133,7 @@ Seven skills, four commands and one agent.
 |---|---|
 | `protoblocks` | The docs hub: how to build, scaffold and debug Proto-Blocks (`block.json`, `template.php`, fields, controls, repeaters, inner blocks, Tailwind, interactivity). |
 | `protoblocks-site-builder` | The orchestrator: runs preflight, keeps a resumable build state, and drives the whole design-to-page pipeline below. |
-| `protoblocks-site-setup` | Prepares the Local site: installs Proto-Blocks and Yoast, forks and activates `proto-blocks-theme`, applies design tokens, creates navigation menus, wires header/footer parts. |
+| `protoblocks-site-setup` | Prepares the Local site: installs Proto-Blocks and Yoast, forks and activates `proto-blocks-theme` (display name, per-site block category), writes the theme screenshot from the design, applies design tokens, creates navigation menus, wires header/footer parts. |
 | `protoblocks-design-breakdown` | Normalizes a design (image, PDF, Figma, Penpot, URL), crops its sections, maps each to reuse/extend/new blocks and gets your approval of the plan. |
 | `protoblocks-section-loop` | Builds one section, runs the build gates, dispatches visual QA and fixes until it matches its crop (with an iteration cap). |
 | `protoblocks-motion` | Adds GSAP scroll/entrance motion through the theme's `pb-motion` data-attribute presets, then verifies it. |
@@ -171,7 +171,7 @@ Seven skills, four commands and one agent.
 The builder runs this pipeline:
 
 1. **Preflight**: finds the Local site and checks tools.
-2. **Setup**: plugins, theme fork, tokens, navigation, header/footer parts.
+2. **Setup**: plugins, theme fork (display name, a per-site block category, the theme screenshot from the design), tokens, navigation, header/footer parts.
 3. **Breakdown**: crops the design into sections and proposes a plan. **Nothing is built until you approve the plan.**
 4. **Per section**: build the block, then visual QA, then motion.
 5. **Header/footer**: moves the design's header and footer into the theme parts.

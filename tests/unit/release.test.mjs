@@ -8,13 +8,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const readme = read('README.md');
 
-test('plugin.json and marketplace.json versions are equal and 2.0.0', () => {
+test('plugin.json and marketplace.json versions are equal and 2.3.0', () => {
   const plugin = JSON.parse(read('.claude-plugin/plugin.json'));
   const market = JSON.parse(read('.claude-plugin/marketplace.json'));
   const entry = market.plugins.find((p) => p.name === plugin.name);
   assert.ok(entry, 'marketplace lists the plugin');
   assert.equal(plugin.version, entry.version);
-  assert.equal(plugin.version, '2.0.0');
+  assert.equal(plugin.version, '2.3.0');
 });
 
 test('every command file is documented in the README', () => {

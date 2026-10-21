@@ -8,9 +8,10 @@ import { nextAction, summarize, ACTIONS, assertAction, setupGaps } from '../../s
 import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 const SCRIPT = new URL('../../skills/protoblocks-site-builder/scripts/lib/status.mjs', import.meta.url).pathname;
-// A finished setup: tokens, menus and the header part are recorded.
+// A finished setup: the theme screenshot, tokens, menus and the header part are recorded.
+const SCREENSHOT = { page: 'home', source: 'frame', writtenAt: 'x' };
 const SETUP = { tokens: {}, navigation: { menus: { primary: { id: 1 } } }, parts: { header: { writtenAt: 'x' } } };
-const base = (pages) => ({ schemaVersion: 1, site: { url: 'http://a.local', path: '/x', theme: { slug: 'acme' }, ...SETUP }, library: {}, pages });
+const base = (pages) => ({ schemaVersion: 1, site: { url: 'http://a.local', path: '/x', theme: { slug: 'acme', screenshot: SCREENSHOT }, ...SETUP }, library: {}, pages });
 const sec = (n, status, extra = {}) => ({ n, anchor: `pb-s${n}`, status, ...extra });
 
 test('no state → setup', () => assert.equal(nextAction(null).action, 'setup'));
@@ -112,7 +113,7 @@ test('CLI: missing state file prints setup', () => {
 
 test('CLI: existing state prints summary; no arg exits 64', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'status-'));
-  initState(dir, { url: 'http://a.local', path: '/x', theme: { slug: 'acme' }, ...SETUP });
+  initState(dir, { url: 'http://a.local', path: '/x', theme: { slug: 'acme', screenshot: SCREENSHOT }, ...SETUP });
   const r = spawnSync('node', [SCRIPT, dir], { encoding: 'utf8' });
   const out = JSON.parse(r.stdout);
   assert.deepEqual([out.site.theme, out.next.action], ['acme', 'ask-more-pages']);
@@ -203,6 +204,24 @@ test('setup is incomplete until tokens, menus and the header part are recorded',
   assert.equal(nextAction(base(pages)).action, 'breakdown');
 });
 
+test('setup is incomplete until the theme screenshot is recorded; the why names theme-screenshot.mjs', () => {
+  const pages = [{ slug: 'home', status: 'planning', sections: [] }];
+  const noShot = base(pages); delete noShot.site.theme.screenshot;
+  const r = nextAction(noShot);
+  assert.equal(r.action, 'setup');
+  assert.match(r.why, /site\.theme\.screenshot \(theme-screenshot\.mjs <page>/);
+  assert.deepEqual(setupGaps(noShot), ["site.theme.screenshot (theme-screenshot.mjs <page>, once the first page's desktop frame is intaken)"]);
+  const noTheme = base(pages); delete noTheme.site.theme;
+  assert.match(setupGaps(noTheme).join(), /site\.theme\.screenshot/);
+  // The screenshot gap comes first: it is taken right after the first intake, before tokens.
+  const nothing = base(pages); delete nothing.site.theme.screenshot; delete nothing.site.tokens;
+  assert.match(setupGaps(nothing)[0], /screenshot/);
+  // No pages yet and no screenshot: still setup (intake first, then the screenshot), not ask-more-pages.
+  const empty = base([]); delete empty.site.theme.screenshot;
+  assert.equal(nextAction(empty).action, 'setup');
+  assert.equal(nextAction(base([])).action, 'ask-more-pages');
+});
+
 test('move-parts: the first page header/footer passed as sections and are not in the parts yet', () => {
   const home = (extra = {}) => ({ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(1, 'done', { anchor: 'pb-header', ...extra }), sec(2, 'done'), sec(3, 'done', { anchor: 'pb-footer', ...extra })] });
   const r = nextAction(base([home()]));
@@ -266,7 +285,7 @@ test('CLI --root finds the theme with a build state: none, one, several; bad usa
   let r = run('--root', root);
   assert.equal(r.status, 0);
   assert.deepEqual(JSON.parse(r.stdout), { themeDir: null, next: { action: 'setup', why: 'no build state yet' } });
-  initState(path.join(themes, 'acme'), { url: 'http://a.local', path: root, theme: { slug: 'acme' }, ...SETUP });
+  initState(path.join(themes, 'acme'), { url: 'http://a.local', path: root, theme: { slug: 'acme', screenshot: SCREENSHOT }, ...SETUP });
   r = run('--root', root);
   const one = JSON.parse(r.stdout);
   assert.deepEqual([one.themeDir, one.site.theme, one.next.action], [path.join(themes, 'acme'), 'acme', 'ask-more-pages']);
@@ -286,7 +305,7 @@ test('CLI --root finds the theme with a build state: none, one, several; bad usa
 test('docs: site-setup records a design without navigation in a way status accepts, and the header part holds the header block alone', () => {
   const doc = fs.readFileSync(new URL('../../skills/protoblocks-site-setup/SKILL.md', import.meta.url), 'utf8');
   const m = doc.match(/<!-- test:run -->\n```bash\nnode "\$PB\/lib\/state\.mjs" set "\$THEME" site\.navigation '(\{[^']*\})'\n```/);
-  assert.ok(m, 'Step 3 has the runnable no-navigation recipe');
+  assert.ok(m, 'Step 4 has the runnable no-navigation recipe');
   const st = base([]);
   st.site.navigation = JSON.parse(m[1]);
   assert.deepEqual(setupGaps(st), []);

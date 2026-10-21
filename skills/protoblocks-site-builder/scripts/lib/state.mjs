@@ -28,7 +28,14 @@ export const schema = {
       properties: {
         localSiteId: str, path: str, url: str,
         wp: { type: 'object', required: ['mode'], properties: { mode: { type: 'string', enum: ['local-wrapper', 'native'] }, wrapper: str } },
-        theme: { type: 'object', properties: { slug: str, forkedFrom: str } },
+        theme: {
+          type: 'object',
+          properties: {
+            slug: str, forkedFrom: str, displayName: str,
+            category: { type: 'object', properties: { slug: str, title: str } },
+            screenshot: { type: 'object', properties: { page: str, source: str, writtenAt: str } },
+          },
+        },
         tokens: obj, motionProfile: obj, navigation: obj, parts: obj,
         qa: { type: 'object', properties: { mismatchMax: { type: 'number' }, pageMismatchMax: { type: 'number' }, heightDeltaMax: { type: 'number' }, maxIterations: { type: 'integer' }, motionMaxAttempts: { type: 'integer' } } },
       },

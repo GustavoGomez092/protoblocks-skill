@@ -22,7 +22,7 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
   "site": {
     "localSiteId": "…", "path": ".../app/public", "url": "https://acme.local",
     "wp": { "mode": "local-wrapper|native", "wrapper": ".protoblocks/wp" },
-    "theme": { "slug": "acme", "forkedFrom": "proto-blocks-theme@1.1.3" },
+    "theme": { "slug": "acme", "forkedFrom": "proto-blocks-theme@1.1.3", "displayName": "Acme Group", "category": { "slug": "acme", "title": "Acme Group blocks" }, "screenshot": { "page": "home", "source": "frame", "writtenAt": "<ISO>" } },
     "tokens": { "colors": {…}, "fonts": {…}, "type": {…}, "radii": {…}, "shadows": {…} },
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
     "qa": { "mismatchMax": 0.08, "pageMismatchMax": 0.12, "heightDeltaMax": 0.03, "maxIterations": 5, "motionMaxAttempts": 3 },
@@ -49,6 +49,17 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
 }
 ```
 
+## `site.theme`
+
+Written by `setup-site.mjs` (merged on a re-run, so `screenshot` survives) and `theme-screenshot.mjs`.
+
+| Field | Meaning |
+|---|---|
+| `slug`, `forkedFrom` | The fork folder under `wp-content/themes/` and the `proto-blocks-theme@<version>` it was forked from (the `Proto Fork:` marker). |
+| `displayName` | The theme's `Theme Name:` (`--theme-name`, default the project name). |
+| `category` | `{ slug, title }`: the Proto-Blocks inserter category the fork's `functions.php` registers (slug = the theme slug, title "<displayName> blocks" or `--category-title`). Every block's `block.json` `"category"` must be `category.slug`; the `category` gate checks it, falling back to the plugin default `proto-blocks` when state has none. |
+| `screenshot` | `{ page, source: "frame", writtenAt }`: `$THEME/screenshot.png` (1200x900) was written from that page's desktop frame. |
+
 ## `site.navigation.menus.<key>`
 
 Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^[a-z0-9][a-z0-9_-]*$`, the `wp_navigation` post slug is `pb-nav-<key>`).
@@ -60,11 +71,11 @@ Written by `navigation.mjs` (`upsert` and `refresh`); one entry per menu key (`^
 | `pending` | `[{ label, page }]` page links still written as placeholder custom links (page missing or unpublished). |
 | `contentHash` | sha256 of the menu's `post_content` as protoblocks last wrote it. `upsert` refuses (`[EEDITED]`) when the live menu no longer matches (edited in the Site Editor) unless `--force`. |
 
-A design without navigation records `site.navigation = { "menus": {}, "none": true }` instead (site-setup Step 3); `status.mjs` then counts navigation as set up. A later `upsert` adds menus as usual.
+A design without navigation records `site.navigation = { "menus": {}, "none": true }` instead (site-setup Step 4); `status.mjs` then counts navigation as set up. A later `upsert` adds menus as usual.
 
 ## `site.parts.<slug>`
 
-Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true`) and `site.parts.header` exist; the header also counts once a page's `pb-header` section is `inPart`.
+Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.theme.screenshot`, `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true`) and `site.parts.header` exist; the header also counts once a page's `pb-header` section is `inPart`.
 
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 
@@ -75,7 +86,7 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | Path | Meaning |
 |---|---|
 | `pages[i].plan` | `{ "approvedAt": "<ISO timestamp>", "by": "developer" }`, written by `plan.mjs record`. Must exist before the page `status` becomes `building`; `page.mjs build` refuses without it (`[ENOPLAN]`). |
-| `pages[i].notes.shellCap` | String note that the theme's 1440px shell cap in `style.css` was changed for a wider desktop frame. |
+| `pages[i].notes.shellCap` | Old builds only: a note that the fork's 1440px shell cap in `style.css` was raised for a wider desktop frame. No longer written (`pb-shell.css` uncaps `main`); tolerated in state. |
 | `sections[j].label` | Human label, e.g. "Hero". |
 | `sections[j].decision` | `new`, `reuse` or `extend` (enum-checked). |
 | `sections[j].block` | Block slug the section uses. |

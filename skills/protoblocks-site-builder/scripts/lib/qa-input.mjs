@@ -6,7 +6,9 @@ import { loadState, updateState, DEFAULT_QA } from './state.mjs';
 import { artifactsDir } from './intake.mjs';
 import { assertSlug } from './slugs.mjs';
 
-export const STANDARD_WIDTHS = { desktop: 1440, tablet: 834, mobile: 390 };
+// Breakpoints every section is checked at; the ones without a design frame run in sanity mode. `wide` (1920, never a
+// frame) exists so a band boxed above the frame width (a max-width on the band, a theme shell rule) fails `widthDelta`.
+export const STANDARD_WIDTHS = { desktop: 1440, tablet: 834, mobile: 390, wide: 1920 };
 
 const SAFE_ANCHOR = /^[A-Za-z][A-Za-z0-9_-]*$/; // same rule as check-section
 const SAFE_NAME = /^[A-Za-z0-9_-]+$/;

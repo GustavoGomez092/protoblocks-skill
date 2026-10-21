@@ -76,6 +76,21 @@ qtest('pb-shell.css: header and footer parts are full-bleed (no theme gutters, n
   }
 });
 
+// Rule 5: `main` is neither capped nor padded, so every page section spans the viewport at any width (1920 is what
+// visual QA's `wide` breakpoint and the page-QA wide pass check).
+qtest('pb-shell.css: main is uncapped, so sections are full-bleed at 1920 (control: the theme boxes the page at 1440)', async () => {
+  const off = await measure(1920, { shell: false, globalStyles: true });
+  assert.equal(off.main.width, 1440, 'control: the theme caps main at 1440px on a 1920 viewport');
+  assert.equal(off.main.left, 240, 'control: centred, with gutters inside');
+  for (const width of [1440, 1920, 2560]) {
+    for (const globalStyles of [true, false]) {
+      const on = await measure(width, { shell: true, globalStyles });
+      assert.equal(on.main.width, on.viewport, `main at ${width} (global styles ${globalStyles}): ${JSON.stringify(on.main)}`);
+      assert.equal(on.main.left, 0, `main at ${width}`);
+    }
+  }
+});
+
 // Rule 3: no root blockGap margin between the parts and the page content when WordPress' global styles are on.
 qtest('pb-shell.css: no blockGap margin between the header part, main and the footer part', async () => {
   const off = await measure(1440, { shell: false, globalStyles: true });
@@ -138,15 +153,18 @@ qtest('pb-shell.css: no blockGap between page sections in post-content; other co
   assert.equal(on['dev-note'][0], '24px', 'a developer paragraph between sections keeps its gap');
 });
 
-// The full-bleed rule targets the template part only: `main` holding #pb-header (first page, before move-parts, on a
-// theme without the Taxi wrapper) keeps the theme's cap and gutters.
-qtest('pb-shell.css: the full-bleed rule never matches main, even when main holds #pb-header', async () => {
+// `main` holding #pb-header (first page, before move-parts, on a theme without the Taxi wrapper) loses the theme's cap and
+// gutters like any main: the sections inside it are the full-bleed bands.
+qtest('pb-shell.css: main loses the theme cap and gutters, also when main holds #pb-header', async () => {
   const body = (shell) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>main</title>
 <style>.wp-site-blocks > header, .wp-site-blocks > footer, .wp-site-blocks main { box-sizing: border-box; width: 100%; max-width: 1440px; margin-inline: auto; padding-inline: 40px; }</style>
 ${shell ? '<link rel="stylesheet" href="/pb-shell.css">' : ''}</head><body><div class="wp-site-blocks">
 <header class="wp-block-template-part"><p>default header part</p></header>
 <main><section id="pb-header" style="height:80px"></section><section id="pb-s2" style="height:200px"></section></main>
 </div></body></html>`;
-  const css = () => { const cs = getComputedStyle(document.querySelector('main')); return [cs.maxWidth, cs.paddingLeft]; };
-  assert.deepEqual(await onPage(body, { shell: true, width: 1680 }, css), ['1440px', '40px']);
+  const css = () => { const cs = getComputedStyle(document.querySelector('main')); return [cs.maxWidth, cs.paddingLeft, document.getElementById('pb-s2').getBoundingClientRect().width, document.documentElement.clientWidth]; };
+  assert.deepEqual(await onPage(body, { shell: false, width: 1680 }, css), ['1440px', '40px', 1360, 1680], 'control: boxed and padded without pb-shell.css');
+  const on = await onPage(body, { shell: true, width: 1680 }, css);
+  assert.deepEqual(on.slice(0, 2), ['none', '0px']);
+  assert.equal(on[2], on[3], 'the section spans the 1680 viewport');
 });

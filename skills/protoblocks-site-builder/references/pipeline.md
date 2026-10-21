@@ -18,7 +18,7 @@ node "$PB/lib/status.mjs" "$THEME"
 | State | `next.action` |
 |---|---|
 | no state | `setup` |
-| `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true` for a design without navigation) or `site.parts.header` (or a `pb-header` section `inPart`) missing (`why` names them) | `setup` |
+| `site.theme.screenshot`, `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true` for a design without navigation) or `site.parts.header` (or a `pb-header` section `inPart`) missing (`why` names them) | `setup` |
 | no pages, or every page `done` with no open section | `ask-more-pages` |
 | `planning`, no `plan.approvedAt` (or approved with no sections) | `breakdown` |
 | `planning` with `plan.approvedAt` | `build-page` |
@@ -61,20 +61,21 @@ Section (`planned` -> `building` -> `verifying` -> `animating` -> `done`):
 
 ### `setup`
 
-Ask the project name, get the first design. Then follow `protoblocks-site-setup`:
+Ask the project name (and the theme's display name when it differs: `--theme-name`), get the first design. Then follow `protoblocks-site-setup`:
 
 ```bash
-node "$PB/lib/setup-site.mjs" --name "<Project>" [--site "<Local site>"]
+node "$PB/lib/setup-site.mjs" --name "<Project>" [--theme-name "<display name>"] [--site "<Local site>"]
 node "$PB/lib/motion.mjs" install "$THEME"
 ```
 
-`THEME` = the printed `theme.themeDir`. `setup-site.mjs` writes `build.json` (`site.url`, `site.path`, `site.theme`, `site.wp`, `site.qa` defaults). Then intake the first design (`protoblocks-design-breakdown` Step 1, `references/intake.md`), because tokens are read from the frames:
+`THEME` = the printed `theme.themeDir`. `setup-site.mjs` writes `build.json` (`site.url`, `site.path`, `site.theme` with `slug`, `forkedFrom`, `displayName` and the per-site block `category`, `site.wp`, `site.qa` defaults). Then intake the first design (`protoblocks-design-breakdown` Step 1, `references/intake.md`), because the theme screenshot and the tokens are read from the frames:
 
 ```bash
 node "$PB/lib/intake.mjs" add-frame "$THEME" <page> desktop frame-desktop.png [--width W] [--title "Home"]
+node "$PB/lib/theme-screenshot.mjs" "$THEME" <page>
 ```
 
-That creates `pages[]` (`status: planning`, `design.frames`). Then tokens (`site.tokens`), navigation (`site.navigation.menus.<key>`) and the header/footer parts (site-setup Steps 2-4):
+That creates `pages[]` (`status: planning`, `design.frames`), then writes `$THEME/screenshot.png` (the top of the desktop frame, 4:3, 1200x900) and `site.theme.screenshot` (site-setup Step 2; `[EQADEPS]`: the QA dependencies are missing, show preflight's `qa-deps` fix command, ask once, install, re-run). Then tokens (`site.tokens`), navigation (`site.navigation.menus.<key>`) and the header/footer parts (site-setup Steps 3-5):
 
 ```bash
 node "$PB/lib/tokens.mjs" apply "$THEME" "$THEME/.protoblocks/tokens.json"
@@ -84,7 +85,7 @@ node "$PB/lib/parts.mjs" overrides "$THEME"
 
 Plan the header and footer as the first and last sections of the first page (ranges with `part`); the section loop builds them and moves them into the parts later.
 
-`tokens.mjs apply` writes `site.tokens`, `navigation.mjs upsert` writes `site.navigation.menus.<key>`, and `parts.mjs write` writes `site.parts.<slug>` (`{block, writtenAt}`).
+`theme-screenshot.mjs` writes `site.theme.screenshot` (`{page, source: "frame", writtenAt}`), `tokens.mjs apply` writes `site.tokens`, `navigation.mjs upsert` writes `site.navigation.menus.<key>`, and `parts.mjs write` writes `site.parts.<slug>` (`{block, writtenAt}`).
 
 Resuming a half-done setup: status says `setup` with `why` naming the missing fields (or `ask-more-pages` with `why: "no pages yet"` when only the intake is missing). Run only those steps; also check `site.motionProfile` and `pages` (`node "$PB/lib/state.mjs" get "$THEME" site`). `setup-site.mjs` is safe to re-run (it reuses the fork) and every setup step is idempotent.
 
@@ -144,16 +145,17 @@ Prints `{page, moved: [{n, anchor, status}], reverify}`. It sets the header/foot
 
 ### `page-qa`
 
-1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
+1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, a `wide` pass at 1920px in which every section must span the viewport, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
 
 ```bash
 node "$PB/qa/page-qa.mjs" run "$THEME" <page>
 ```
 
-   Prints `{url, pass, breakpoints: [{name, status, mismatch, heightDelta, fullyMasked, masksApplied, masks, imageErrors, composite, pass}], a11y: {blocking, other}, pageErrors, warnings, file}` and exits 1 unless `pass`. Section masks (`sections[j].masks.<bp>`) are applied at the design position (via the crop range `sections[j].ranges.<bp>`) and at the position the section renders; a section with masks but no range is listed in `warnings` (re-crop it to record the range). The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). Only `serious`/`critical` axe violations inside `main`, `header`, `footer` or a `#pb-s…` section block the page; `minor`/`moderate` go into the final report. `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
+   Prints `{url, pass, breakpoints: [{name, status, mismatch, heightDelta, fullyMasked, masksApplied, masks, imageErrors, composite, pass}], wide: {width, viewport, sections, boxed, pass}, a11y: {blocking, other}, pageErrors, warnings, file}` and exits 1 unless `pass`. `wide.boxed` lists the sections narrower (or wider) than the 1920px viewport: the page fails. Section masks (`sections[j].masks.<bp>`) are applied at the design position (via the crop range `sections[j].ranges.<bp>`) and at the position the section renders; a section with masks but no range is listed in `warnings` (re-crop it to record the range). The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). Only `serious`/`critical` axe violations inside `main`, `header`, `footer` or a `#pb-s…` section block the page; `minor`/`moderate` go into the final report. `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
 2. Fix failures:
    - Design difference: open the `composite` images, find the responsible section, fix it with `protoblocks-section-loop` (Build fix, gates, `page.mjs build`), then `qa-input.mjs prepare` for that section. Status now routes to `section-verify`; a pass returns it to `done` and page QA comes up again.
    - Blocking a11y violation: fix the block markup or colors (tokens), rebuild, re-verify every section whose markup changed.
+   - `wide.boxed`: those bands do not span the viewport at 1920 (a `max-width` on the band, or a theme rule the fork added; `pb-shell.css` already uncaps `main`): fix the block, rebuild, `qa-input.mjs prepare` that section (its `wide` breakpoint fails the same way).
    - `imageErrors` / `pageErrors`: broken media or console errors; fix them, rebuild.
    - `a11y.error`: axe could not run (QA deps, see Recovery).
    - Design differences you cannot fix (for example ones the developer already accepted per section): show the composites and ask. They accept them (step 3 with `--accepted`) or you keep fixing. Never accept for them; only the developer may change `site.qa`.
@@ -169,7 +171,7 @@ node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json" --accepted "<what they accepted>"
 ```
 
-   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, a boxed section in the wide pass, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
 
 ### `seo`
 

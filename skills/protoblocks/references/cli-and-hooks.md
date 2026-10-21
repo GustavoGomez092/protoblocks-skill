@@ -99,6 +99,7 @@ Auto-generates inserter thumbnails. The admin "Preview Capture" page renders eac
 Proto-Blocks registers a custom inserter category that appears at the **top** of the block inserter.
 - Defaults: title "Proto Blocks", slug `proto-blocks`, icon `layout` (dashicon).
 - Rename in admin (Proto-Blocks → System Status → General Settings) or via filters: `proto_blocks_category_title`, `proto_blocks_category_icon`, `proto_blocks_category_slug`. If you change the slug, update each block's `"category"` to match.
+- The site builder (`protoblocks-site-setup`, `setup-site.mjs`) sets the category per site in the theme fork's `functions.php`: slug = the theme slug, title "<theme display name> blocks" (`--category-title` overrides), recorded as `site.theme.category` in the build state. Every block on that site must set `"category"` to that slug; the build gates check it.
 
 ## Demo blocks
 

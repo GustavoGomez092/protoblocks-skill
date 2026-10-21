@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildCheckInput, prepareCheck, recordVerdict, validateVerdict } from '../../skills/protoblocks-site-builder/scripts/lib/qa-input.mjs';
+import { buildCheckInput, prepareCheck, recordVerdict, validateVerdict, STANDARD_WIDTHS } from '../../skills/protoblocks-site-builder/scripts/lib/qa-input.mjs';
 import { initState, updateState, loadState } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 
 function setup(max = 2) {
@@ -20,7 +20,8 @@ function setup(max = 2) {
 const verdict = (pass, extra = {}) => ({ pass, anchor: 'pb-s1', numericPass: pass,
   breakpoints: [{ name: 'desktop', mode: 'diff', mismatch: pass ? 0.03 : 0.2, heightDelta: 0.01, widthDelta: 0, numericPass: pass, status: 200 },
     { name: 'tablet', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true },
-    { name: 'mobile', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true }],
+    { name: 'mobile', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true },
+    { name: 'wide', mode: 'sanity', ok: true, widthDelta: 0, numericPass: true }],
   discrepancies: pass ? [] : [{ breakpoint: 'desktop', area: 'h1', issue: 'x', severity: 'high', fix: 'y' }], artifacts: [], ...extra });
 const errVerdict = () => ({ pass: false, anchor: 'pb-s1', numericPass: false, error: '[EINPUT] boom' });
 // What check-section would have written for this verdict (result.json uses `breakpoint`, the verdict `name`).
@@ -41,7 +42,8 @@ test('buildCheckInput: diff for framed breakpoints, sanity for the rest, iterati
   assert.equal(input.anchor, 'pb-s1');
   assert.deepEqual(input.qa, { mismatchMax: 0.08, heightDeltaMax: 0.03 });
   assert.deepEqual(input.breakpoints[0], { name: 'desktop', width: 1440, scale: 2, design: '/c/pb-s1.png', masks: [] });
-  assert.deepEqual(input.breakpoints.slice(1).map((b) => [b.name, b.width, b.sanityOnly]), [['tablet', 834, true], ['mobile', 390, true]]);
+  assert.deepEqual(input.breakpoints.slice(1).map((b) => [b.name, b.width, b.sanityOnly]), [['tablet', 834, true], ['mobile', 390, true], ['wide', 1920, true]]);
+  assert.equal(STANDARD_WIDTHS.wide, 1920, 'the wide breakpoint catches a band boxed above the frame width');
   assert.ok(input.iterDir.endsWith(path.join('artifacts', 'home', 'pb-s1', 'iter-1')));
 });
 
@@ -167,7 +169,7 @@ test('recordVerdict: fail → building and cap; pass → animating with baseline
   const r3 = recordVerdict(theme, 'home', 1, writeV(dir3, verdict(true)));
   assert.equal(r3.status, 'animating');
   const st = loadState(theme);
-  assert.equal(st.pages[0].sections[0].qa.filter((q) => q.iteration === 3).length, 3);
+  assert.equal(st.pages[0].sections[0].qa.filter((q) => q.iteration === 3).length, 4, "one qa record per breakpoint: desktop, tablet, mobile, wide");
   assert.equal(st.library.hero.baselines[0].breakpoint, 'desktop');
   assert.ok(fs.existsSync(st.library.hero.baselines[0].file));
 

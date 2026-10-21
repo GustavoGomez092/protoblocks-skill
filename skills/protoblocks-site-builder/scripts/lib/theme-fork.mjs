@@ -62,6 +62,66 @@ export function rewriteStyleHeader(css, { name, slug, forkedFrom }) {
 
 export const rewriteTextDomain = (src, slug) => src.replaceAll("'proto-theme'", `'${slug}'`);
 
+export const readThemeName = (css) => css.match(/^Theme Name:\s*(.+?)\s*$/m)?.[1] ?? null;
+
+/**
+ * Theme Name and Description of an existing fork (a rename); Version, Text Domain and the marker are left alone.
+ * A header without a Description line gets one after Theme Name.
+ */
+export function renameStyleHeader(css, { name, forkedFrom }) {
+  const description = `Description: ${name} — built with Proto-Blocks (forked from ${forkedFrom}).`;
+  const out = css.replace(/^Theme Name:.*$/m, `Theme Name: ${name}`);
+  return /^Description:.*$/m.test(out) ? out.replace(/^Description:.*$/m, description) : out.replace(/^(Theme Name:.*)$/m, `$1\n${description}`);
+}
+
+// The plugin's defaults when a theme does not filter the inserter category.
+export const DEFAULT_CATEGORY = Object.freeze({ slug: 'proto-blocks', title: 'Proto Blocks' });
+const CATEGORY_SLUG_RE = /add_filter\(\s*'proto_blocks_category_slug'\s*,\s*fn\(\)\s*=>\s*'((?:[^'\\]|\\.)*)'\s*\)/;
+const CATEGORY_TITLE_RE = /add_filter\(\s*'proto_blocks_category_title'\s*,\s*fn\(\)\s*=>\s*__\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'\s*\)\s*\)/;
+const phpUnquote = (s) => s.replace(/\\(['\\])/g, '$1');
+const phpQuote = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+/** The inserter category the theme's functions.php registers (`proto_blocks_category_slug` / `_title` filters), or null. */
+export function categoryFilters(src) {
+  const slug = src.match(CATEGORY_SLUG_RE);
+  const title = src.match(CATEGORY_TITLE_RE);
+  if (!slug || !title) return null;
+  return { slug: phpUnquote(slug[1]), title: phpUnquote(title[1]) };
+}
+
+/** Rewrites both category filters (appends them when the theme has none). `domain` is the text domain for a new title. */
+export function rewriteCategoryFilters(src, { slug, title, domain = slug }) {
+  if (CATEGORY_SLUG_RE.test(src) && CATEGORY_TITLE_RE.test(src)) {
+    return src
+      .replace(CATEGORY_SLUG_RE, `add_filter('proto_blocks_category_slug', fn() => '${phpQuote(slug)}')`)
+      .replace(CATEGORY_TITLE_RE, (_m, _t, d) => `add_filter('proto_blocks_category_title', fn() => __('${phpQuote(title)}', '${d}'))`);
+  }
+  const block = `\n// Proto-Blocks inserter category.\nadd_filter('proto_blocks_category_slug', fn() => '${phpQuote(slug)}');\nadd_filter('proto_blocks_category_title', fn() => __('${phpQuote(title)}', '${phpQuote(domain)}'));\n`;
+  return `${src.replace(/\s*$/, '\n')}${block}`;
+}
+
+/**
+ * Writes the fork's identity: `Theme Name:` / `Description:` in style.css and the inserter category filters in
+ * functions.php (slug = the theme slug, title = `categoryTitle`). Used by a fresh fork and by a rename of an existing one.
+ */
+export function applyIdentity(themeDir, { displayName, slug, forkedFrom, categoryTitle }) {
+  const stylePath = path.join(themeDir, 'style.css');
+  fs.writeFileSync(stylePath, renameStyleHeader(fs.readFileSync(stylePath, 'utf8'), { name: displayName, forkedFrom }));
+  const category = { slug, title: categoryTitle };
+  const fn = path.join(themeDir, 'functions.php');
+  if (fs.existsSync(fn)) fs.writeFileSync(fn, rewriteCategoryFilters(fs.readFileSync(fn, 'utf8'), category));
+  return { displayName, category };
+}
+
+/** The identity an existing fork has on disk (what a re-run without --theme-name records). */
+export function readIdentity(themeDir, fallbackName) {
+  const stylePath = path.join(themeDir, 'style.css');
+  const displayName = (fs.existsSync(stylePath) && readThemeName(fs.readFileSync(stylePath, 'utf8'))) || fallbackName;
+  const fn = path.join(themeDir, 'functions.php');
+  const category = (fs.existsSync(fn) && categoryFilters(fs.readFileSync(fn, 'utf8'))) || { ...DEFAULT_CATEGORY };
+  return { displayName, category };
+}
+
 function textDomainFiles(themeDir) {
   const files = [path.join(themeDir, 'functions.php')];
   for (const sub of ['inc', 'assets/editor']) {
@@ -119,8 +179,11 @@ function moveToBackup(themesDir, slug, themeDir) {
  * - `force` only replaces a foreign (non-fork) folder; `refork: '<slug>'` replaces an existing fork.
  * - A replaced folder is moved to <wp-content>/.protoblocks/backups/<slug>-<ts>/ (reported as `backup`),
  *   and moved back if the new fork cannot be set up. A symlinked folder is never replaced (ESYMLINK).
+ * - `themeName` (default `name`) is the display name (`Theme Name:`); `categoryTitle` (default "<themeName> blocks")
+ *   titles the inserter category, whose slug is the theme slug. On a reused fork they are written only when passed
+ *   (a rename, `renamed: true`); otherwise the identity on disk is reported. `displayName` and `category` are returned.
  */
-export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, refork, zipFile, forkedFrom, exec = realExec, cp = fs.cpSync }) {
+export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = false, refork, zipFile, forkedFrom, themeName, categoryTitle, exec = realExec, cp = fs.cpSync }) {
   // Validate slug format first, before any other processing
   validateSlug(slug);
   if (refork !== undefined && refork !== slug) {
@@ -136,11 +199,17 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
     throw e;
   }
 
+  const rename = themeName !== undefined || categoryTitle !== undefined;
+  const displayName = themeName ?? name;
+  const identity = { displayName, slug, categoryTitle: categoryTitle ?? `${displayName} blocks` };
+
   const existing = inspectThemeDir(themeDir);
-  // Reusing never writes over anything, so a fork (even a symlinked one) is reused whatever `force` says.
+  // Reusing never writes over anything but, with --theme-name / --category-title, the identity (a rename); a fork
+  // (even a symlinked one) is reused whatever `force` says.
   if (existing.marker && refork === undefined) {
+    const id = rename ? applyIdentity(themeDir, { ...identity, forkedFrom: existing.marker }) : readIdentity(themeDir, name);
     wp.check(['theme', 'activate', slug]);
-    return { themeDir, slug, reused: true, forkedFrom: existing.marker };
+    return { themeDir, slug, reused: true, forkedFrom: existing.marker, ...id, ...(rename ? { renamed: true } : {}) };
   }
   if (existing.kind === 'symlink' && (force || refork !== undefined)) {
     throw new ForkError(`wp-content/themes/${slug} is a symlink (a development checkout?); it is never replaced. Use another --slug.`, 'ESYMLINK');
@@ -171,8 +240,9 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
 
   try {
     const stylePath = path.join(themeDir, 'style.css');
-    fs.writeFileSync(stylePath, rewriteStyleHeader(fs.readFileSync(stylePath, 'utf8'), { name, slug, forkedFrom }));
+    fs.writeFileSync(stylePath, rewriteStyleHeader(fs.readFileSync(stylePath, 'utf8'), { name: displayName, slug, forkedFrom }));
     for (const f of textDomainFiles(themeDir)) fs.writeFileSync(f, rewriteTextDomain(fs.readFileSync(f, 'utf8'), slug));
+    applyIdentity(themeDir, { ...identity, forkedFrom });
 
     gitInit(themeDir, forkedFrom, exec);
     wp.check(['theme', 'activate', slug]);
@@ -181,7 +251,7 @@ export function forkTheme({ wp, themesDir, name, slug = slugify(name), force = f
     throw err;
   }
 
-  return { themeDir, slug, reused: false, forkedFrom, ...(backup ? { backup } : {}) };
+  return { themeDir, slug, reused: false, forkedFrom, displayName, category: { slug, title: identity.categoryTitle }, ...(backup ? { backup } : {}) };
 }
 
 // Remove only the folder this call created, then put the moved-away original back.
@@ -214,11 +284,11 @@ async function main(argv) {
     if (argv[i] === '--force') a.force = true;
     else if (argv[i].startsWith('--')) a[argv[i].slice(2)] = argv[++i];
   }
-  if (!a.name) { process.stderr.write('Usage: node theme-fork.mjs --name "<Project>" [--slug s] [--force] [--refork <slug>] [--cwd D]\n'); process.exit(64); }
+  if (!a.name) { process.stderr.write('Usage: node theme-fork.mjs --name "<Project>" [--slug s] [--theme-name "<display name>"] [--category-title "<title>"] [--force] [--refork <slug>] [--cwd D]\n'); process.exit(64); }
   const rt = loadRuntime(a.cwd ?? process.cwd());
   const themesDir = path.join(rt.publicPath, 'wp-content', 'themes');
   const slug = a.slug ?? slugify(a.name);
-  const opts = { wp: createWp(rt), themesDir, name: a.name, slug, force: !!a.force, refork: a.refork };
+  const opts = { wp: createWp(rt), themesDir, name: a.name, slug, force: !!a.force, refork: a.refork, themeName: a['theme-name'], categoryTitle: a['category-title'] };
   // A reusable fork needs no download, so re-runs work offline.
   if (inspectThemeDir(path.join(themesDir, slug)).marker && a.refork === undefined) {
     process.stdout.write(`${JSON.stringify(forkTheme(opts), null, 2)}\n`);

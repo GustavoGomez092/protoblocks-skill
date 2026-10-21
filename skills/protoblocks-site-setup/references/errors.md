@@ -9,6 +9,7 @@ Shell variables do not persist between Bash commands: start each command with th
 - A replaced folder (foreign under `--force`, fork under `--refork`) is moved, never deleted, to `wp-content/.protoblocks/backups/<slug>-<timestamp>/`; the result reports it as `theme.backup`. If the new fork cannot be set up, the folder is moved back.
 - A symlinked theme folder is never replaced (`ESYMLINK`).
 - The fork gets its own git repo, unless the themes folder is already inside a git work tree.
+- The fork's identity: `Theme Name:` / `Description:` in `style.css` are `--theme-name` (default `--name`), and `functions.php` registers the Proto-Blocks inserter category as slug `<slug>`, title "<display name> blocks" (`--category-title`). On a reused fork they are rewritten only when one of those flags is passed (`theme.renamed: true`, left uncommitted in the fork's repo); otherwise the identity on disk is recorded as is.
 
 Plugins already installed are never replaced. When a newer Proto-Blocks release exists the result says `"updateAvailable": "<version>"` on the `proto-blocks` entry; tell the developer. Only with their explicit OK re-run with `--update-plugins`, which reinstalls Proto-Blocks from the release zip. It refuses with `EPLUGINDEV` when the plugin folder is a symlink or a git checkout (WordPress would delete the checkout, `.git` included); the developer updates that copy themselves (e.g. `git pull`).
 
@@ -29,6 +30,13 @@ Plugins already installed are never replaced. When a newer Proto-Blocks release 
 - `EMANAGEDBLOCK` - the managed block in the theme's functions.php is broken; ask the developer to fix it by hand.
 - `ENOFUNCTIONS` - the theme has no `functions.php`, so the managed assets cannot be wired; check the theme folder.
 
+## Step 2 (theme screenshot) errors
+
+- `EQADEPS` - sharp is not installed with the QA dependencies; the message prints the install command (preflight's `qa-deps` fix). Ask once, install, re-run.
+- `ENOPAGE` - no page with that slug in state; `EINPUT` - the page has no desktop frame: intake it first (`intake.mjs add-frame`).
+- `EIMAGE` - the desktop frame is not a PNG/JPEG, or its file is gone: re-run the intake.
+- `ENOTFORK` - see below.
+
 ## Motion errors
 
 - `EPROFILE` - unknown profile name or an invalid custom profile (duration 0-10, stagger 0-2, distance 0-400, ease 1-40 chars from `A-Za-z0-9.(), -`); nothing changed.
@@ -39,6 +47,8 @@ Plugins already installed are never replaced. When a newer Proto-Blocks release 
 ## Header/footer part errors
 
 `ECONFIRM` (needs developer OK + id), `ESTALE` (the id changed; re-preview), `EAMBIGUOUS` (several copies; resolve in wp-admin), `ETHEMEMISMATCH` (the theme is not the active one, or the saved part does not resolve to this theme), `ESLUG`/`ETHEME` (invalid argument), `ENOTRASH` (Trash is disabled, so removal would delete permanently: tell the developer to use "Clear customizations" on the part in the Site Editor).
+
+The recovery command printed by `remove-override` uses the same WP-CLI command preflight resolved (Local's wrapper at `wp-content/.protoblocks/wp`, or `wp --path=...`), never a bare `wp` that may target another install.
 
 ## Errors shared by every step
 

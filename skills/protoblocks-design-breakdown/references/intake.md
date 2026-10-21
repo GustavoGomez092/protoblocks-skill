@@ -47,20 +47,9 @@ Takes full-page screenshots at each width (>=1200 desktop, >=700 tablet, else mo
 
 Say which server failed and the error. Offer the fallback: the developer exports PNGs and (for copy) pastes text. Do not guess content or reconstruct a frame from memory.
 
-## Shell cap (desktop frames above 1440px)
+## Frames wider than 1440px
 
-The base theme caps `header`, `main` and `footer` at `max-width: 1440px` and pads them with side gutters (theme `style.css`, the `.wp-site-blocks > header, > footer, main` rule). The builder's managed `assets/css/pb-shell.css` (installed by setup) lifts cap and gutters for the template parts that hold the design's header and footer (`#pb-header`, `#pb-footer`, after `move-parts`), resets the body margin and removes WordPress' blockGap between the parts and the page; `main` keeps the cap. So if the desktop frame width W is greater than 1440, every page section verified against it fails with `widthDelta = 1440 - W`. Before any section is verified:
-
-1. `grep -n "max-width: 1440px" "$THEME/style.css"` and edit that one rule (and the comment above it) so it reads `max-width: Wpx`. Edit the forked theme in `$THEME` only, never the upstream `proto-blocks-theme` checkout.
-2. Record it in state notes (`PI` is the page index, found by slug as in SKILL.md Step 5; this example uses W = 1600):
-
-<!-- test:run -->
-```bash
-PI=$(node "$PB/lib/state.mjs" get "$THEME" pages | node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a.findIndex((p)=>p.slug===process.argv[1]))' home)
-node "$PB/lib/state.mjs" set "$THEME" "pages.$PI.notes.shellCap" '"style.css shell max-width raised from 1440px to 1600px for the 1600px desktop frame"'
-```
-
-Frames at or below 1440 need no change (the shell is centred). The cap is theme-wide: if a later page has a different W, ask the developer before changing it again.
+No theme edit is needed for a desktop frame of any width. The base theme caps `main` (and its stock header/footer parts) at `max-width: 1440px` with side gutters, but the builder's managed `assets/css/pb-shell.css` (installed by setup, overwritten on every install) lifts that cap and the gutters from `main` and from the template parts holding `#pb-header` / `#pb-footer`: every Proto-Blocks section is a full-bleed band carrying its own inner container, so the page spans the viewport at every width (visual QA checks 1920px as the `wide` breakpoint, page QA runs a wide pass). Never raise `max-width: 1440px` in the fork's `style.css` for a frame; a `notes.shellCap` entry in an old build only records that this was once done.
 
 ## Assets
 

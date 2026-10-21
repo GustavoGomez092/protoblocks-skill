@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { slugify, forkMarker, rewriteStyleHeader, rewriteTextDomain, ForkError, forkTheme } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
+import { slugify, forkMarker, rewriteStyleHeader, rewriteTextDomain, ForkError, forkTheme, categoryFilters, rewriteCategoryFilters, renameStyleHeader, readThemeName, readIdentity, DEFAULT_CATEGORY } from '../../skills/protoblocks-site-builder/scripts/lib/theme-fork.mjs';
 
 const STYLE = `/*
 Theme Name: Proto-theme
@@ -31,6 +31,51 @@ test('rewriteStyleHeader sets identity and the fork marker', () => {
   const again = rewriteStyleHeader(out, { name: 'Acme Co', slug: 'acme-co', forkedFrom: 'proto-blocks-theme@1.1.4' });
   assert.equal(again.match(/^Proto Fork:/gm).length, 1);
   assert.equal(forkMarker(again), 'proto-blocks-theme@1.1.4');
+});
+
+const FUNCTIONS = `<?php
+// Proto-Blocks inserter category.
+add_filter('proto_blocks_category_slug', fn() => 'proto');
+add_filter('proto_blocks_category_title', fn() => __('Proto Blocks', 'proto-theme'));
+
+// SVG favicon.
+add_action('wp_head', 'x');
+`;
+
+test('categoryFilters reads the inserter category the theme registers; null when it has no filters', () => {
+  assert.deepEqual(categoryFilters(FUNCTIONS), { slug: 'proto', title: 'Proto Blocks' });
+  assert.equal(categoryFilters("<?php\nadd_action('init', 'x');"), null);
+  assert.equal(categoryFilters("<?php\nadd_filter('proto_blocks_category_slug', fn() => 'x');"), null, 'both filters are needed');
+  assert.deepEqual(categoryFilters("add_filter( 'proto_blocks_category_slug', fn() => 'o-flex' );\nadd_filter('proto_blocks_category_title', fn() => __('O\\'Flex blocks', 'o-flex'));"), { slug: 'o-flex', title: "O'Flex blocks" });
+});
+
+test('rewriteCategoryFilters rewrites both filters in place, keeps the text domain and escapes quotes', () => {
+  const out = rewriteCategoryFilters(FUNCTIONS, { slug: 'o-flex', title: "O'Flex Group blocks" });
+  assert.match(out, /^add_filter\('proto_blocks_category_slug', fn\(\) => 'o-flex'\);$/m);
+  assert.match(out, /^add_filter\('proto_blocks_category_title', fn\(\) => __\('O\\'Flex Group blocks', 'proto-theme'\)\);$/m);
+  assert.ok(out.includes("add_action('wp_head', 'x');"), 'the rest of the file is untouched');
+  assert.equal(out.match(/proto_blocks_category_slug/g).length, 1);
+  assert.deepEqual(categoryFilters(out), { slug: 'o-flex', title: "O'Flex Group blocks" });
+  // Idempotent.
+  assert.equal(rewriteCategoryFilters(out, { slug: 'o-flex', title: "O'Flex Group blocks" }), out);
+});
+
+test('rewriteCategoryFilters appends the filters when the theme has none', () => {
+  const out = rewriteCategoryFilters("<?php\nadd_action('init', 'x');\n\n", { slug: 'acme', title: 'Acme blocks' });
+  assert.ok(out.startsWith("<?php\nadd_action('init', 'x');\n\n// Proto-Blocks inserter category.\n"));
+  assert.deepEqual(categoryFilters(out), { slug: 'acme', title: 'Acme blocks' });
+  assert.match(out, /__\('Acme blocks', 'acme'\)/, 'the text domain defaults to the slug');
+});
+
+test('renameStyleHeader changes only Theme Name and Description; readThemeName reads it back', () => {
+  const forked = rewriteStyleHeader(STYLE, { name: 'Acme', slug: 'acme', forkedFrom: 'proto-blocks-theme@1.1.3' });
+  const out = renameStyleHeader(forked.replace('Version: 1.0.0', 'Version: 1.4.2'), { name: 'Acme Group', forkedFrom: 'proto-blocks-theme@1.1.3' });
+  assert.equal(readThemeName(out), 'Acme Group');
+  assert.match(out, /^Description: Acme Group — built with Proto-Blocks \(forked from proto-blocks-theme@1\.1\.3\)\.$/m);
+  assert.match(out, /^Version: 1\.4\.2$/m, 'a rename keeps the version');
+  assert.match(out, /^Text Domain: acme$/m);
+  assert.equal(forkMarker(out), 'proto-blocks-theme@1.1.3');
+  assert.equal(readThemeName('body{}'), null);
 });
 
 test('forkMarker is null for a non-fork theme', () => {
@@ -399,6 +444,52 @@ test('failed activation after refork/force restores the previous folder from the
   assert.throws(() => forkTheme(base(f, { wp, force: true, zipFile: f.zipFile })), (e) => e.code === 'WPFAIL');
   assert.equal(fs.readFileSync(path.join(d, 'style.css'), 'utf8'), '/*\nTheme Name: Client\n*/', 'foreign folder restored');
   assert.deepEqual(f.backups(), []);
+});
+
+// ---- theme display name and the per-site inserter category ----
+test('a fresh fork gets the display name, and the category filters rewritten to <slug> / "<display name> blocks"', () => {
+  const s = sandbox();
+  fs.writeFileSync(path.join(path.dirname(s.zipFile), 'zipsrc', 'proto-theme', 'functions.php'), FUNCTIONS.replace("'proto-theme'", "'proto-theme'"));
+  execSync(`cd "${path.join(s.root, 'zipsrc')}" && rm -f "${s.zipFile}" && zip -qr "${s.zipFile}" proto-theme`);
+  const r = forkTheme(base(s, { zipFile: s.zipFile, themeName: 'Acme Group' }));
+  assert.deepEqual([r.displayName, r.category], ['Acme Group', { slug: 'acme', title: 'Acme Group blocks' }]);
+  const css = fs.readFileSync(path.join(s.themesDir, 'acme', 'style.css'), 'utf8');
+  assert.equal(readThemeName(css), 'Acme Group');
+  assert.match(css, /^Description: Acme Group — built with Proto-Blocks/m);
+  assert.match(css, /^Text Domain: acme$/m);
+  const fn = fs.readFileSync(path.join(s.themesDir, 'acme', 'functions.php'), 'utf8');
+  assert.deepEqual(categoryFilters(fn), { slug: 'acme', title: 'Acme Group blocks' });
+  assert.match(fn, /__\('Acme Group blocks', 'acme'\)/, 'the text domain was rewritten first');
+  // Defaults: the display name is the project name; --category-title overrides the title only.
+  const d = sandbox();
+  const rd = forkTheme(base(d, { zipFile: d.zipFile, categoryTitle: 'Blocks' }));
+  assert.deepEqual([rd.displayName, rd.category], ['Acme', { slug: 'acme', title: 'Blocks' }]);
+  assert.deepEqual(categoryFilters(fs.readFileSync(path.join(d.themesDir, 'acme', 'functions.php'), 'utf8')), { slug: 'acme', title: 'Blocks' }, 'appended when the theme has no filters');
+});
+
+test('a reused fork is renamed only when --theme-name / --category-title are passed; otherwise its identity is read', () => {
+  const s = sandbox();
+  const d = s.mkFork('acme');
+  fs.writeFileSync(path.join(d, 'functions.php'), FUNCTIONS);
+  const plain = forkTheme(base(s));
+  assert.equal(plain.reused, true);
+  assert.equal(plain.renamed, undefined);
+  assert.deepEqual([plain.displayName, plain.category], ['Acme', { slug: 'proto', title: 'Proto Blocks' }], 'what is on disk, not the defaults');
+  assert.equal(readThemeName(fs.readFileSync(path.join(d, 'style.css'), 'utf8')), 'Acme', 'nothing rewritten');
+  const renamed = forkTheme(base(s, { themeName: 'Acme Group' }));
+  assert.deepEqual([renamed.reused, renamed.renamed, renamed.displayName, renamed.category], [true, true, 'Acme Group', { slug: 'acme', title: 'Acme Group blocks' }]);
+  const css = fs.readFileSync(path.join(d, 'style.css'), 'utf8');
+  assert.equal(readThemeName(css), 'Acme Group');
+  assert.match(css, /^Description: Acme Group — built with Proto-Blocks \(forked from proto-blocks-theme@1\.0\.0\)\.$/m, 'the marker version, not the download');
+  assert.equal(forkMarker(css), 'proto-blocks-theme@1.0.0');
+  assert.deepEqual(categoryFilters(fs.readFileSync(path.join(d, 'functions.php'), 'utf8')), { slug: 'acme', title: 'Acme Group blocks' });
+  assert.equal(fs.readFileSync(path.join(d, 'work.txt'), 'utf8'), 'mine', 'still the same fork');
+  // A fork with neither a readable name nor filters: the project name and the plugin defaults.
+  const f = sandbox();
+  const fd = f.mkFork('acme');
+  fs.writeFileSync(path.join(fd, 'style.css'), '/*\nProto Fork: proto-blocks-theme@1.0.0\n*/');
+  assert.deepEqual(readIdentity(fd, 'Acme'), { displayName: 'Acme', category: { ...DEFAULT_CATEGORY } });
+  assert.deepEqual(forkTheme(base(f)).category, { slug: 'proto-blocks', title: 'Proto Blocks' });
 });
 
 test('no git init when the themes dir is already inside a git work tree', () => {

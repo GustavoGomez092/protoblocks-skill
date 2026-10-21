@@ -6,17 +6,24 @@ Authoring rules (field types, controls, templates, Tailwind) live in the `protob
 
 ## Scaffold (decision `new`)
 
+The block's `"category"` is the inserter category the site's theme registers (`site.theme.category.slug`, set by `setup-site.mjs`; the plugin default `proto-blocks` when state has none). Read it, then scaffold with it:
+
+<!-- test:run -->
 ```bash
-"$WP" proto-blocks create hero-split --title="Hero Split" --dir=theme
+CAT=$(node "$PB/lib/state.mjs" get "$THEME" site.theme.category.slug | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v??"proto-blocks")')
+test -n "$CAT"
+```
+```bash
+"$WP" proto-blocks create hero-split --title="Hero Split" --category="$CAT" --dir=theme
 ```
 
-Real flags (checked against the plugin's `create` command): `--title`, `--description`, `--category`, `--fields="name:type,..."`, `--dir=theme|plugin`, `--force`. Use `--dir=theme` (default); `plugin` is not a discovery path. The block lands in `$THEME/proto-blocks/<block>/`. The scaffold is a starting point: rewrite `block.json`, `template.php` and CSS to the design. Names are generic (`hero-split`, never `home-hero`).
+Real flags (checked against the plugin's `create` command): `--title`, `--description`, `--category`, `--fields="name:type,..."`, `--dir=theme|plugin`, `--force`. Use `--dir=theme` (default); `plugin` is not a discovery path. The block lands in `$THEME/proto-blocks/<block>/`. The scaffold is a starting point: rewrite `block.json`, `template.php` and CSS to the design, keeping `"category": "$CAT"` (the `category` gate refuses any other). Names are generic (`hero-split`, never `home-hero`).
 
 ## Block checklist
 
-- `block.json` declares `"supports": { "anchor": true }`. The gate enforces it; QA targets the section anchor (`#pb-s<n>`, or `#pb-header` / `#pb-footer`).
+- `block.json` declares `"supports": { "anchor": true }` and `"category": "<site.theme.category.slug>"`. The gates enforce both; QA targets the section anchor (`#pb-s<n>`, or `#pb-header` / `#pb-footer`).
 - The root element of `template.php` carries `<?php echo get_block_wrapper_attributes([...]); ?>` so the anchor and classes reach the DOM.
-- The root is the full-bleed band (`alignfull`, no outer max-width or margins). Put the container inside it: `max-w-[1200px] mx-auto px-6` (use the design's width). If the same container repeats on every section, record it once in `state.site.tokens.spacing` and reuse the class.
+- The root is the full-bleed band (`alignfull`, no outer max-width or margins) and spans the viewport at any width, not only the frame's: the managed `pb-shell.css` uncaps the theme's `main` for that, and Verify checks the band at 1920px (`wide`) as well as at the frame width. Put the container inside it: `max-w-[1200px] mx-auto px-6` (use the design's width). If the same container repeats on every section, record it once in `state.site.tokens.spacing` and reuse the class.
 - Style with Tailwind and the theme tokens (`text-h1`, `bg-accent`, `font-display`, `rounded-card`), never raw hex when a token exists. Add responsive prefixes (`md:`, `lg:`) that match the design's breakpoints (mobile first). Use vanilla CSS in `style.css`, scoped under the block's class, when Tailwind is awkward (pseudo-elements, complex grids, the mobile nav overlay).
 - Every editable element has `data-proto-field` (or `data-proto-repeater` / `data-proto-inner-blocks`) even when its value is empty.
 - Every field declared in `block.json` is bound somewhere, including any the template parses rather than prints — a CSV read into a table, a colour passed to a `style` attribute, a key that selects an icon. Those have no element in the rendered markup, so they have no input and the block cannot be authored even though it renders. Give them an editor-only authoring region behind `$is_preview`. The `protoblocks` skill's `references/authoring-workflow.md` has a check that lists unbound fields; run it before moving to Verify.

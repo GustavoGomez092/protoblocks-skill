@@ -22,7 +22,7 @@ node "$PB/lib/intake.mjs" add-frame "$THEME" <page> desktop frame-desktop.png [-
 node "$PB/lib/intake.mjs" from-url "$THEME" <page> https://example.com --widths 1440,390
 ```
 
-The desktop frame is required; tablet and mobile are optional. `[ESCALE]` means the width fits no 1x/2x/3x scale: ask the developer for the frame's CSS width once and pass `--width`. If the desktop width is above 1440, raise the theme shell cap first (intake.md, "Shell cap").
+The desktop frame is required; tablet and mobile are optional. `[ESCALE]` means the width fits no 1x/2x/3x scale: ask the developer for the frame's CSS width once and pass `--width`. Wider frames need no theme edit (`main` is uncapped by pb-shell.css).
 
 ## Step 2 - Segment
 

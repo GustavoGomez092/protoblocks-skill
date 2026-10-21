@@ -10,10 +10,12 @@ import { installThemeAssets } from './theme-assets.mjs';
 import { initState, updateState, setPath, statePath } from './state.mjs';
 
 const DEFAULT_DEPS = { runPreflight, createWp, ensurePlugins, fetchThemeZip, forkTheme, installThemeAssets };
-const USAGE = 'Usage: node setup-site.mjs --name "<Project>" [--slug s] [--site "<Local site>"] [--force] [--refork <slug>] [--update-plugins] [--cwd D]\n';
+const USAGE = 'Usage: node setup-site.mjs --name "<Project>" [--slug s] [--theme-name "<display name>"] [--category-title "<title>"] [--site "<Local site>"] [--force] [--refork <slug>] [--update-plugins] [--cwd D]\n';
 
 // `deps` lets tests inject fakes; production callers omit it.
-export async function setupSite({ cwd = process.cwd(), site, name, slug, force = false, refork, updatePlugins = false }, deps = {}) {
+// `themeName` (default `name`) is the theme's display name; `categoryTitle` (default "<themeName> blocks") titles the
+// Proto-Blocks inserter category, whose slug is the theme slug. On an existing fork they are written only when passed.
+export async function setupSite({ cwd = process.cwd(), site, name, slug, force = false, refork, updatePlugins = false, themeName, categoryTitle }, deps = {}) {
   const d = { ...DEFAULT_DEPS, ...deps };
   const preflight = d.runPreflight({ cwd, site });
   const fatal = preflight.checks.filter((c) => c.status === 'fail');
@@ -34,7 +36,7 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
 
   const wp = d.createWp(preflight);
   const plugins = await d.ensurePlugins(wp, { updatePlugins });
-  const forkOpts = { wp, themesDir, name, slug, force, ...(refork !== undefined ? { refork } : {}) };
+  const forkOpts = { wp, themesDir, name, slug, force, ...(refork !== undefined ? { refork } : {}), ...(themeName !== undefined ? { themeName } : {}), ...(categoryTitle !== undefined ? { categoryTitle } : {}) };
   let theme;
   let assets;
   if (reusable) {
@@ -54,13 +56,15 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
     url: preflight.url,
     path: preflight.publicPath,
     wp: preflight.mode === 'local-wrapper' ? { mode: 'local-wrapper', wrapper: preflight.wp } : { mode: 'native' },
-    theme: { slug: theme.slug, forkedFrom: theme.forkedFrom },
+    theme: { slug: theme.slug, forkedFrom: theme.forkedFrom, ...(theme.displayName ? { displayName: theme.displayName } : {}), ...(theme.category ? { category: theme.category } : {}) },
     ...(preflight.localSite ? { localSiteId: preflight.localSite.id } : {}),
   };
   if (fs.existsSync(statePath(theme.themeDir))) {
     assertStateSite(theme.themeDir, preflight);
     updateState(theme.themeDir, (s) => {
-      for (const k of ['theme', 'path', 'wp']) setPath(s, `site.${k}`, siteState[k]);
+      // site.theme is merged so a recorded screenshot survives a re-run.
+      setPath(s, 'site.theme', { ...(s.site.theme ?? {}), ...siteState.theme });
+      for (const k of ['path', 'wp']) setPath(s, `site.${k}`, siteState[k]);
       if (siteState.localSiteId) setPath(s, 'site.localSiteId', siteState.localSiteId);
     });
   } else {
@@ -69,7 +73,8 @@ export async function setupSite({ cwd = process.cwd(), site, name, slug, force =
   return { preflight: { mode: preflight.mode, url: preflight.url, checks: preflight.checks }, plugins, theme, assets, stateFile: statePath(theme.themeDir) };
 }
 
-const VALUE_FLAGS = new Set(['name', 'slug', 'site', 'cwd', 'refork']);
+const VALUE_FLAGS = new Set(['name', 'slug', 'site', 'cwd', 'refork', 'theme-name', 'category-title']);
+const FLAG_KEYS = { 'theme-name': 'themeName', 'category-title': 'categoryTitle' };
 
 export function parseArgs(argv) {
   const usage = (msg) => Object.assign(new Error(msg), { code: 'EUSAGE' });
@@ -81,7 +86,7 @@ export function parseArgs(argv) {
     else if (arg.startsWith('--') && VALUE_FLAGS.has(arg.slice(2))) {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith('--')) throw usage(`${arg} needs a value`);
-      a[arg.slice(2)] = v;
+      a[FLAG_KEYS[arg.slice(2)] ?? arg.slice(2)] = v;
       i++;
     } else throw usage(`Unknown argument ${arg}`);
   }
@@ -95,7 +100,7 @@ async function main(argv) {
     process.stderr.write(`${e.message}\n${USAGE}`);
     process.exit(64);
   }
-  const r = await setupSite({ cwd: a.cwd ?? process.cwd(), site: a.site, name: a.name, slug: a.slug, force: a.force, refork: a.refork, updatePlugins: a.updatePlugins });
+  const r = await setupSite({ cwd: a.cwd ?? process.cwd(), site: a.site, name: a.name, slug: a.slug, force: a.force, refork: a.refork, updatePlugins: a.updatePlugins, themeName: a.themeName, categoryTitle: a.categoryTitle });
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
 }
 

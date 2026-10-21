@@ -41,6 +41,8 @@ your-theme/proto-blocks/my-block/   ← discovered automatically (theme's proto-
 
 The **folder name is the block slug**. Default block name is `proto-blocks/{folder}`. Discovery scans the active theme's `proto-blocks/` directory (and child theme); add more paths via the `proto_blocks_paths` filter.
 
+`"category"` defaults to `proto-blocks`. On a site built with `protoblocks-site-builder`, setup registers one inserter category per site (slug = the theme slug, `site.theme.category.slug` in the build state): every `block.json` on that site must use that slug, not `proto-blocks`.
+
 ## Minimal Block
 
 `block.json`:

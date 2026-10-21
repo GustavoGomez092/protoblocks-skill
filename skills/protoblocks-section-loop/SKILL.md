@@ -38,7 +38,7 @@ Details and checklist: `references/build.md`.
 
 1. Load the `protoblocks` skill (always) for authoring rules.
 2. By `decision`:
-   - `new`: scaffold with `"$WP" proto-blocks create <block> --title="<Title>" --dir=theme`, then write `block.json`, `template.php` and CSS. Never `--dir=plugin` (not a discovery path); never `--force` over an existing block.
+   - `new`: scaffold with `"$WP" proto-blocks create <block> --title="<Title>" --category="<site.theme.category.slug>" --dir=theme` (the slug from state; `build.md`), then write `block.json`, `template.php` and CSS. Never `--dir=plugin` (not a discovery path); never `--force` over an existing block.
    - `extend`: add a control whose default reproduces the current output. Never change what existing instances render.
    - `reuse`: no block changes; set attrs only.
 3. Assets cropped from the design: `node "$PB/lib/media.mjs" import "$THEME" <file> --alt "<text>"`. Alt is required. Put the printed `attr` object into `section.attrs`. A re-import reuses the attachment and keeps its existing alt (`altKept: true`, `attr.alt` is the kept text); add `--force-alt` only when the developer wants it replaced.
