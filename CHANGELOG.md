@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.1
+
+Navigation
+
+- Menu spec items accept an optional `className` (letters, digits, `-`, `_`; several separated by spaces), written to the `core/navigation-link` / `core/navigation-submenu` block as `className`, so a highlighted entry such as a "See all services" link in a dropdown can be styled from the header block's CSS.
+
 ## 2.3.0
 
 Site setup

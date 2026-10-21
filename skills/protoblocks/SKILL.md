@@ -107,7 +107,7 @@ That's a complete, editable block. `heading`/`body` are editable inline in the e
 | `inner-blocks` | nested blocks → `$innerBlocksContent` | `data-proto-inner-blocks` (one per block; type must be hyphenated) |
 
 ### Control types (`protoBlocks.controls`)
-`text`, `textarea`, `select`, `multiselect`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`, `gallery`, `file`, `repeater`. Select/radio require `options` **or** (for `select` and `multiselect`) a server-loaded `optionsSource` (see `references/controls.md` → Dynamic / server-provided options); range expects `min`/`max`. `multiselect` stores an **ordered array of keys** and is drag-reorderable — read it with `orderby => 'post__in'` (see `references/controls.md` → Multiselect). Any control can declare `conditions.visible` to show only when other attributes match (see `references/controls.md` → Conditional rendering). `image`/`video` exist as **both** fields and controls — use the control form for a sidebar media picker. `file` is the media picker for anything else (a CSV, a PDF, a font); read it by attachment id, never by fetching its URL. `repeater` as a **control** holds repeated *configuration* in the sidebar — a set of tabs, a list of breakpoints, a table pasted as CSV — where the `repeater` **field** holds repeated *content* in the canvas; a value the template parses rather than prints belongs in the control, because a field needs an element carrying its `data-proto-field` and a parsed value has none (see Iron Rule 3b). A repeater **field** can also carry `itemControls`: per-row controls shown in the sidebar when a row is focused, which is where a row's consumed values belong (see `references/repeaters.md`). `gallery` is the **multi**-image control (`[{ id, url, alt }]`, drag to reorder): reach for it instead of a repeater of image fields whenever the images ARE the layout — a repeater injects its editing chrome into the block's markup, so the canvas stops matching the front end (see `references/controls.md` → Gallery).
+`text`, `textarea`, `select`, `multiselect`, `toggle`, `checkbox`, `range`, `number`, `color`, `color-palette`, `radio`, `image`, `video`, `gallery`, `file`, `repeater`. Select/radio need `options` (or, for `select`/`multiselect`, a server-loaded `optionsSource`); range needs `min`/`max`; `multiselect` stores an ordered array of keys. Any control can declare `conditions.visible`. `image`/`video` exist as both fields and controls (control = sidebar media picker); `file` is the picker for anything else, read by attachment id. A `repeater` control holds repeated configuration (tabs, breakpoints, a pasted CSV) where a repeater field holds repeated content; a value the template parses rather than prints belongs in a control or in the field's per-row `itemControls` (Iron Rule 3b). `gallery` is the multi-image control: use it instead of a repeater of images whenever the images are the layout. Details: `references/controls.md`, `references/repeaters.md`.
 
 ### `data-proto-*` attributes
 | Attribute | Purpose |
@@ -158,18 +158,18 @@ Load these as needed — do not read all of them up front.
 - `references/authoring-workflow.md` — **start here to build a block.** End-to-end clean workflow: scaffold → schema → template → style → preview → validate, with a quick-start checklist.
 - `references/recipes.md` — "I want to build X" → the fields/controls/pattern for common modules (hero, card grid, FAQ/accordion, stats, pricing, tabs, CTA, nav, logo wall, feature grid).
 - `references/composition.md` — **read before designing a block's fields.** When to use discrete fields vs one wysiwyg vs an inner-blocks slot vs a repeater; avoiding field proliferation.
-- `references/schema.md` — full `block.json` / `protoBlocks` schema, every key, defaults, validation errors vs warnings, attribute generation.
+- `references/schema.md` — full `block.json` / `protoBlocks` schema, defaults, validation, attribute generation.
 - `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
 - `references/controls.md` — each control type (incl. `video`), options, **conditional rendering & composition** (`conditions.visible`), `affects`.
-- `references/templates.md` — template variables, the `data-proto-*` system, escaping, preview vs frontend detection, and the `data-proto-animate` scroll-reveal convention (2.4.0+).
+- `references/templates.md` — template variables, `data-proto-*`, escaping, preview detection, `data-proto-animate` reveals.
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
 - `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
-- `references/interactivity.md` — `view.js`, ES modules, WordPress Interactivity API conventions, and **loading JS in the editor** for third-party embeds (e.g. HubSpot forms) via `enqueue_block_assets`.
-- `references/previews.md` — generating inserter thumbnails (Preview Capture admin tool) or supplying your own `preview.png`.
-- `references/examples.md` — the 9 bundled example blocks (6 vanilla + 3 Tailwind), a capability matrix, and full canonical samples (CTA, Stats, Hero, Tailwind Hero).
+- `references/interactivity.md` — `view.js`, ES modules, Interactivity API, and loading JS in the editor for third-party embeds.
+- `references/previews.md` — inserter thumbnails (Preview Capture) or your own `preview.png`.
+- `references/examples.md` — the 9 bundled example blocks, a capability matrix and canonical samples.
 - `references/theme.md` — the proto-blocks-theme starter: builder canvas, Taxi page transitions (wrapper, lifecycle events, script re-run rules), animation globals, token file, required plugins.
-- `references/cli-and-hooks.md` — WP-CLI commands, all `proto_blocks_*` actions/filters, discovery, block category, setup wizard, demo blocks, debug mode, editor preview system.
-- `references/troubleshooting.md` — symptom → cause → fix for common problems.
+- `references/cli-and-hooks.md` — WP-CLI commands, `proto_blocks_*` hooks, discovery, block category, wizard, debug mode, preview system.
+- `references/troubleshooting.md` — symptom → cause → fix.
 
 ## Common Mistakes
 
@@ -177,12 +177,12 @@ Load these as needed — do not read all of them up front.
 |---------|-------|-----|
 | Block missing from inserter | No `block.json` or no template file; folder not under a discovered path | Ensure `block.json` + `template.php` in `theme/proto-blocks/{name}/` |
 | Field not editable in editor | Element lacks `data-proto-field`, or element not rendered when value empty | Always render the element with the attribute (see Iron Rule 3) |
-| A field has **no interface at all**, and the sidebar shows only the controls | The field's value is parsed or passed through rather than printed, so no element carries its `data-proto-field` | Inside a repeater row, move it to `itemControls`; at block level, make it a control; only as a last resort an editor-only region behind `$is_preview` (Iron Rule 3b). Run the unbound-fields check in `references/authoring-workflow.md` |
+| A field has **no interface at all** | Its value is parsed, not printed, so no element carries its `data-proto-field` | Repeater row: `itemControls`; block level: a control; last resort an editor-only region (Iron Rule 3b) |
 | Template edits don't show | Template output cached | `wp proto-blocks cache clear` |
 | Repeater items don't render/add | Missing `data-proto-repeater` / `data-proto-repeater-item`, or name mismatch | Match container `data-proto-repeater="x"` to field `x`; one `data-proto-repeater-item` per item |
 | Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
-| Tailwind classes ignored **on some elements only** | Those classes live in an included partial (`parts/card.php`); the scanner reads only `<block>/template.php` and `<block>/<block-name>.php`, never subdirectories | Move the markup into `template.php` — share it between arrangements with a closure, not an include (`references/styling.md`) |
-| Tailwind classes ignored | No first compile yet, prod (`cached`) mode without recompile, or `useTailwind` off | Run a first compile — shell host: download the Tailwind binary; managed host (WP Engine): click **Compile CSS** (browser engine, no binary/exec). Use dev (`on_reload`) mode while iterating; set `"useTailwind": true` (`references/styling.md`) |
+| Tailwind classes ignored **on some elements only** | The classes live in an included partial; the scanner reads only the block's own template files | Keep markup in `template.php`, share it with a closure, not an include (`references/styling.md`) |
+| Tailwind classes ignored | No first compile yet, prod (`cached`) mode without recompile, or `useTailwind` off | Run a first compile (CLI binary or **Compile CSS** on managed hosts), use dev (`on_reload`) mode while iterating, set `"useTailwind": true` |
 | HTML stripped from wysiwyg | Escaped with `esc_html` instead of `wp_kses_post` | Use `wp_kses_post()` for HTML/wysiwyg values |
 | Inner blocks not nestable (no `+`) | Type spelled `innerblocks`, or no `data-proto-inner-blocks` marker, or stale saved instance | Use `"inner-blocks"` (hyphen) + `data-proto-inner-blocks`; re-insert a fresh block |
 | Inner blocks render empty on frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead |

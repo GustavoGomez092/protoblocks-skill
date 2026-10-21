@@ -42,6 +42,12 @@ function pb_nav_published_page(string $page) {
 
 function pb_nav_link_attrs(array $item, array &$pending): array {
     $attrs = ['label' => (string) ($item['label'] ?? '')];
+    // Optional CSS class(es) on the item (letters, digits, "-" and "_"; several separated by spaces).
+    if (!empty($item['className']) && is_string($item['className'])) {
+        $class = trim(preg_replace('/[^A-Za-z0-9_\- ]+/', '', $item['className']));
+        $class = preg_replace('/\s+/', ' ', $class);
+        if ($class !== '') { $attrs['className'] = $class; }
+    }
     if (!empty($item['page'])) {
         $page = pb_nav_published_page((string) $item['page']);
         if ($page) {

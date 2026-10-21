@@ -53,7 +53,7 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
     const spec = { title: 'Primary', items: [
       { label: 'Home', page: f.page('home') },
       { label: 'Later', page: f.page('later') },
-      { label, url: 'https://example.com', children: [{ label: 'Docs', url: 'https://example.com/docs', opensInNewTab: true }] },
+      { label, url: 'https://example.com', children: [{ label: 'Docs', url: 'https://example.com/docs', opensInNewTab: true, className: 'pb-nav-cta' }] },
     ] };
 
     const a = upsertMenu(wp, f.key, spec);
@@ -70,6 +70,7 @@ itest('menus upsert idempotently and pending page links resolve on refresh', () 
     assert.match(content, /"kind":"post-type"/);
     assert.match(content, /wp:navigation-submenu/);
     assert.match(content, /"opensInNewTab":true/);
+    assert.match(content, /"className":"pb-nav-cta"/);
 
     // content must parse back (parse_blocks, via wp eval) into the same tree; labels round-trip
     const tree = JSON.parse(wp.check(['eval',

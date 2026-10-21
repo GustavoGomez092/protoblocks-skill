@@ -13,7 +13,8 @@ Block themes ignore classic menus: `register_nav_menus` locations and `wp_nav_me
     { "label": "Home", "page": "home" },
     { "label": "Services", "page": "services", "children": [
       { "label": "Design", "page": "services/design" },
-      { "label": "Docs", "url": "https://example.com/docs", "opensInNewTab": true }
+      { "label": "Docs", "url": "https://example.com/docs", "opensInNewTab": true },
+      { "label": "See all services", "page": "services", "className": "pb-nav-cta" }
     ] },
     { "label": "Contact", "page": "contact" }
   ]
@@ -27,7 +28,7 @@ Footer column:
 ```
 
 - `items` (required array); `title` optional (defaults to the capitalized key).
-- Item: `label`, plus `page` (page slug/path, e.g. `services/design`) or `url`; optional `opensInNewTab` (for `url` links); optional `children` (turns the item into a submenu).
+- Item: `label`, plus `page` (page slug/path, e.g. `services/design`) or `url`; optional `opensInNewTab` (for `url` links); optional `className` (CSS class or classes put on the item's `<li>`, for a styled "See all" link or a highlighted entry; letters, digits, `-`, `_`); optional `children` (turns the item into a submenu).
 - Key: `primary`, `footer-1`, `footer-2`, `utility`, ... A lowercase letter or digit first, then `[a-z0-9_-]` (`[ENAVKEY]` otherwise). The key is the upsert identity (post slug `pb-nav-<key>`): the same key updates the menu, never duplicates it.
 
 ## Commands
