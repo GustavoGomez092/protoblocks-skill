@@ -62,6 +62,7 @@ import { applySeo, recordAudit } from '../../skills/protoblocks-site-builder/scr
 import { nextAction } from '../../skills/protoblocks-site-builder/scripts/lib/status.mjs';
 import { loadState, updateState, statePath } from '../../skills/protoblocks-site-builder/scripts/lib/state.mjs';
 import { buildInputs, recordPageQa } from '../../skills/protoblocks-site-builder/scripts/qa/page-qa.mjs';
+import { runEditorQa, recordEditorQa, recordPartsEditorQa, deleteQaUser, QA_USER } from '../../skills/protoblocks-site-builder/scripts/qa/editor-qa.mjs';
 import { partMarkup, writePart, markupFromArgs, adoptParts, listOverrides } from '../../skills/protoblocks-site-builder/scripts/lib/parts.mjs';
 import { refreshMenus } from '../../skills/protoblocks-site-builder/scripts/lib/navigation.mjs';
 import { recordUse } from '../../skills/protoblocks-site-builder/scripts/lib/library.mjs';
@@ -315,6 +316,7 @@ async function e2ePass(t, { globalStyles }) {
   let pageId = null;
   let menuId = null;
   const ownedMedia = [];
+  let qaUserCreated = false; // editor QA created the pb-editor-qa administrator in this run: delete it on cleanup
   let server;
   try {
     // 0. This pass's WordPress global styles (Proto-Blocks setting; restored with the option snapshot).
@@ -519,6 +521,16 @@ async function e2ePass(t, { globalStyles }) {
     assert.deepEqual(moved.map((x) => [x.n, x.status, x.inPart === true]), [[1, 'done', true], [2, 'done', false], [3, 'done', false], [4, 'done', false], [5, 'done', true]]);
     assert.equal(nextAction(loadState(themeDir)).action, 'page-qa');
 
+    // 10b. The parts in the Site Editor (editor QA on parts/header and parts/footer), before page QA.
+    budget('parts editor qa');
+    const partsQa = await runEditorQa(themeDir, { parts: true });
+    qaUserCreated = partsQa.user?.created === true;
+    report.partsEditorQa = { pass: partsQa.pass, parts: Object.fromEntries(Object.entries(partsQa.parts).map(([k, v]) => [k, { pass: v.pass, error: v.error, sections: v.sections, blocks: (v.blocks ?? []).map(({ clientId, canvas, ...b }) => b), dirty: v.dirty, pageErrors: v.pageErrors }])) };
+    say(`parts editor qa: ${JSON.stringify(report.partsEditorQa)}`);
+    assert.equal(partsQa.pass, true, `parts editor QA: ${JSON.stringify(report.partsEditorQa, null, 2)}`);
+    assert.deepEqual(recordPartsEditorQa(themeDir, partsQa.file), { pass: true, parts: { header: true, footer: true } });
+    lap('parts-editor-qa');
+
     // 11. Page QA against the full design frame (frames from state).
     budget('page qa');
     const inputs = buildInputs(themeDir, pageSlug);
@@ -527,8 +539,22 @@ async function e2ePass(t, { globalStyles }) {
     say(`page qa: ${JSON.stringify(report.pageQa)}`);
     assert.equal(pq.breakpoints[0].pass, true, `page QA desktop: ${JSON.stringify(report.pageQa)}`);
     assert.equal(pq.pass, true, `page QA: ${JSON.stringify(report.pageQa)}`);
-    assert.deepEqual(await recordPageQa(themeDir, pageSlug, path.join(inputs.outDir, 'page-qa.json')), { pass: true, status: 'seo' });
+    assert.deepEqual(await recordPageQa(themeDir, pageSlug, path.join(inputs.outDir, 'page-qa.json')), { pass: true, status: 'building' }, 'page QA alone does not finish the page');
     lap('page-qa');
+    assert.equal(nextAction(loadState(themeDir)).action, 'page-editor-qa');
+
+    // 11b. Editor QA: the page opened in wp-admin's block editor as pb-editor-qa (blocks valid and rendered, every
+    // field bound in the preview, sections in order, inspector shown, post not dirty).
+    budget('editor qa');
+    const eq = await runEditorQa(themeDir, { slug: pageSlug });
+    qaUserCreated = qaUserCreated || eq.user?.created === true;
+    report.editorQa = { pass: eq.pass, error: eq.error, loaded: eq.loaded, canvas: eq.canvas, sections: eq.sections, dirty: eq.dirty, pageErrors: eq.pageErrors, consoleErrors: eq.consoleErrors, blocks: (eq.blocks ?? []).map(({ clientId, canvas, ...b }) => b) };
+    say(`editor qa: ${JSON.stringify(report.editorQa)}`);
+    assert.equal(eq.pass, true, `editor QA: ${JSON.stringify(report.editorQa, null, 2)}`);
+    assert.deepEqual(eq.sections.found, SECTIONS.filter((s) => !['pb-header', 'pb-footer'].includes(s.anchor)).map((s) => s.anchor), 'the content sections, in order, without the parts');
+    for (const b of eq.blocks) assert.deepEqual(b.fields.missing, [], `${b.name}: unbound fields`);
+    assert.deepEqual(recordEditorQa(themeDir, pageSlug, eq.file), { pass: true, status: 'seo' });
+    lap('editor-qa');
     assert.equal(nextAction(loadState(themeDir)).action, 'seo');
 
     // 12. SEO: OG image from the hero, apply (first apply on a fresh page; no organization leaf), audit, record.
@@ -612,6 +638,8 @@ async function e2ePass(t, { globalStyles }) {
         wp.check(['post', 'delete', String(m.id), '--force']);
       });
     }
+    // The editor-QA administrator, only when this run created it (a developer's own pb-editor-qa stays).
+    if (qaUserCreated) step(`delete ${QA_USER} user`, () => { const r = deleteQaUser(wp); if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim()); });
     step('delete theme fork', () => {
       if (!fs.existsSync(themeDir)) return;
       const real = fs.realpathSync(themeDir);

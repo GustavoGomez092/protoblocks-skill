@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.3.2
+
+Page editor QA
+
+- New `qa/editor-qa.mjs`: `run "$THEME" <page>` logs into wp-admin headlessly (Playwright) as a dedicated administrator `pb-editor-qa` (created through the resolved WP-CLI on first use, a random password regenerated per run and kept in memory, welcome guides off through `wp_persisted_preferences`; remove with `wp user delete pb-editor-qa --yes`), opens the page in the block editor and checks every Proto-Blocks block there: `isValid`, the canvas wrapper rendered without an error notice, every `block.json` field bound in the editor preview markup (repeater subfields included, `itemControls` excluded, whole-card/icon-only repeater links counting through the item toolbar), the inspector showing the block's title and a control panel when controls are declared, the state's sections present once and in order as top-level blocks with nothing extra, and `isEditedPostDirty()` false after opening and selecting. Writes `artifacts/<page>/editor-qa/editor-qa.json` plus `editor.png` / `inspector.png`. `record` writes `pages[i].editorQa` (never accepted).
+- `run "$THEME" --parts` performs the same checks on the header and footer template parts in the Site Editor; `record --parts` writes `site.parts.editorQa`. The first page's `move-parts` flow runs it before page QA.
+- A page now needs both page QA and editor QA before SEO: `page-qa.mjs record` no longer moves a page to `seo` on its own; `status.mjs` routes the new `page-editor-qa` action after page QA passed until `editorQa.pass`. Pages already `seo`/`done` from older builds are left alone.
+- Docs: `page-editor-qa` in the site-builder action table and `references/pipeline.md` (commands, transitions, `[ELOGIN]` recovery), `editorQa` in the state schema, an "Editor check" section in the section loop's `build.md` pointing to the unbound-fields check.
+
+Site setup
+
+- `setup-site.mjs --logo <file>` (SVG or PNG) copies the client logo into the fork as `assets/img/logo.<ext>` (an SVG loses its xml prolog, comments and root `id`/`x`/`y`/`version`/`xml:space`) and records `site.theme.logo`. The fork now gets a short client README (logo, display name, "WordPress block theme for <project>, powered by Proto-Blocks") instead of inheriting proto-blocks-theme's: written on a fresh fork, or on an existing one with `--readme`; `site.theme.readmeHash` remembers what was written and a README edited since is refused with `[EEDITED]` (`--force` overwrites). The site-setup skill asks for the logo file in Step 1.
+
+Motion
+
+- `pb-motion.js` reveal presets wait for the theme's intro overlay: while `.proto-intro` is up they are queued and start together on `proto:intro-complete` (10 s backstop), so the hero entrance plays after the preloader instead of underneath it. Continuous presets are not gated; the motion check is unaffected (it skips the intro). The Proto-Blocks plugin's reveal watchdog waits too from plugin 2.14.1 (`protoblocks-motion` `references/presets.md`, "Hero and the intro overlay").
+- `data-pb-duration` (seconds) overrides the profile duration per element; on `counter` it is the count time itself. The motion skill recommends exposing timing as block controls (`motionDuration`, `motionDelay`, `motionStagger`, `counterDuration`; 0 = profile default) merged into the preset options by the `$pb_motion` helper, keeping delay + duration under 1.4 s.
+
 ## 2.3.1
 
 Navigation

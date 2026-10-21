@@ -29,7 +29,8 @@ node "$PB/lib/status.mjs" "$THEME"
 | `seo` or `done` page with an open section (reopened) | that section's action |
 | `building`, every section `done`/`skipped`, a header/footer section `done` and not `inPart` (no other page has it in a part) | `move-parts` (`next.sections`: their `n`s) |
 | `building`, every section `done`/`skipped`, no passed or accepted `pageQa` | `page-qa` |
-| `seo`, or `pageQa.pass` / `pageQa.accepted` | `seo` |
+| `building`, `pageQa.pass` / `pageQa.accepted`, no `editorQa.pass` | `page-editor-qa` |
+| `seo`, or `pageQa.pass` / `pageQa.accepted` with `editorQa.pass` | `seo` |
 
 ## Status transitions
 
@@ -39,7 +40,7 @@ Page (`planning` -> `building` -> `seo` -> `done`):
 |---|---|
 | (new) -> `planning` | `intake.mjs add-frame` / `from-url` (creates the page) |
 | `planning` -> `building` | `plan.mjs record` (with `plan.approvedAt`); `page.mjs build` refuses with `[ENOPLAN]` until `plan.approvedAt` exists |
-| `building` -> `seo` | `page-qa.mjs record` with a passing result, or `--accepted "<note>"` on design-only differences (a plain failure keeps `building` and stores `pageQa.pass: false`, clearing any earlier acceptance) |
+| `building` -> `seo` | the second of the two page checks to pass: `page-qa.mjs record` with a passing result, or `--accepted "<note>"` on design-only differences (a plain failure keeps `building` and stores `pageQa.pass: false`, clearing any earlier acceptance), and `editor-qa.mjs record` with a passing result (`editorQa.pass`; never accepted). Either alone keeps `building` |
 | `seo` -> `done` | `seo.mjs record-audit` with a passing audit (`[ESTATUS]` on any other page status, or while a section is open) |
 | `done` -> `seo` | `seo.mjs apply` on a finished page (the old audit no longer applies) |
 
@@ -64,11 +65,11 @@ Section (`planned` -> `building` -> `verifying` -> `animating` -> `done`):
 Ask the project name (and the theme's display name when it differs: `--theme-name`), get the first design. Then follow `protoblocks-site-setup`:
 
 ```bash
-node "$PB/lib/setup-site.mjs" --name "<Project>" [--theme-name "<display name>"] [--site "<Local site>"]
+node "$PB/lib/setup-site.mjs" --name "<Project>" [--theme-name "<display name>"] [--logo <file>] [--site "<Local site>"]
 node "$PB/lib/motion.mjs" install "$THEME"
 ```
 
-`THEME` = the printed `theme.themeDir`. `setup-site.mjs` writes `build.json` (`site.url`, `site.path`, `site.theme` with `slug`, `forkedFrom`, `displayName` and the per-site block `category`, `site.wp`, `site.qa` defaults). Then intake the first design (`protoblocks-design-breakdown` Step 1, `references/intake.md`), because the theme screenshot and the tokens are read from the frames:
+`THEME` = the printed `theme.themeDir`. `setup-site.mjs` writes `build.json` (`site.url`, `site.path`, `site.theme` with `slug`, `forkedFrom`, `displayName`, the per-site block `category`, `logo` and `readmeHash`, `site.wp`, `site.qa` defaults), copies the client logo into the fork and writes its README (site-setup Step 1). Then intake the first design (`protoblocks-design-breakdown` Step 1, `references/intake.md`), because the theme screenshot and the tokens are read from the frames:
 
 ```bash
 node "$PB/lib/intake.mjs" add-frame "$THEME" <page> desktop frame-desktop.png [--width W] [--title "Home"]
@@ -143,6 +144,15 @@ node "$PB/lib/parts.mjs" adopt "$THEME" <page>
 
 Prints `{page, moved: [{n, anchor, status}], reverify}`. It sets the header/footer `inPart: true`, status `building`, `prevStatus: "done"`, and the first content section `verifying` (`prevStatus: "done"`). Status then routes through them: `section-build` for the header (inPart row: `library.mjs record`, `page.mjs build`, Verify), `section-verify` for the content section, then the footer. Each pass returns them to `done`. `[EINPUT]` "does not carry the anchor": write the part from state first. `[EINPUT]` "nothing to adopt": already moved. Afterwards: `node "$PB/lib/navigation.mjs" refresh "$THEME"`.
 
+Once the re-verifications passed and before page QA, check both parts in the Site Editor (the same block checks as `page-editor-qa`, on the `proto-blocks` block of `parts/header` and `parts/footer`):
+
+```bash
+node "$PB/qa/editor-qa.mjs" run "$THEME" --parts
+node "$PB/qa/editor-qa.mjs" record "$THEME" --parts "$THEME/.protoblocks/artifacts/parts/editor-qa/editor-qa.json"
+```
+
+`run` prints `{pass, parts: {header: {...}, footer: {...}}, user, file}` (each part a result like the page one, `expected: ["pb-header"]` / `["pb-footer"]`) and exits 1 unless `pass`; `record` writes `site.parts.editorQa: {pass, file, at}`. A failing part: fix the block (gates, `parts.mjs markup --from-state`, `parts.mjs write`, `page.mjs build`), re-verify it, re-run. `[ENOPAGE]` "No header or footer part": `parts.mjs write` never ran.
+
 ### `page-qa`
 
 1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, a `wide` pass at 1920px in which every section must span the viewport, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
@@ -165,13 +175,42 @@ node "$PB/qa/page-qa.mjs" run "$THEME" <page>
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json"
 ```
 
-   Prints `{pass, status}`; writes `pageQa: {pass, file, at}`. A pass sets the page `seo`. With the developer's acceptance:
+   Prints `{pass, status}`; writes `pageQa: {pass, file, at}`. A pass sets the page `seo` when `editorQa.pass` is already recorded; otherwise the page stays `building` and status says `page-editor-qa` next. With the developer's acceptance:
 
 ```bash
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json" --accepted "<what they accepted>"
 ```
 
-   Prints `{pass: false, accepted: true, status: "seo"}`; writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, a boxed section in the wide pass, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+   Prints `{pass: false, accepted: true, status}` (`seo` once editor QA passed, else `building`); writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, a boxed section in the wide pass, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+
+### `page-editor-qa`
+
+Page QA passed (or was accepted); the page must now be verified editable in wp-admin's block editor, not only rendered. The `render` gate only proved the preview endpoint answers; this opens the real editor.
+
+1. Run it (Playwright logs into wp-admin as `pb-editor-qa`, a dedicated administrator created through WP-CLI on first use, with a random password regenerated every run and held in memory only; its welcome guides are turned off through `wp_persisted_preferences`):
+
+```bash
+node "$PB/qa/editor-qa.mjs" run "$THEME" <page>
+```
+
+   It opens `post.php?post=<postId>&action=edit`, waits for the blocks and the canvas, and prints `{url, postId, pass, loaded, canvas, blocks: [{anchor, name, isValid, rendered, renderError?, fields: {declared, bound, missing, toolbar, hints}, inspector: {title, panels, controls, pass}, preview, canvas}], sections: {expected, found, missing, extra, duplicates, order, pass}, dirty, pageErrors, consoleErrors, screenshots: {editor, inspector}, user, file}`, exit 1 unless `pass`. Per Proto-Blocks block it checks: the editor's `isValid`; the canvas wrapper rendered with no `.proto-blocks-error` / core error notice; every field `block.json` declares is bound in the editor preview markup (the same `data-proto-*` check as the authoring workflow, run on the preview the editor fetches: repeater subfields included, `itemControls` excluded, a repeater `link` subfield counting through the item toolbar when the item is or holds an `<a>`); after `selectBlock`, the inspector shows the block's title and, when `controls` are declared, at least one panel. `sections` compares the state's sections (not `inPart`, not `skipped`, in `n` order) with the top-level block list by anchor: each once, in order, nothing else. `dirty` is `isEditedPostDirty()` after opening and selecting: it must be `false` (a block that rewrites its attributes on load shows up here). Nothing is saved. Screenshots: `artifacts/<page>/editor-qa/editor.png` and `inspector.png`; the result file is `artifacts/<page>/editor-qa/editor-qa.json`. `[ENOPAGE]` "no postId": build the page first. `[ELOGIN]`: wp-login.php refused the QA user (a login plugin or lockout?); `[ENORUNTIME]`: run preflight.
+2. Fix failures:
+   - `fields.missing`: the field has no `data-proto-field` (or repeater/inner-blocks) element in the preview. `hints` names an empty repeater (seed a placeholder item under `$is_preview`); otherwise bind it, or move a consumed value to a control / `itemControls` (`protoblocks` skill, `references/authoring-workflow.md`, "Where an unbound field belongs").
+   - `rendered: false` (`renderError`): the preview failed in the editor (PHP error in the template: `preview.error`, `gates.mjs`), or the block never finished loading.
+   - `sections.missing` / `extra` / `duplicates` / `order: false`: the page content and the state disagree; `page.mjs build` again (a section still `planned` is not on the page).
+   - `inspector.pass: false`: the sidebar did not show the block card, the title differs from `block.json`, or no control panel appeared although `controls` are declared.
+   - `dirty: true`: a block changes its attributes when opened; fix the block (stable defaults, no attribute rewriting on mount).
+   - `pageErrors`: JavaScript errors in the editor (the block's `editor` script, a view script loaded in the canvas).
+   After a block fix: gates, `page.mjs build`, `qa-input.mjs prepare` for that section (status routes to `section-verify`, then back here).
+3. Record every run:
+
+```bash
+node "$PB/qa/editor-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/editor-qa/editor-qa.json"
+```
+
+   Prints `{pass, status}`; writes `editorQa: {pass, file, at}`. A pass sets the page `seo` when page QA passed or was accepted (otherwise `building`, and page QA comes next). There is no acceptance for editor QA. `[ESTATUS]`: the page is not `building` or a section is open. `[EINPUT]`: the file is for another post (re-run `run`).
+
+The `pb-editor-qa` user stays on the site (an administrator with an unknown password). Remove it when the build is delivered: `"$WP" user delete pb-editor-qa --yes`.
 
 ### `seo`
 
@@ -255,6 +294,10 @@ cd "$PB/qa" && npm install && npx playwright install chromium
 ```
 
 Then re-run the failed check. An error verdict from visual QA leaves the section `verifying`, so status resumes there.
+
+### `[ELOGIN]`: editor QA cannot log in
+
+`editor-qa.mjs run` creates or reuses the administrator `pb-editor-qa` through WP-CLI and logs in through `wp-login.php` with a fresh random password. `[ELOGIN]` means WordPress refused that login (a login-limiting or two-factor plugin, a lockout, a login URL changed by a security plugin): check `"$WP" user get pb-editor-qa --field=roles` (it must be `administrator`), deactivate the plugin on the local site for the check, re-run. The user is never printed with its password; remove it any time with `"$WP" user delete pb-editor-qa --yes` (the next run recreates it).
 
 ### `[EWRONGSITE]`
 

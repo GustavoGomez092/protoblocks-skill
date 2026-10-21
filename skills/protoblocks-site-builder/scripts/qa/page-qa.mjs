@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadState, updateState, stateDir } from '../lib/state.mjs';
+import { editorQaPassed } from '../lib/status.mjs';
 
 // Axe nodes count only when they sit in page content: main/header/footer or a section anchor (#pb-s…). Tag names are
 // matched as whole compound-selector heads so ".domain a", "#footer-widget a" and ".site-header a" do not qualify.
@@ -227,8 +228,9 @@ export function acceptBlockers(r, frames = []) {
 
 /**
  * Records a page-QA result for a page in status `building` whose sections are all done or skipped. The result must be
- * of the page's url. A pass sets the page `seo`. `accepted` (the developer's note) records a failing result whose only
- * failures are design differences as accepted: `pageQa.accepted`, `page.notes.pageQa`, status `seo`.
+ * of the page's url. A pass sets the page `seo` once editor QA (`editor-qa.mjs record`) has passed too; otherwise the
+ * page stays `building` and status routes to `page-editor-qa`. `accepted` (the developer's note) records a failing
+ * result whose only failures are design differences as accepted: `pageQa.accepted`, `page.notes.pageQa`.
  */
 export async function recordPageQa(themeDir, slug, file, { accepted } = {}) {
   if (accepted !== undefined && (typeof accepted !== 'string' || !accepted.trim())) throw inputError('--accepted needs a non-empty note (what the developer accepted).');
@@ -258,7 +260,7 @@ export async function recordPageQa(themeDir, slug, file, { accepted } = {}) {
       p.notes = { ...notes, pageQa: `accepted by developer: ${note}` };
       acceptedOut = true;
     }
-    if (pass || acceptedOut) p.status = 'seo';
+    if ((pass || acceptedOut) && editorQaPassed(p)) p.status = 'seo';
     status = p.status;
   });
   return acceptedOut ? { pass, accepted: true, status } : { pass, status };

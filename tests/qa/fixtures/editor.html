@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fake block editor</title>
+<style>
+  body { margin: 0; font-family: sans-serif; display: flex; }
+  #canvas { width: 1000px; height: 800px; border: 1px solid #ccc; }
+  #sidebar { width: 280px; min-height: 800px; border-left: 1px solid #ccc; padding: 8px; }
+  .inline-canvas [data-block] { padding: 8px; border: 1px dashed #999; margin: 8px; }
+</style>
+</head>
+<body>
+<!-- A stand-in for wp-admin's block editor: the wp.data stores editor-qa.mjs reads, Proto-Blocks' localized data and
+     admin-ajax preview, an editor-canvas iframe (or an inline block list) and a block inspector. Configured through
+     window.__editorConfig (set with addInitScript before the page loads). -->
+<div id="main"></div>
+<div id="sidebar" class="interface-complementary-area"></div>
+<script>
+(function () {
+  var cfg = Object.assign({ blocks: [], canvas: [], previews: {}, dirty: false, titles: {}, panels: {}, localized: [], inline: false, noProtoData: false, noWp: false }, window.__editorConfig || {});
+  var selected = null;
+  window.__selected = [];
+  window.__requests = [];
+  var wrappers = cfg.canvas.map(function (c) { return '<div data-block="' + c.clientId + '" data-type="' + c.name + '" class="proto-block">' + (c.html || '') + '</div>'; }).join('');
+  var list = '<div class="block-editor-block-list__layout">' + wrappers + '</div>';
+  if (cfg.inline) {
+    document.getElementById('main').innerHTML = '<div class="inline-canvas">' + list + '</div>';
+  } else {
+    var iframe = document.createElement('iframe');
+    iframe.name = 'editor-canvas';
+    iframe.id = 'canvas';
+    iframe.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><style>.proto-block{padding:8px;border:1px dashed #999;margin:8px}</style></head><body>' + list + '</body></html>';
+    document.getElementById('main').appendChild(iframe);
+  }
+  if (!cfg.noProtoData) window.protoBlocksData = { ajaxUrl: '/__ajax', previewNonce: 'nonce-1', blocks: cfg.localized };
+  var realFetch = window.fetch.bind(window);
+  window.fetch = function (url, init) {
+    if (url !== '/__ajax') return realFetch(url, init);
+    var rec = {};
+    new URLSearchParams(init.body).forEach(function (v, k) { rec[k] = v; });
+    window.__requests.push(rec);
+    var pv = cfg.previews[rec.template];
+    var json = function (status, body) { return Promise.resolve(new Response(JSON.stringify(body), { status: status, headers: { 'Content-Type': 'application/json' } })); };
+    if (pv === undefined) return json(404, { success: false, data: 'Block template not found.' });
+    if (pv && typeof pv === 'object') return json(500, { success: false, data: { message: pv.error } });
+    return json(200, { success: true, data: { html: pv } });
+  };
+  function renderInspector() {
+    var b = null;
+    cfg.blocks.forEach(function (x) { if (x.clientId === selected) b = x; });
+    var slug = b ? b.name.replace(/^proto-blocks\//, '') : '';
+    var panels = cfg.panels[slug] || 0;
+    var title = Object.prototype.hasOwnProperty.call(cfg.titles, slug) ? cfg.titles[slug] : (b ? b.name : '');
+    var html = '<div class="block-editor-block-inspector"><div class="block-editor-block-card"><h2 class="block-editor-block-card__title">' + title + '</h2></div>';
+    for (var i = 0; i < panels; i++) html += '<div class="components-panel__body"><div class="proto-blocks-control">control ' + i + '</div></div>';
+    document.getElementById('sidebar').innerHTML = html + '</div>';
+  }
+  var stores = {
+    'core/block-editor': {
+      select: { getBlocks: function () { return cfg.blocks.map(function (b) { return { name: b.name, clientId: b.clientId, isValid: b.isValid !== false, attributes: b.attributes || {} }; }); } },
+      dispatch: { selectBlock: function (id) { selected = id; window.__selected.push(id); renderInspector(); } }
+    },
+    'core/editor': { select: { isEditedPostDirty: function () { return cfg.dirty === 'select' ? selected !== null : !!cfg.dirty; } }, dispatch: {} },
+    'core/preferences': { select: {}, dispatch: { set: function (scope, key, value) { (window.__prefs = window.__prefs || []).push([scope, key, value]); } } },
+    'core/edit-post': { select: {}, dispatch: { openGeneralSidebar: function (area) { document.getElementById('sidebar').setAttribute('data-area', area); } } },
+    'core/interface': { select: {}, dispatch: { enableComplementaryArea: function () {} } },
+    'core': { select: { __experimentalGetDirtyEntityRecords: function () { return []; } }, dispatch: {} }
+  };
+  if (!cfg.noWp) window.wp = { data: { select: function (s) { return stores[s] ? stores[s].select : undefined; }, dispatch: function (s) { return stores[s] ? stores[s].dispatch : {}; } } };
+})();
+</script>
+</body>
+</html>

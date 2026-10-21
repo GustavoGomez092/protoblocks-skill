@@ -175,7 +175,7 @@ The builder runs this pipeline:
 3. **Breakdown**: crops the design into sections and proposes a plan. **Nothing is built until you approve the plan.**
 4. **Per section**: build the block, then visual QA, then motion.
 5. **Header/footer**: moves the design's header and footer into the theme parts.
-6. **Full-page QA**: whole-page visual check plus accessibility.
+6. **Full-page QA**: whole-page visual check plus accessibility, then the page opened in wp-admin's block editor (every block valid, rendered, editable, the post left clean).
 7. **Yoast SEO**: infers and applies SEO data, audits the rendered page, fixes failures.
 8. **Menu and more pages**: asks whether to add the page to the primary menu and whether you have other landing pages to build.
 

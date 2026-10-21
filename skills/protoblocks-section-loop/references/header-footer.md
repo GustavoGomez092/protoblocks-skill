@@ -40,6 +40,8 @@ Run steps 1-8 once, when every section of the first page has passed Verify (head
 7. If a re-verification fails after `inPart` (for example a pixel shift because the template wraps the part in `<header>` / `<footer>`, or the page now has a different top offset), fix it in the block CSS or in the part markup (regenerate with `markup`, `write`, rebuild) and re-verify. Do not unset `inPart` to chase it, and do not lower thresholds. The iteration cap applies as usual (`verify.md`).
 8. Refresh menus that link to pages built since: `node "$PB/lib/navigation.mjs" refresh "$THEME"`. It keeps Site Editor edits; it patches only pending placeholder links. `page.mjs build` already runs it when a menu has a pending link to the page.
 
+Then, before page QA, the orchestrator checks both parts in the Site Editor: `node "$PB/qa/editor-qa.mjs" run "$THEME" --parts` and `record "$THEME" --parts <file>` (`protoblocks-site-builder` `references/pipeline.md`, `move-parts`). It fails on a part whose block does not render in the editor, has an unbound field, or whose top-level block is not the one with the `pb-header` / `pb-footer` anchor.
+
 ## Later pages
 
 `plan.mjs record` stores the header and footer of a later page as `reuse`, `inPart: true`, anchors `pb-header` / `pb-footer`, status `building`, `prevStatus: "done"` (a pass returns them to `done`; they are never animated again). A row without `part` on a section cropped as the header or footer counts as that part. Skip Build for them except `library.mjs record` (so `usedOn` lists the page); `page.mjs build` leaves them out. Verify them like any section once the page is built: `prepare` targets `#pb-header` / `#pb-footer`, which the parts render.

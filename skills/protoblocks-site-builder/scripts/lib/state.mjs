@@ -31,7 +31,7 @@ export const schema = {
         theme: {
           type: 'object',
           properties: {
-            slug: str, forkedFrom: str, displayName: str,
+            slug: str, forkedFrom: str, displayName: str, logo: str, readmeHash: str,
             category: { type: 'object', properties: { slug: str, title: str } },
             screenshot: { type: 'object', properties: { page: str, source: str, writtenAt: str } },
           },

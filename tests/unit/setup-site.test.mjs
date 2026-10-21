@@ -35,6 +35,8 @@ function harness({ preflight = okPreflight(), themeReused = false, forkThrows = 
   return { themeDir, calls, deps };
 }
 const names = (calls) => calls.map((c) => c[0]);
+// site.theme minus the README hash every run records (checked here, compared elsewhere).
+const noHash = ({ readmeHash, ...theme }) => { assert.match(readmeHash ?? '', /^[0-9a-f]{64}$/); return theme; };
 
 test('EPREFLIGHT lists failing checks and never touches plugins, download or fork', async () => {
   const h = harness({ preflight: okPreflight({ ok: false, checks: [
@@ -73,7 +75,7 @@ test('runs preflight, plugins, fork, assets in order and initializes state', asy
   assert.equal(s.site.path, '/w/public');
   assert.equal(s.site.localSiteId, 'abc');
   assert.deepEqual(s.site.wp, { mode: 'local-wrapper', wrapper: '/w/wp' });
-  assert.deepEqual(s.site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3' });
+  assert.deepEqual(noHash(s.site.theme), { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3' });
 });
 
 test('native mode records wp mode without wrapper or localSiteId', async () => {
@@ -96,7 +98,7 @@ test('second run on the same site keeps existing state and updates site.theme', 
   const s = loadState(h.themeDir);
   assert.deepEqual(s.library.hero, { purpose: 'x' });
   assert.equal(s.site.url, 'http://x.local');
-  assert.deepEqual(s.site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@9.9.9' });
+  assert.deepEqual(noHash(s.site.theme), { slug: 'acme', forkedFrom: 'proto-blocks-theme@9.9.9' });
 });
 
 test('zip cleanup runs when forkTheme throws, and the error propagates', async () => {
@@ -109,7 +111,7 @@ test('zip cleanup runs when forkTheme throws, and the error propagates', async (
 
 test('--theme-name and --category-title reach forkTheme and are recorded as site.theme.displayName / category', async () => {
   assert.deepEqual(parseArgs(['--name', 'O-Flex', '--theme-name', 'O-Flex Group', '--category-title', 'O-Flex blocks']),
-    { name: 'O-Flex', themeName: 'O-Flex Group', categoryTitle: 'O-Flex blocks', force: false, updatePlugins: false });
+    { name: 'O-Flex', themeName: 'O-Flex Group', categoryTitle: 'O-Flex blocks', force: false, updatePlugins: false, readme: false });
   for (const argv of [['--name', 'A', '--theme-name'], ['--name', 'A', '--category-title', '--force']]) {
     assert.throws(() => parseArgs(argv), (e) => e.code === 'EUSAGE', JSON.stringify(argv));
   }
@@ -119,14 +121,14 @@ test('--theme-name and --category-title reach forkTheme and are recorded as site
   const fork = h.calls.find((c) => c[0] === 'fork')[1];
   assert.equal(fork.themeName, 'O-Flex Group');
   assert.equal('categoryTitle' in fork, false, 'not passed when not given (the fork decides the default)');
-  assert.deepEqual(loadState(h.themeDir).site.theme, { slug: 'o-flex', forkedFrom: 'proto-blocks-theme@1.4.0', displayName: 'O-Flex Group', category: { slug: 'o-flex', title: 'O-Flex Group blocks' } });
+  assert.deepEqual(noHash(loadState(h.themeDir).site.theme), { slug: 'o-flex', forkedFrom: 'proto-blocks-theme@1.4.0', displayName: 'O-Flex Group', category: { slug: 'o-flex', title: 'O-Flex Group blocks' } });
   // Without the flags nothing identity-related is passed to forkTheme.
   const plain = harness();
   await setupSite({ name: 'Acme' }, plain.deps);
   const pf = plain.calls.find((c) => c[0] === 'fork')[1];
   assert.equal('themeName' in pf, false);
   assert.equal('categoryTitle' in pf, false);
-  assert.deepEqual(loadState(plain.themeDir).site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3' }, 'a fake fork without identity records none');
+  assert.deepEqual(noHash(loadState(plain.themeDir).site.theme), { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3' }, 'a fake fork without identity records none');
 });
 
 test('a re-run keeps site.theme.screenshot while refreshing the rest of site.theme', async () => {
@@ -137,13 +139,13 @@ test('a re-run keeps site.theme.screenshot while refreshing the rest of site.the
   const h2 = harness();
   h2.deps.forkTheme = () => ({ themeDir: h.themeDir, slug: 'acme', reused: true, renamed: true, forkedFrom: 'proto-blocks-theme@1.2.3', displayName: 'Acme Group', category: { slug: 'acme', title: 'Acme Group blocks' } });
   await setupSite({ name: 'Acme', themeName: 'Acme Group' }, h2.deps);
-  assert.deepEqual(loadState(h.themeDir).site.theme, { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3', displayName: 'Acme Group', category: { slug: 'acme', title: 'Acme Group blocks' }, screenshot: { page: 'home', source: 'frame', writtenAt: 'x' } });
+  assert.deepEqual(noHash(loadState(h.themeDir).site.theme), { slug: 'acme', forkedFrom: 'proto-blocks-theme@1.2.3', displayName: 'Acme Group', category: { slug: 'acme', title: 'Acme Group blocks' }, screenshot: { page: 'home', source: 'frame', writtenAt: 'x' } });
 });
 
 test('parseArgs: values, boolean --force, defaults', () => {
   assert.deepEqual(parseArgs(['--name', 'A B', '--slug', 's', '--site', 'Local X', '--cwd', '/d', '--force']),
-    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true, updatePlugins: false });
-  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false, updatePlugins: false });
+    { name: 'A B', slug: 's', site: 'Local X', cwd: '/d', force: true, updatePlugins: false, readme: false });
+  assert.deepEqual(parseArgs(['--name', 'A']), { name: 'A', force: false, updatePlugins: false, readme: false });
 });
 
 test('parseArgs rejects a missing value, an unknown flag and a stray positional (EUSAGE)', () => {
@@ -255,4 +257,101 @@ test('a re-run on the same site refreshes site.path and site.wp along with the t
   const s = loadState(h.themeDir);
   assert.equal(s.site.path, '/moved/public');
   assert.deepEqual(s.site.wp, { mode: 'local-wrapper', wrapper: '/moved/wp' });
+});
+
+// ---- the fork's README and logo ----
+import { cleanSvg, installLogo, readmeContent, writeReadme } from '../../skills/protoblocks-site-builder/scripts/lib/setup-site.mjs';
+
+const SVG = '﻿<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: Figma -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x">\n<svg id="Layer_1" x="0px" y="0px" version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" xml:space="preserve"><defs><linearGradient id="g"/></defs><path fill="url(#g)" d="M0 0h10v10z"/></svg>\n';
+const README_PLAIN = '# Acme Co\n\nWordPress block theme for Acme Co, powered by [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks).\n';
+const logoFile = (dir, name, body = SVG) => { const f = path.join(dir, name); fs.writeFileSync(f, body); return f; };
+
+test('cleanSvg strips the prolog, doctype, comments and the root id/x/y/version/xml:space, keeping inner ids and the rest', () => {
+  assert.equal(cleanSvg(SVG), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><linearGradient id="g"/></defs><path fill="url(#g)" d="M0 0h10v10z"/></svg>\n');
+  assert.equal(cleanSvg('<svg viewBox="0 0 1 1"/>'), '<svg viewBox="0 0 1 1"/>\n');
+});
+
+test('readmeContent: the display name, the project line, and the logo block only with a logo (alt escaped)', () => {
+  assert.equal(readmeContent({ displayName: 'Acme Co', projectName: 'Acme Co' }), README_PLAIN);
+  assert.equal(readmeContent({ displayName: 'A "&" B', projectName: 'Acme', logo: 'assets/img/logo.svg' }), '<p align="center">\n  <img src="assets/img/logo.svg" alt="A &quot;&amp;&quot; B" width="360">\n</p>\n\n# A "&" B\n\nWordPress block theme for Acme, powered by [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks).\n');
+});
+
+test('a fresh fork gets the client README (inherited README replaced) and site.theme.readmeHash', async () => {
+  const h = harness();
+  fs.writeFileSync(path.join(h.themeDir, 'README.md'), '# proto-blocks-theme\n');
+  const r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme' }, h.deps);
+  assert.equal(fs.readFileSync(path.join(h.themeDir, 'README.md'), 'utf8'), README_PLAIN);
+  assert.equal(r.readme.file, path.join(h.themeDir, 'README.md'));
+  assert.equal(r.logo, undefined);
+  const theme = loadState(h.themeDir).site.theme;
+  assert.equal(theme.readmeHash, r.readme.hash);
+  assert.match(theme.readmeHash, /^[0-9a-f]{64}$/);
+  assert.equal(theme.logo, undefined);
+});
+
+test('--logo copies the cleaned SVG to assets/img/logo.svg, records site.theme.logo and puts it in the README; png is kept as is', async () => {
+  const h = harness();
+  const r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', logo: logoFile(h.themeDir, 'brand.SVG') }, h.deps);
+  assert.equal(r.logo, 'assets/img/logo.svg');
+  assert.equal(fs.readFileSync(path.join(h.themeDir, 'assets', 'img', 'logo.svg'), 'utf8'), cleanSvg(SVG));
+  const readme = fs.readFileSync(path.join(h.themeDir, 'README.md'), 'utf8');
+  assert.ok(readme.startsWith('<p align="center">\n  <img src="assets/img/logo.svg" alt="Acme Co" width="360">\n</p>\n\n# Acme Co\n'), readme);
+  assert.equal(loadState(h.themeDir).site.theme.logo, 'assets/img/logo.svg');
+  const p = harness();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', logo: logoFile(p.themeDir, 'logo.png', png) }, p.deps);
+  assert.deepEqual(fs.readFileSync(path.join(p.themeDir, 'assets', 'img', 'logo.png')), png);
+  assert.match(fs.readFileSync(path.join(p.themeDir, 'README.md'), 'utf8'), /src="assets\/img\/logo\.png"/);
+  // Bad logos are EINPUT, found before the state is touched.
+  const b = harness();
+  await assert.rejects(setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', logo: logoFile(b.themeDir, 'logo.jpg', 'x') }, b.deps), (e) => e.code === 'EINPUT');
+  await assert.rejects(setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', logo: path.join(b.themeDir, 'absent.svg') }, b.deps), (e) => e.code === 'EINPUT');
+  assert.throws(() => installLogo(b.themeDir, logoFile(b.themeDir, 'empty.svg', '')), (e) => e.code === 'EINPUT');
+});
+
+test('an existing fork keeps its README unless --readme; --readme rewrites an untouched README, refuses an edited one (EEDITED) unless --force', async () => {
+  const fresh = harness();
+  await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme' }, fresh.deps);
+  const file = path.join(fresh.themeDir, 'README.md');
+  const hash = loadState(fresh.themeDir).site.theme.readmeHash;
+  // A re-run (reused fork) without --readme: not rewritten, hash kept.
+  const again = harness({ themeReused: true });
+  again.deps.forkTheme = (o) => { again.calls.push(['fork', o]); return { themeDir: fresh.themeDir, slug: 'acme', reused: true, forkedFrom: 'proto-blocks-theme@1.0.0' }; };
+  fs.writeFileSync(file, '# Edited by the developer\n');
+  let r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme' }, again.deps);
+  assert.equal(r.readme, null);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Edited by the developer\n');
+  assert.equal(loadState(fresh.themeDir).site.theme.readmeHash, hash);
+  // --readme on the edited README: EEDITED, nothing written; --force overwrites.
+  await assert.rejects(setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', readme: true }, again.deps), (e) => e.code === 'EEDITED' && /edited since/.test(e.message));
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Edited by the developer\n');
+  r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', readme: true, force: true }, again.deps);
+  assert.equal(fs.readFileSync(file, 'utf8'), README_PLAIN);
+  assert.equal(r.readme.hash, hash);
+  // Untouched README (what the tool wrote): --readme rewrites it (here with a logo added later).
+  r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', readme: true, logo: logoFile(fresh.themeDir, 'l.svg') }, again.deps);
+  assert.match(fs.readFileSync(file, 'utf8'), /^<p align="center">\n  <img src="assets\/img\/logo\.svg"/);
+  assert.notEqual(loadState(fresh.themeDir).site.theme.readmeHash, hash);
+  // A logo alone on a reused fork: copied and recorded, README untouched (and the next --readme run uses it).
+  const withLogo = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, '# Mine\n');
+  r = await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme', logo: logoFile(fresh.themeDir, 'l2.svg') }, again.deps);
+  assert.deepEqual([r.logo, r.readme, fs.readFileSync(file, 'utf8')], ['assets/img/logo.svg', null, '# Mine\n']);
+  assert.notEqual(withLogo, '# Mine\n');
+  // A README nobody recorded (no readmeHash) on an existing fork: EEDITED too.
+  const old = harness({ themeReused: true });
+  fs.writeFileSync(path.join(old.themeDir, 'README.md'), '# inherited\n');
+  fs.mkdirSync(path.join(old.themeDir, '.protoblocks'), { recursive: true });
+  await setupSite({ cwd: '/c', name: 'Acme Co', slug: 'acme' }, harness().deps).catch(() => {});
+  assert.throws(() => writeReadme(old.themeDir, { displayName: 'A', projectName: 'A', fresh: false }), (e) => e.code === 'EEDITED' && /no site\.theme\.readmeHash/.test(e.message));
+  assert.equal(writeReadme(old.themeDir, { displayName: 'A', projectName: 'A', fresh: false, force: true }).logo, null);
+  assert.equal(writeReadme(old.themeDir, { displayName: 'A', projectName: 'A', fresh: false }).hash, writeReadme(old.themeDir, { displayName: 'A', projectName: 'A', fresh: true }).hash, 'identical content is never a conflict');
+});
+
+test('parseArgs: --logo takes a file, --readme is a flag; the CLI usage lists both', () => {
+  assert.deepEqual(parseArgs(['--name', 'A', '--logo', 'l.svg', '--readme']), { name: 'A', logo: 'l.svg', readme: true, force: false, updatePlugins: false });
+  assert.throws(() => parseArgs(['--name', 'A', '--logo']), (e) => e.code === 'EUSAGE');
+  const r = spawnSync(process.execPath, [CLI, '--logo'], { encoding: 'utf8' });
+  assert.equal(r.status, 64);
+  assert.match(r.stderr, /\[--logo <file\.svg\|png>\] \[--readme\]/);
 });

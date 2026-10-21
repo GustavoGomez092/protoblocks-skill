@@ -78,8 +78,8 @@ function stateWith(pages, site = { url: 'http://a.local', path: '/x' }) {
 }
 
 const URL_ = 'http://a.local/home/';
-test('recordPageQa stores the absolute file; pass moves the page to seo, fail leaves status', async () => {
-  const dir = stateWith([{ slug: 'home', url: URL_, status: 'building', sections: [] }]);
+test('recordPageQa stores the absolute file; a pass moves the page to seo once editor QA passed, fail leaves status', async () => {
+  const dir = stateWith([{ slug: 'home', url: URL_, status: 'building', sections: [], editorQa: { pass: true, file: '/eq.json', at: 'x' } }]);
   const f = path.join(dir, 'pq.json');
   fs.writeFileSync(f, JSON.stringify({ url: URL_, pass: false }));
   assert.deepEqual(await recordPageQa(dir, 'home', f), { pass: false, status: 'building' });
@@ -91,6 +91,20 @@ test('recordPageQa stores the absolute file; pass moves the page to seo, fail le
   assert.equal(p.pageQa.file, f);
   assert.equal(p.pageQa.pass, true);
   assert.ok(p.pageQa.at);
+});
+
+test('recordPageQa: a pass (or an acceptance) without a passed editor QA records pageQa but keeps the page building', async () => {
+  for (const editorQa of [undefined, { pass: false, file: '/eq.json', at: 'x' }]) {
+    const dir = stateWith([{ slug: 'home', url: URL_, status: 'building', sections: [], ...(editorQa ? { editorQa } : {}) }]);
+    const f = path.join(dir, 'pq.json');
+    fs.writeFileSync(f, JSON.stringify({ url: URL_, pass: true }));
+    assert.deepEqual(await recordPageQa(dir, 'home', f), { pass: true, status: 'building' }, JSON.stringify(editorQa));
+    const p = loadState(dir).pages[0];
+    assert.deepEqual([p.status, p.pageQa.pass, p.pageQa.file], ['building', true, f]);
+  }
+  const dir = stateWith([qaPage({ editorQa: undefined })]);
+  assert.deepEqual(await recordPageQa(dir, 'home', writeResult(dir, designFail()), { accepted: 'ok' }), { pass: false, accepted: true, status: 'building' });
+  assert.deepEqual([loadState(dir).pages[0].pageQa.accepted, loadState(dir).pages[0].status], [true, 'building']);
 });
 
 test('recordPageQa: missing page is ENOPAGE; unreadable or unparseable file is EINPUT; state untouched', async () => {
@@ -156,7 +170,8 @@ const designFail = (extra = {}) => ({
   breakpoints: [{ name: 'desktop', status: 200, mismatch: 0.2, heightDelta: 0.01, fullyMasked: false, imageErrors: [], pass: false }],
   ...extra,
 });
-const qaPage = (extra = {}) => ({ slug: 'home', url: URL_, status: 'building', design: { frames: [{ breakpoint: 'desktop', width: 1440, image: 'd.png' }] }, sections: [{ n: 1, anchor: 'pb-s1', status: 'done' }, { n: 2, anchor: 'pb-s2', status: 'skipped' }], ...extra });
+// editorQa already passed: page QA is then the last check before seo (editor-qa.test.mjs covers the other order).
+const qaPage = (extra = {}) => ({ slug: 'home', url: URL_, status: 'building', design: { frames: [{ breakpoint: 'desktop', width: 1440, image: 'd.png' }] }, sections: [{ n: 1, anchor: 'pb-s1', status: 'done' }, { n: 2, anchor: 'pb-s2', status: 'skipped' }], editorQa: { pass: true, file: '/eq.json', at: 'x' }, ...extra });
 const writeResult = (dir, obj) => { const f = path.join(dir, `pq-${Math.random().toString(16).slice(2)}.json`); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
 
 test('recordPageQa guards: page must be building, every section done/skipped, and the result of the page url', async () => {

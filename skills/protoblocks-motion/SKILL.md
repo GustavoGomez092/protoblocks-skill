@@ -38,18 +38,24 @@ Motion attributes live in the block's `template.php`, so they are a property of 
 1. Choose presets (`references/presets.md`): one hero-level effect for the heading (e.g. `split-lines`), one supporting effect for the content group (e.g. `fade-up`, `stagger-children`), `counter` for stats, at most 3 distinct presets per section. Nothing on body paragraphs over ~3 lines; never navigation links or form inputs. Design motion notes come first. Header and footer: no motion.
 2. Edit `template.php`. Attributes only on the frontend. The plugin does NOT provide `$is_preview`; define it (`$block` is null in the editor preview) and add one helper (a closure, never a named function: several instances would redeclare it):
 
+   Expose timing as block controls (`motionDuration`, `motionDelay`, `motionStagger`: `range`, seconds, `0` = profile default; `counterDuration` where a counter is used) and merge them in the helper (`$opts` wins per element). Keep delay + duration under 1.4 s: the plugin watchdog forces `done` 1.5 s after an element enters view.
+
 ```php
 $is_preview = ! isset( $block ) || $block === null;
-$pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview ) {
+$pb_timing  = array_filter( array( 'duration' => $attributes['motionDuration'] ?? 0, 'delay' => $attributes['motionDelay'] ?? 0, 'stagger' => $attributes['motionStagger'] ?? 0 ) );
+$pb_counter = $attributes['counterDuration'] ?? 0;
+$pb_motion  = function ( $preset, $opts = array() ) use ( $is_preview, $pb_timing, $pb_counter ) {
 	if ( $is_preview ) { return ''; }
+	if ( 'counter' === $preset && $pb_counter > 0 ) { $opts += array( 'duration' => $pb_counter ); }
 	$out = 'data-pb-motion="' . esc_attr( $preset ) . '"';
 	if ( ! in_array( $preset, array( 'parallax', 'marquee' ), true ) ) { $out .= ' data-proto-animate="manual"'; }
-	foreach ( $opts as $k => $v ) { $out .= ' data-pb-' . sanitize_key( $k ) . '="' . esc_attr( $v ) . '"'; }
+	foreach ( $opts + $pb_timing as $k => $v ) { $out .= ' data-pb-' . sanitize_key( $k ) . '="' . esc_attr( $v ) . '"'; }
 	return $out;
 };
 ```
 
    Use it on the element: `<h2 <?php echo $pb_motion( 'split-lines' ); ?> data-proto-field="heading">` or `<div <?php echo $pb_motion( 'fade-up', array( 'delay' => 0.15 ) ); ?>>`. Continuous presets (`parallax`, `marquee`) get no `data-proto-animate`.
+
 3. Re-run gates (they render both the frontend and the editor preview), then rebuild the page:
    `node "$PB/lib/gates.mjs" "$THEME" <block> --attrs '<attrs json>'`, then `node "$PB/lib/page.mjs" build "$THEME" <page>`.
 4. Verify (the page URL is `page.url` in `state.mjs get "$THEME" pages`; width is the desktop width used in Verify, default 1440):

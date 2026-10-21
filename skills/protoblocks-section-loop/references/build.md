@@ -31,6 +31,10 @@ Real flags (checked against the plugin's `create` command): `--title`, `--descri
 - Images use the shape `{id, url, alt, caption, size}` (what `media.mjs` prints as `attr`). Use `loading="lazy"`, except the first section's hero image: `fetchpriority="high"` and no lazy.
 - `extend`: the new control's default must reproduce today's output exactly; run `regress.mjs` afterwards.
 
+## Editor check
+
+A block that renders is not finished until it can be edited. Before Verify, run the unbound-fields check from the `protoblocks` skill's `references/authoring-workflow.md` ("Every declared field must be reachable") in the block folder: it lists the `block.json` fields no `data-proto-field` / `data-proto-repeater` / `data-proto-inner-blocks` element binds (repeater subfields included). Fix each one as that section says (bind it, move a consumed value to a control or `itemControls`, or an editor-only region behind `$is_preview`), and seed a placeholder repeater item under `$is_preview` so the editor can learn the subfields. Once the page's sections are done, the orchestrator's `page-editor-qa` step (`editor-qa.mjs`) re-verifies all of this in the real block editor: it opens the page in wp-admin, requests each block's editor preview, and fails the page on any unbound field, a block that does not render there, a missing inspector, or a post that turns dirty on open.
+
 ## Writing attrs, inner and block to state
 
 Find indexes first (`n` need not be contiguous; other pages may exist), then write. Values are JSON; strings are quoted.

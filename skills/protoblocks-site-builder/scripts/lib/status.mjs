@@ -11,7 +11,7 @@ export const OPEN = new Set(['building', 'verifying', 'animating']);
 const PART_ANCHOR_SET = new Set(Object.values(PART_ANCHORS));
 // Every action nextAction can return (enforced at runtime). The orchestrator SKILL.md has one action-table row per
 // entry and references/pipeline.md one section per entry (tested).
-export const ACTIONS = Object.freeze(['setup', 'breakdown', 'build-page', 'section-build', 'section-verify', 'section-animate', 'move-parts', 'page-qa', 'seo', 'ask-more-pages']);
+export const ACTIONS = Object.freeze(['setup', 'breakdown', 'build-page', 'section-build', 'section-verify', 'section-animate', 'move-parts', 'page-qa', 'page-editor-qa', 'seo', 'ask-more-pages']);
 
 const byN = (a, b) => a.n - b.n;
 
@@ -49,6 +49,9 @@ export function partsToMove(state, page) {
 /** A page's QA counts as passed when it passed, or the developer accepted its design differences. */
 export const pageQaPassed = (page) => page.pageQa?.pass === true || page.pageQa?.accepted === true;
 
+/** Editor QA (the page opened in the block editor, `editor-qa.mjs`) only counts as a real pass; nothing is accepted. */
+export const editorQaPassed = (page) => page.editorQa?.pass === true;
+
 const pageQaWhy = (page) => (page.pageQa?.pass !== true && page.pageQa?.accepted === true ? 'page QA differences accepted by the developer' : 'page QA passed');
 
 function sectionAction(page, s, why) {
@@ -81,9 +84,10 @@ function decide(state) {
   if (unmoved.length) {
     return { action: 'move-parts', page: page.slug, sections: unmoved.map((s) => s.n), why: `header/footer (${unmoved.map((s) => `#${s.anchor}`).join(', ')}) passed as sections but are not in the template parts yet` };
   }
-  return pageQaPassed(page)
-    ? { action: 'seo', page: page.slug, why: pageQaWhy(page) }
-    : { action: 'page-qa', page: page.slug, why: 'all sections closed' };
+  if (!pageQaPassed(page)) return { action: 'page-qa', page: page.slug, why: 'all sections closed' };
+  // Both checks gate SEO: the rendered page (page QA) and the page in the block editor (editor QA).
+  if (!editorQaPassed(page)) return { action: 'page-editor-qa', page: page.slug, why: `${pageQaWhy(page)}; the page has not passed editor QA yet` };
+  return { action: 'seo', page: page.slug, why: `${pageQaWhy(page)} and editor QA passed` };
 }
 
 /** Throws EACTION unless `next.action` is one of ACTIONS (so the docs, which list ACTIONS, cannot drift). */

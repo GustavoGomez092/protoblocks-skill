@@ -59,6 +59,8 @@ Written by `setup-site.mjs` (merged on a re-run, so `screenshot` survives) and `
 | `displayName` | The theme's `Theme Name:` (`--theme-name`, default the project name). |
 | `category` | `{ slug, title }`: the Proto-Blocks inserter category the fork's `functions.php` registers (slug = the theme slug, title "<displayName> blocks" or `--category-title`). Every block's `block.json` `"category"` must be `category.slug`; the `category` gate checks it, falling back to the plugin default `proto-blocks` when state has none. |
 | `screenshot` | `{ page, source: "frame", writtenAt }`: `$THEME/screenshot.png` (1200x900) was written from that page's desktop frame. |
+| `logo` | Theme-relative path of the client logo `setup-site.mjs --logo` copied into the fork (`assets/img/logo.svg` or `.png`; an SVG is stored without its xml prolog, comments and root `id`/`x`/`y`/`version`/`xml:space`). |
+| `readmeHash` | sha256 of the `$THEME/README.md` `setup-site.mjs` last wrote (the client README: logo, display name, one line). Written on a fresh fork and with `--readme`; a later `--readme` refuses with `[EEDITED]` when the file no longer matches it (`--force` overwrites). |
 
 ## `site.navigation.menus.<key>`
 
@@ -97,6 +99,8 @@ Free-form keys (not schema-enforced), set at the plan gate after the developer a
 | `sections[j].inPart` | `true` once a header/footer section is rendered by its template part: `page.mjs` then leaves it out of the page content. Set on the first page by `parts.mjs adopt` (after `parts.mjs write`; `references/header-footer.md` in `protoblocks-section-loop`) and on later pages by `plan.mjs record` (`reuse` rows with `part`). |
 | `pages[i].pageQa` | Written by `page-qa.mjs record`: `{ "pass", "file", "at" }`, or with the developer's acceptance `{ "pass": false, "accepted": true, "note", "by": "developer", "file", "at" }`. A pass or an acceptance sets the page `seo`; a later plain record replaces it. |
 | `pages[i].notes.pageQa` | "accepted by developer: <note>", set by `page-qa.mjs record --accepted`. |
+| `pages[i].editorQa` | Written by `editor-qa.mjs record`: `{ "pass", "file", "at" }`, the page checked in wp-admin's block editor (`file` is `artifacts/<page>/editor-qa/editor-qa.json`). Never accepted. The page becomes `seo` only when `editorQa.pass` and `pageQa` (passed or accepted) are both recorded, whichever comes second; `status.mjs` routes `page-editor-qa` while it is missing or failed. Old builds already `seo`/`done` without it are left alone. |
+| `site.parts.editorQa` | Written by `editor-qa.mjs record --parts`: `{ "pass", "file", "at" }`, the header/footer parts checked in the Site Editor after `move-parts` (`file` is `artifacts/parts/editor-qa/editor-qa.json`). Sits next to `site.parts.header` / `.footer`. |
 | `pages[i].notes.menu` | `"declined"` when the developer did not want the page in the primary menu (never asked again). |
 | `sections[j].prevStatus`, `sections[j].preparedIteration` | Set by `qa-input.mjs prepare`: the status before verification (a pass on a section that was `done` returns it to `done`) and the newest prepared iteration (`record` only accepts a verdict from that iteration). |
 

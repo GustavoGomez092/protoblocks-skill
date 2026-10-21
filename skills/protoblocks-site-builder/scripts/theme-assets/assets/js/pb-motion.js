@@ -43,7 +43,7 @@
   function num(el, name, fallback) { var v = parseFloat(el.getAttribute(name)); return isNaN(v) ? fallback : v; }
   function opts(el) {
     return {
-      duration: profile.duration, ease: profile.ease,
+      duration: num(el, 'data-pb-duration', profile.duration), ease: profile.ease,
       delay: num(el, 'data-pb-delay', 0),
       stagger: num(el, 'data-pb-stagger', profile.stagger),
       distance: num(el, 'data-pb-distance', profile.distance),
@@ -166,9 +166,10 @@
         reserve();
         window.addEventListener('resize', onResize);
         el.textContent = formatCounter(c, 0);
-        // Capped so the plugin watchdog (done 1.5 s after entering view) never cuts the count short.
+        // Capped so the plugin watchdog (done 1.5 s after entering view) never cuts the count short; an explicit
+        // data-pb-duration is the count time itself.
         return g.to(state, Object.assign({
-          v: c.value, duration: Math.min(1.2, Math.max(1, o.duration * 2)),
+          v: c.value, duration: el.hasAttribute('data-pb-duration') ? o.duration : Math.min(1.2, Math.max(1, o.duration * 2)),
           onStart: reserve, // re-measure: web fonts may have loaded since init
           onUpdate: function () { el.textContent = formatCounter(c, state.v); }, onComplete: finish
         }, { ease: o.ease, delay: o.delay }));
@@ -224,7 +225,30 @@
     });
   }
 
+  // Intro overlay (the theme's once-per-session preloader): while it is up, reveal tweens are created but not
+  // armed, so the hero plays when the overlay hands control back (proto:intro-complete) instead of underneath it.
+  // The overlay's own 8 s safety net fires that event; a 10 s backstop here covers a theme that never does.
+  var introQueue = null;
+  function introActive() {
+    var html = document.documentElement;
+    if (html.classList.contains('proto-intro-skip')) return false;
+    var overlay = document.querySelector('.proto-intro');
+    return !!(overlay && !overlay.classList.contains('is-hidden') && (html.classList.contains('proto-intro-active') || !window.performance || performance.now() < 3000));
+  }
+  function releaseIntro() {
+    var q = introQueue; introQueue = null;
+    if (q) q.forEach(function (fn) { try { fn(); } catch (e) {} });
+  }
+  function afterIntro(fn) {
+    if (introQueue) { introQueue.push(fn); return; }
+    if (!introActive()) { fn(); return; }
+    introQueue = [fn];
+    document.addEventListener('proto:intro-complete', releaseIntro, { once: true });
+    window.setTimeout(releaseIntro, 10000);
+  }
+
   function startReveal(el, name) {
+    if (introQueue || introActive()) { afterIntro(function () { if (el.getAttribute('data-proto-animate') !== 'done') startReveal(el, name); }); return; }
     var o = opts(el);
     var tween = revealTween(el, name, o);
     if (!tween) { done(el); return; }

@@ -27,7 +27,7 @@ test('every data-pb-* option named in the motion docs is read by the runtime', (
   const named = new Set([...docs.matchAll(/data-pb-([a-z-]+)/g)].map((m) => m[1]).filter((n) => n !== 'motion'));
   const read = new Set([...RUNTIME.matchAll(/'data-pb-([a-z-]+)'/g)].map((m) => m[1]));
   for (const n of named) assert.ok(read.has(n), `data-pb-${n} is documented but pb-motion.js never reads it`);
-  for (const n of ['delay', 'stagger', 'start', 'distance', 'speed']) assert.ok(named.has(n), `option data-pb-${n} is not documented`);
+  for (const n of ['delay', 'duration', 'stagger', 'start', 'distance', 'speed']) assert.ok(named.has(n), `option data-pb-${n} is not documented`);
 });
 
 test('every concrete data-pb-motion="<name>" attribute in the motion docs names a runtime preset', () => {

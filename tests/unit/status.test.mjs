@@ -33,6 +33,7 @@ test('skipped sections do not block page QA; page QA pass → seo', () => {
   const pg = { slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(1, 'done'), sec(2, 'skipped')] };
   assert.equal(nextAction(base([pg])).action, 'page-qa');
   assert.equal(nextAction(base([{ ...pg, status: 'seo', pageQa: { pass: true } }])).action, 'seo');
+  assert.equal(nextAction(base([{ ...pg, pageQa: { pass: true }, editorQa: { pass: true } }])).action, 'seo');
 });
 
 test('multi-page: next page breakdown, then ask-more-pages', () => {
@@ -87,7 +88,27 @@ test('a done page with a reopened section is resumed before the next page', () =
 test('page QA not passed with all sections closed stays page-qa; pass flag false does not skip', () => {
   const pg = { slug: 'home', status: 'building', sections: [sec(1, 'done')], pageQa: { pass: false } };
   assert.equal(nextAction(base([pg])).action, 'page-qa');
-  assert.equal(nextAction(base([{ ...pg, pageQa: { pass: true } }])).action, 'seo');
+  assert.equal(nextAction(base([{ ...pg, pageQa: { pass: true } }])).action, 'page-editor-qa');
+  assert.equal(nextAction(base([{ ...pg, pageQa: { pass: true }, editorQa: { pass: true } }])).action, 'seo');
+});
+
+test('page-editor-qa: after page QA passed (or was accepted) the page needs editor QA before seo; a failed editor QA stays', () => {
+  const pg = (pageQa, editorQa) => base([{ slug: 'home', status: 'building', sections: [sec(1, 'done'), sec(2, 'skipped')], pageQa, editorQa }]);
+  let r = nextAction(pg({ pass: true }));
+  assert.deepEqual([r.action, r.page], ['page-editor-qa', 'home']);
+  assert.match(r.why, /page QA passed; the page has not passed editor QA yet/);
+  r = nextAction(pg({ pass: false, accepted: true, note: 'n' }));
+  assert.deepEqual([r.action, r.why], ['page-editor-qa', 'page QA differences accepted by the developer; the page has not passed editor QA yet']);
+  assert.equal(nextAction(pg({ pass: true }, { pass: false })).action, 'page-editor-qa');
+  assert.equal(nextAction(pg({ pass: true }, { accepted: true })).action, 'page-editor-qa', 'editor QA is never accepted');
+  r = nextAction(pg({ pass: true }, { pass: true }));
+  assert.deepEqual([r.action, r.why], ['seo', 'page QA passed and editor QA passed']);
+  assert.equal(nextAction(pg({ pass: false, accepted: true }, { pass: true })).why, 'page QA differences accepted by the developer and editor QA passed');
+  // Editor QA recorded before page QA: page QA still comes first.
+  assert.equal(nextAction(pg(undefined, { pass: true })).action, 'page-qa');
+  // Old builds: a page already seo/done without editorQa is not sent back.
+  for (const status of ['seo', 'done']) assert.notEqual(nextAction(base([{ slug: 'home', status, sections: [sec(1, 'done')], pageQa: { pass: true } }])).action, 'page-editor-qa', status);
+  assert.equal(nextAction(base([{ slug: 'home', status: 'seo', sections: [sec(1, 'done')], pageQa: { pass: true } }])).action, 'seo');
 });
 
 test('empty pages array → ask-more-pages', () => {
@@ -169,6 +190,7 @@ test('ACTIONS lists exactly the actions nextAction returns', () => {
     base([pg('planning', [sec(1, 'planned')], { plan: { approvedAt: 'x' } })]),
     ...['planned', 'building', 'verifying', 'animating'].map((st) => base([pg('building', [sec(1, st)], { plan: { approvedAt: 'x' } })])),
     base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' } })]),
+    base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' }, pageQa: { pass: true } })]),
     base([pg('seo', [sec(1, 'done')], { pageQa: { pass: true } })]),
     base([pg('building', [sec(1, 'done', { anchor: 'pb-header' })], { plan: { approvedAt: 'x' } })]),
   ];
@@ -265,9 +287,9 @@ test('the why on an seo/done page says whether page QA passed or was accepted', 
 });
 
 test('page QA accepted by the developer counts as passed; a fail without acceptance does not', () => {
-  const pg = (pageQa) => base([{ slug: 'home', status: 'building', sections: [sec(1, 'done')], pageQa }]);
+  const pg = (pageQa) => base([{ slug: 'home', status: 'building', sections: [sec(1, 'done')], pageQa, editorQa: { pass: true } }]);
   const r = nextAction(pg({ pass: false, accepted: true, note: 'n' }));
-  assert.deepEqual([r.action, r.why], ['seo', 'page QA differences accepted by the developer']);
+  assert.deepEqual([r.action, r.why], ['seo', 'page QA differences accepted by the developer and editor QA passed']);
   assert.equal(nextAction(pg({ pass: false })).action, 'page-qa');
 });
 

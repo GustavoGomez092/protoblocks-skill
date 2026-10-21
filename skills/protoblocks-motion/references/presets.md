@@ -27,12 +27,13 @@ Options (all optional, numbers except `start`):
 | Attribute | Meaning | Applies to |
 |---|---|---|
 | `data-pb-delay` | seconds before the tween starts | reveal presets and `counter` |
+| `data-pb-duration` | seconds; overrides the profile duration for that element; on `counter` it is the count time itself (no doubling or cap) | reveal presets and `counter` |
 | `data-pb-stagger` | seconds between items; default from the profile | `stagger-children`, `split-lines`; `split-chars` uses a quarter of it |
 | `data-pb-start` | ScrollTrigger start string; default `top 85%` | reveal presets |
 | `data-pb-distance` | px travelled; default from the profile | `fade-up`, `stagger-children`; half of it for `split-chars` |
 | `data-pb-speed` | factor, default 1 | `parallax` (drift), `marquee` (loop takes 20 s / speed) |
 
-The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + profile duration + stagger x (n - 1) must stay under about 1.4 s (counters run twice the duration, between 1 s and 1.2 s). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
+The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + duration (`data-pb-duration`, else the profile's) + stagger x (n - 1) must stay under about 1.4 s (a counter without `data-pb-duration` runs twice the profile duration, between 1 s and 1.2 s). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
 
 ## Choosing per pattern
 
@@ -72,6 +73,6 @@ The element moves, so give it an `overflow: hidden` wrapper and make it taller t
 
 ## Hero and the intro overlay
 
-On a visitor's first page of a session the theme's intro overlay (`proto-intro`, a Lottie preloader, up to 8 s) covers the page. Hero reveals start at load and usually finish underneath it, so the visitor sees the hero already settled when the overlay fades. The motion check never sees the overlay: it sets `sessionStorage.protoIntroShown` (as on every later page of a session) and hides `.proto-intro`.
+On a visitor's first page of a session the theme's intro overlay (`proto-intro`, a Lottie preloader, up to 8 s) covers the page. Reveal presets wait for it: while the overlay is up (`html.proto-intro-active`, `.proto-intro` without `is-hidden`), pb-motion queues every reveal instead of arming it, and starts them all when the theme dispatches `proto:intro-complete` (which its own 8 s safety net also fires), with a 10 s backstop in pb-motion for a theme that never does. So the hero entrance plays when the overlay hands the page back, not underneath it. On later pages of the session the inline head guard sets `html.proto-intro-skip` and reveals start at once. Continuous presets (`parallax`, `marquee`) are not gated.
 
-pb-motion does not wait for the theme's `proto:intro-complete` event. The plugin watchdog forces `done` 1.5 s after a `manual` element enters view (2 s after load for content already in view), which snaps a still-waiting hero tween to its end; delaying hero reveals past the intro would show no motion either way. Do not design a hero whose meaning depends on its entrance being seen. If the developer wants the hero entrance visible on first visit, shorten or remove the intro (theme setting), not the motion.
+The Proto-Blocks plugin's reveal watchdog (which forces `done` on a `manual` element that never reveals) also waits for the intro from plugin 2.14.1; on an older plugin it can snap a queued hero to its end 1.5 s after the element enters view (2 s after load for content already in view), so pair this runtime with plugin ≥ 2.14.1. The motion check never sees the overlay: it sets `sessionStorage.protoIntroShown` (as on every later page of a session) and hides `.proto-intro`, so it verifies the reveals exactly as a returning visitor sees them.
