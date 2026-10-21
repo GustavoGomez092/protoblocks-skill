@@ -35,6 +35,10 @@ Top-level children of a frame usually equal sections. Use each child's `y` and `
 3. `execute_code` to list each board's children with `y`, `height` and text content (read-only code; never modify the file). Children become crop ranges (scale them to the exported pixels) and give exact copy.
 4. Library colours and typographies feed the tokens step.
 
+## Design root font size
+
+Before tokens, read the source's root font size: a Figma Make bundle sets `--font-size` / `html { font-size }` in its globals (14px is common), and every rem-based utility in the design (`max-w-7xl`, `h-16`, `text-base`) then means 0.875x the usual value. Set the fork's `html { font-size }` to match in `style.css` and keep the design's utility classes verbatim in templates; converting them to px by hand produces a page that is ~14% too large in every direction. Bracketed values (`h-[921px]`) are unaffected. Record it in `site.tokens` notes.
+
 ## Live URL
 
 ```bash

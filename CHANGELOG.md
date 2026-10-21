@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.3
+
+Docs only, from the O-Flex build.
+
+- `protoblocks-section-loop/references/header-footer.md`: animating core's navigation drawer: own every layout property in both the open and closed states at higher specificity than core's `.is-menu-open` rules, place the panel below the admin bar when logged in, and prove the close with a computed-style diff.
+- `protoblocks-section-loop/references/build.md`: editability rules the editor QA enforces (no `<a>` repeater rows, static authoring layout for hover-state blocks, editor wrappers around inner-blocks slots, rows editable only while the block is selected) and a class-naming rule (never a Tailwind utility prefix such as `pb-` on a shared class).
+- `protoblocks-design-breakdown/references/intake.md`: read the design source's root font size (Figma Make bundles often use 14px) and set the fork's `html { font-size }` to match before tokens.
+
 ## 2.3.2
 
 Page editor QA
