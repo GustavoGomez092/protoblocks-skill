@@ -56,6 +56,11 @@ function pb_nav_link_attrs(array $item, array &$pending): array {
         $pending[] = ['label' => $attrs['label'], 'page' => (string) $item['page']];
         return $attrs + ['url' => pb_nav_placeholder((string) $item['page']), 'kind' => 'custom'];
     }
+    // A submenu parent with neither page nor url is a label-only toggle: core renders its <a> without href,
+    // so it opens the submenu (hover, or click with the icon) and never navigates. A leaf without url is "#".
+    if (empty($item['url']) && !empty($item['children']) && is_array($item['children'])) {
+        return $attrs + ['kind' => 'custom'];
+    }
     $attrs += ['url' => (string) ($item['url'] ?? '#'), 'kind' => 'custom'];
     if (!empty($item['opensInNewTab'])) { $attrs['opensInNewTab'] = true; }
     return $attrs;

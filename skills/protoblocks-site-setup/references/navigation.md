@@ -28,7 +28,7 @@ Footer column:
 ```
 
 - `items` (required array); `title` optional (defaults to the capitalized key).
-- Item: `label`, plus `page` (page slug/path, e.g. `services/design`) or `url`; optional `opensInNewTab` (for `url` links); optional `className` (CSS class or classes put on the item's `<li>`, for a styled "See all" link or a highlighted entry; letters, digits, `-`, `_`); optional `children` (turns the item into a submenu).
+- Item: `label`, plus `page` (page slug/path, e.g. `services/design`) or `url`; optional `opensInNewTab` (for `url` links); optional `className` (CSS class or classes put on the item's `<li>`, for a styled "See all" link or a highlighted entry; letters, digits, `-`, `_`); optional `children` (turns the item into a submenu). A submenu parent may omit both `page` and `url`: it then renders without `href`, a label that only opens its submenu (designs where "Services" is a button, not a link; put the page link among the children, e.g. "See all services").
 - Key: `primary`, `footer-1`, `footer-2`, `utility`, ... A lowercase letter or digit first, then `[a-z0-9_-]` (`[ENAVKEY]` otherwise). The key is the upsert identity (post slug `pb-nav-<key>`): the same key updates the menu, never duplicates it.
 
 ## Commands

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.4
+
+- `navigation.mjs upsert`: a submenu parent with neither `page` nor `url` is a label-only toggle (no `href`), for designs whose top-level items with a dropdown are buttons rather than links. A leaf without `url` still gets `#`.
+
 ## 2.3.3
 
 Docs only, from the O-Flex build.
