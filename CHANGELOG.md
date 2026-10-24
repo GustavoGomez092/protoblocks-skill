@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.5
+
+- `navigation.mjs upsert`: page links are stored host-relative (`/about/`, via `wp_make_link_relative`) instead of the absolute permalink. A site moved to another host or scheme by a host-only search-replace kept `http://` menu links on an `https://` page; Taxi treated them as internal, its mixed-content fetch failed and every such click fell back to a full page load after the curtain had dropped. Re-run `upsert` for each menu to rewrite existing links.
+
 ## 2.3.4
 
 - `navigation.mjs upsert`: a submenu parent with neither `page` nor `url` is a label-only toggle (no `href`), for designs whose top-level items with a dropdown are buttons rather than links. A leaf without `url` still gets `#`.

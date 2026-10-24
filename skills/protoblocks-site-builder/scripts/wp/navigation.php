@@ -33,7 +33,11 @@ function pb_nav_find(string $slug) {
 function pb_nav_hash(string $content): string { return hash('sha256', $content); }
 
 // The URL a not-yet-published page link points at until refresh converts it.
-function pb_nav_placeholder(string $page): string { return home_url('/' . trim($page, '/') . '/'); }
+function pb_nav_placeholder(string $page): string { return wp_make_link_relative(home_url('/' . trim($page, '/') . '/')); }
+
+// Page links are stored host-relative (/about/) so a site moved to another host or scheme (a search-replace that keeps
+// http://, an https migration) never leaves a menu pointing at the old origin or at mixed content.
+function pb_nav_page_url($page): string { return wp_make_link_relative(get_permalink($page)); }
 
 function pb_nav_published_page(string $page) {
     $p = get_page_by_path($page, OBJECT, 'page');
@@ -51,7 +55,7 @@ function pb_nav_link_attrs(array $item, array &$pending): array {
     if (!empty($item['page'])) {
         $page = pb_nav_published_page((string) $item['page']);
         if ($page) {
-            return $attrs + ['type' => 'page', 'id' => (int) $page->ID, 'url' => get_permalink($page), 'kind' => 'post-type'];
+            return $attrs + ['type' => 'page', 'id' => (int) $page->ID, 'url' => pb_nav_page_url($page), 'kind' => 'post-type'];
         }
         $pending[] = ['label' => $attrs['label'], 'page' => (string) $item['page']];
         return $attrs + ['url' => pb_nav_placeholder((string) $item['page']), 'kind' => 'custom'];
@@ -86,7 +90,7 @@ function pb_nav_patch(array &$blocks, array $targets, array &$found, array &$pat
             $found[$url] = true;
             $page = $targets[$url]['post'];
             if ($page) {
-                $b['attrs'] = array_merge($b['attrs'], ['type' => 'page', 'id' => (int) $page->ID, 'url' => get_permalink($page), 'kind' => 'post-type']);
+                $b['attrs'] = array_merge($b['attrs'], ['type' => 'page', 'id' => (int) $page->ID, 'url' => pb_nav_page_url($page), 'kind' => 'post-type']);
                 $patched[$url] = true;
             }
         }
