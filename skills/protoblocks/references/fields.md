@@ -1,5 +1,7 @@
 # Fields
 
+> **Block fields, not custom fields.** This file covers `protoBlocks.fields` in `block.json`: content stored on one block instance. Data that belongs to a post, term, user or settings page (ACF-style field groups read with `proto_field()`) is in `custom-fields.md`.
+
 Fields are editable content regions. They are declared under `protoBlocks.fields` in `block.json` and bound to template elements with `data-proto-field="name"` (repeaters and inner-blocks have their own bindings). Each field becomes a block attribute readable as `$attributes['name']`.
 
 There are seven built-in field types: `text`, `wysiwyg`, `image`, `video`, `link`, `repeater`, `inner-blocks`.

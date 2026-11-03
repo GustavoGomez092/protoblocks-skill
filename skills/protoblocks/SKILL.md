@@ -1,6 +1,6 @@
 ---
 name: protoblocks
-description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind. For turning a whole design into pages or a site, use protoblocks-site-builder.
+description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind. Also the content model: custom post type, taxonomy, custom fields / field group (ACF-style, ACF import), settings page / options page, proto_field(). For turning a whole design into pages or a site, use protoblocks-site-builder.
 ---
 
 # Proto-Blocks
@@ -24,6 +24,7 @@ Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML
 - Adding fields (text, image, video, link, wysiwyg, repeater, inner-blocks) or controls (select, toggle, range, color, image/video picker, etc.), including conditional controls.
 - Debugging: block not appearing, preview not updating, field not editable, repeater issues, Tailwind not applying.
 - Writing `template.php` markup with correct `data-proto-*` bindings and escaping.
+- Declaring post types, taxonomies, field groups or settings pages, or reading their values → "Content model" below.
 - Building whole pages or a site from a design → use `protoblocks-site-builder`.
 
 **Not for:** classic React/`@wordpress/scripts` block development, or non-Proto-Blocks WordPress work.
@@ -135,6 +136,23 @@ wp proto-blocks cache stats
 wp proto-blocks export <name> --output=<path>
 ```
 
+## Content model (plugin 2.15.0+)
+
+Post types, taxonomies, custom fields and settings pages are theme files (the admin UI edits the same files):
+
+```
+proto-types/<slug>/type.jsonc     post type (+ inline taxonomies, field groups)
+proto-taxonomies/<slug>/taxonomy.jsonc
+proto-fields/<slug>/group.jsonc   field group, ACF local-JSON shape
+proto-options/<slug>/page.jsonc   settings page
+```
+
+PHP one-liners (functions.php): `proto_post_type('Event')`, `proto_taxonomy('Topic', ['post_types' => ['event']])`, `proto_field_group('event', [...])`, `proto_options_page('Theme Settings', [...])`. Read values escaped per type: `proto_field('subtitle')`, `proto_rows('agenda')`, `proto_field('phone', 'option:theme-settings')`, `$template->field('subtitle')` in `template.php`; core blocks: Block Bindings source `proto-blocks/field`.
+
+Decide: per-instance section copy → block field. Same data wherever a post shows (date, venue, role) → custom field. A collection with its own URLs → post type. Site-wide values (phone, footer, scripts) → settings page.
+
+Rules: prefer files over PHP (file wins, "declared twice" warning); folder = slug; child theme wins; files cannot name PHP callbacks; no `<`/`>` in labels; `code`/`password` values need `unfiltered_html` (CLI seeding: `--user=<admin>`); no read-permission check, never pass visitor input as context; never rename a slug with content by hand. After every change: `wp proto-blocks validate`.
+
 ## Iron Rules (cause most bugs when ignored)
 
 1. **Always escape output**: `esc_html()`, `esc_attr()`, `esc_url()`, `wp_kses_post()` (for wysiwyg/HTML).
@@ -169,21 +187,9 @@ Load these as needed — do not read all of them up front.
 - `references/examples.md` — the 9 bundled example blocks, a capability matrix and canonical samples.
 - `references/theme.md` — the proto-blocks-theme starter: builder canvas, Taxi page transitions (wrapper, lifecycle events, script re-run rules), animation globals, token file, required plugins.
 - `references/cli-and-hooks.md` — WP-CLI commands, `proto_blocks_*` hooks, discovery, block category, wizard, debug mode, preview system.
-- `references/troubleshooting.md` — symptom → cause → fix.
-
-## Common Mistakes
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Block missing from inserter | No `block.json` or no template file; folder not under a discovered path | Ensure `block.json` + `template.php` in `theme/proto-blocks/{name}/` |
-| Field not editable in editor | Element lacks `data-proto-field`, or element not rendered when value empty | Always render the element with the attribute (see Iron Rule 3) |
-| A field has **no interface at all** | Its value is parsed, not printed, so no element carries its `data-proto-field` | Repeater row: `itemControls`; block level: a control; last resort an editor-only region (Iron Rule 3b) |
-| Template edits don't show | Template output cached | `wp proto-blocks cache clear` |
-| Repeater items don't render/add | Missing `data-proto-repeater` / `data-proto-repeater-item`, or name mismatch | Match container `data-proto-repeater="x"` to field `x`; one `data-proto-repeater-item` per item |
-| Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
-| Tailwind classes ignored **on some elements only** | The classes live in an included partial; the scanner reads only the block's own template files | Keep markup in `template.php`, share it with a closure, not an include (`references/styling.md`) |
-| Tailwind classes ignored | No first compile yet, prod (`cached`) mode without recompile, or `useTailwind` off | Run a first compile (CLI binary or **Compile CSS** on managed hosts), use dev (`on_reload`) mode while iterating, set `"useTailwind": true` |
-| HTML stripped from wysiwyg | Escaped with `esc_html` instead of `wp_kses_post` | Use `wp_kses_post()` for HTML/wysiwyg values |
-| Inner blocks not nestable (no `+`) | Type spelled `innerblocks`, or no `data-proto-inner-blocks` marker, or stale saved instance | Use `"inner-blocks"` (hyphen) + `data-proto-inner-blocks`; re-insert a fresh block |
-| Inner blocks render empty on frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead |
-| Control change has no effect | Attribute name mismatch (case-sensitive) | Names are camelCase and case-sensitive — `$attributes['imagePosition']` must match `block.json` exactly |
+- `references/troubleshooting.md` — symptom → cause → fix, plus the common-mistakes table.
+- `references/content-model.md` — post types, taxonomies: annotated files, overrides, scaffolding.
+- `references/custom-fields.md` — field groups, field types, conditions, getters, bindings, ACF import, trust.
+- `references/settings-pages.md` — `page.jsonc`, storage modes, reading values, migration.
+- `references/admin-and-cli.md` — admin screens, content-model CLI, REST for QA.
+- `references/content-model-recipes.md` — Event type + card, ACF conversion, header settings, bindings, QA.

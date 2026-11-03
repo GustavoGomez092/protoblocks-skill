@@ -130,3 +130,20 @@ template reads it from the same row object as before:
 
 Do not render the value on the canvas purely to make it editable — that puts
 editing furniture into markup the frame does not draw.
+
+## Common mistakes at a glance
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Block missing from inserter | No `block.json` or no template file; folder not under a discovered path | Ensure `block.json` + `template.php` in `theme/proto-blocks/{name}/` |
+| Field not editable in editor | Element lacks `data-proto-field`, or element not rendered when value empty | Always render the element with the attribute (see Iron Rule 3) |
+| A field has **no interface at all** | Its value is parsed, not printed, so no element carries its `data-proto-field` | Repeater row: `itemControls`; block level: a control; last resort an editor-only region (Iron Rule 3b) |
+| Template edits don't show | Template output cached | `wp proto-blocks cache clear` |
+| Repeater items don't render/add | Missing `data-proto-repeater` / `data-proto-repeater-item`, or name mismatch | Match container `data-proto-repeater="x"` to field `x`; one `data-proto-repeater-item` per item |
+| Block validation error | `select` control without `options`, or missing block `name` | Add `options`; ensure `name` is `namespace/block` |
+| Tailwind classes ignored **on some elements only** | The classes live in an included partial; the scanner reads only the block's own template files | Keep markup in `template.php`, share it with a closure, not an include (`references/styling.md`) |
+| Tailwind classes ignored | No first compile yet, prod (`cached`) mode without recompile, or `useTailwind` off | Run a first compile (CLI binary or **Compile CSS** on managed hosts), use dev (`on_reload`) mode while iterating, set `"useTailwind": true` |
+| HTML stripped from wysiwyg | Escaped with `esc_html` instead of `wp_kses_post` | Use `wp_kses_post()` for HTML/wysiwyg values |
+| Inner blocks not nestable (no `+`) | Type spelled `innerblocks`, or no `data-proto-inner-blocks` marker, or stale saved instance | Use `"inner-blocks"` (hyphen) + `data-proto-inner-blocks`; re-insert a fresh block |
+| Inner blocks render empty on frontend | Template echoes `$content` | Echo `$innerBlocksContent ?? ''` instead |
+| Control change has no effect | Attribute name mismatch (case-sensitive) | Names are camelCase and case-sensitive — `$attributes['imagePosition']` must match `block.json` exactly |
