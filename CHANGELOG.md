@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.4.0
+
+Content model (Proto-Blocks 2.15.0+: post types, taxonomies, custom fields, settings pages). Docs only.
+
+- `protoblocks/SKILL.md`: a "Content model" section (file locations, PHP one-liners, getters, decision rules, trust rules); the description now triggers on custom post types, taxonomies, custom fields / field groups, ACF, settings / options pages and `proto_field`. The common-mistakes table moved to `references/troubleshooting.md` to keep the SKILL.md under its size ceiling.
+- New `protoblocks` references: `content-model.md` (post types and taxonomies: JSONC vs PHP, annotated `type.jsonc` / `taxonomy.jsonc`, overrides of core and plugin types, template scaffolding, CLI), `custom-fields.md` (three ways to declare a group, per-type settings / stored shape / getter output, conditions, repeaters and flexible content, getter API and escaping contract, Block Bindings, ACF import, trust rules, common mistakes), `settings-pages.md` (`page.jsonc`, storage modes, reading values, CADCO-style migration), `admin-and-cli.md` (screens, UI vs files, every `wp proto-blocks type|taxonomy|fields|options` command, REST routes for QA) and `content-model-recipes.md` (Event type with fields and a card block, ACF conversion, settings read in a header block, Block Bindings, QA checklist). `fields.md` now points to `custom-fields.md`; `cli-and-hooks.md` lists the content-model filters.
+- `protoblocks-site-setup`: Step 6 and `references/content-model-setup.md`: when the design has collections, per-item data or site-wide values, declare `proto-types/`, `proto-fields/` and `proto-options/` files in the fork, scaffold templates, seed sample items and run `wp proto-blocks validate`.
+- `protoblocks-site-builder`: asks whether collections or site-wide values become a post type, field group or settings page, and lists the declared model in the final report. `/protoblocks-skill:setup-site` asks the same after the parts.
+- `protoblocks-design-breakdown` (`references/breakdown.md`): sections that read declared data say so in their `notes`.
+- `protoblocks-section-loop` (`references/build.md`): "Blocks that read custom fields" (`$template->field()`, `proto_rows()`, `option:` contexts, `usesContext`, editor-preview placeholders, Block Bindings, validate after declaration changes).
+
 ## 2.3.5
 
 - `navigation.mjs upsert`: page links are stored host-relative (`/about/`, via `wp_make_link_relative`) instead of the absolute permalink. A site moved to another host or scheme by a host-only search-replace kept `http://` menu links on an `https://` page; Taxi treated them as internal, its mixed-content fetch failed and every such click fell back to a full page load after the curtain had dropped. Re-run `upsert` for each menu to rewrite existing links.

@@ -355,3 +355,30 @@ test('docs: visual-qa names stalledRequests as a possible explanation of a font 
   const agent = fs.readFileSync(path.join(ROOT, 'agents', 'visual-qa.md'), 'utf8');
   assert.match(agent, /`stalledRequests`[^\n]*never fails the check[^\n]*font mismatch/);
 });
+
+// Every `references/<file>.md` a SKILL.md names must exist in some skill's references folder.
+test('every references/*.md named in a SKILL.md exists', () => {
+  const all = new Set();
+  for (const skill of fs.readdirSync(SKILLS)) {
+    const refs = path.join(SKILLS, skill, 'references');
+    if (fs.existsSync(refs)) for (const f of fs.readdirSync(refs)) all.add(f);
+  }
+  for (const skill of fs.readdirSync(SKILLS).filter((s) => fs.existsSync(path.join(SKILLS, s, 'SKILL.md')))) {
+    const text = fs.readFileSync(path.join(SKILLS, skill, 'SKILL.md'), 'utf8');
+    for (const m of text.matchAll(/references\/([\w.-]+\.md)/g)) {
+      assert.ok(all.has(m[1]), `${skill}/SKILL.md names references/${m[1]}, which does not exist`);
+    }
+  }
+});
+
+test('the protoblocks skill documents the content model and links its references', () => {
+  const skill = fs.readFileSync(path.join(SKILLS, 'protoblocks', 'SKILL.md'), 'utf8');
+  const description = skill.match(/^description:\s*(.+)$/m)[1];
+  for (const term of ['custom post type', 'taxonomy', 'custom fields', 'field group', 'ACF', 'settings page', 'options page', 'proto_field']) {
+    assert.ok(description.includes(term), `description lacks "${term}"`);
+  }
+  for (const ref of ['content-model.md', 'custom-fields.md', 'settings-pages.md', 'admin-and-cli.md', 'content-model-recipes.md']) {
+    assert.ok(skill.includes(`references/${ref}`), `SKILL.md does not link references/${ref}`);
+  }
+  assert.match(skill, /wp proto-blocks validate/);
+});

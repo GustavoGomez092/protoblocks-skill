@@ -9,7 +9,7 @@
     {
       "name": "protoblocks-skill",
       "description": "Proto-Blocks docs hub and design-to-WordPress site builder: turn images, Figma, Penpot or URLs into block-theme landing pages built from Proto-Blocks on local sites, with visual QA, GSAP motion and Yoast SEO.",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "source": "./",
       "author": {
         "name": "Gustavo Gomez",
@@ -29,7 +29,11 @@
         "penpot",
         "yoast",
         "gsap",
-        "local-by-flywheel"
+        "local-by-flywheel",
+        "custom-post-types",
+        "custom-fields",
+        "acf",
+        "options-page"
       ]
     }
   ]

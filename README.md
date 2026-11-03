@@ -1,10 +1,10 @@
 # Proto-Blocks Skill
 
-A Claude Code plugin that is both a docs hub and a design-to-WordPress site builder. Its docs-hub [skill](https://docs.anthropic.com/en/docs/claude-code/skills) teaches an AI coding agent how to build WordPress Gutenberg blocks with the [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks) plugin — PHP-template blocks defined in `block.json` with `data-proto-*` fields, controls, repeaters, inner blocks, and optional Tailwind. With it installed, you can ask your agent for "a Proto-Blocks testimonial block" or "a Tailwind hero with an image control" and get clean, idiomatic, correct-by-construction code.
+A Claude Code plugin that is both a docs hub and a design-to-WordPress site builder. Its docs-hub [skill](https://docs.anthropic.com/en/docs/claude-code/skills) teaches an AI coding agent how to build WordPress Gutenberg blocks with the [Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks) plugin — PHP-template blocks defined in `block.json` with `data-proto-*` fields, controls, repeaters, inner blocks, and optional Tailwind. With it installed, you can ask your agent for "a Proto-Blocks testimonial block", "a Tailwind hero with an image control" or "an Event post type with a date, venue and agenda" and get clean, idiomatic, correct-by-construction code. It also covers the plugin's content model: custom post types, taxonomies, ACF-style custom fields and settings pages declared as theme files.
 
 It is delivered as a Claude Code plugin (auto-discovered skill) and is grounded in the Proto-Blocks plugin source + README, structured for progressive disclosure: a small always-loaded `SKILL.md` plus focused reference files the agent reads only when relevant.
 
-> **Two pieces, don't confuse them.** This repo is the *skill* (how an agent builds blocks). The blocks it produces run on the **Proto-Blocks WordPress plugin**, which must be installed and active in your WordPress site — get it from [GustavoGomez092/Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks). Requirements there: WordPress 6.3+, PHP 8.0+.
+> **Two pieces, don't confuse them.** This repo is the *skill* (how an agent builds blocks). The blocks it produces run on the **Proto-Blocks WordPress plugin**, which must be installed and active in your WordPress site — get it from [GustavoGomez092/Proto-Blocks](https://github.com/GustavoGomez092/Proto-Blocks). Requirements there: WordPress 6.3+, PHP 8.0+ for blocks; the content model (post types, custom fields, settings pages) needs Proto-Blocks 2.15.0+, WordPress 6.5+ and PHP 8.1+.
 
 ---
 
@@ -116,6 +116,9 @@ rm -rf ~/.claude/skills/protoblocks
 - "Add a repeater of logos to my block."
 - "My inner blocks render empty on the frontend — why?"
 - "Convert this card to use Tailwind."
+- "Add an Event post type with a start date, venue and agenda repeater, and a card block that shows them."
+- "Convert this ACF export to Proto-Blocks fields."
+- "Add a Theme Settings page with the phone number and read it in the header."
 
 If the agent doesn't pick it up, nudge it: *"Use the protoblocks skill."*
 
@@ -131,9 +134,9 @@ Seven skills, four commands and one agent.
 
 | Skill | What it does |
 |---|---|
-| `protoblocks` | The docs hub: how to build, scaffold and debug Proto-Blocks (`block.json`, `template.php`, fields, controls, repeaters, inner blocks, Tailwind, interactivity). |
+| `protoblocks` | The docs hub: how to build, scaffold and debug Proto-Blocks (`block.json`, `template.php`, fields, controls, repeaters, inner blocks, Tailwind, interactivity), and the content model (post types, taxonomies, custom fields, settings pages, `proto_field()`, Block Bindings, ACF import). |
 | `protoblocks-site-builder` | The orchestrator: runs preflight, keeps a resumable build state, and drives the whole design-to-page pipeline below. |
-| `protoblocks-site-setup` | Prepares the Local site: installs Proto-Blocks and Yoast, forks and activates `proto-blocks-theme` (display name, per-site block category), writes the theme screenshot from the design, applies design tokens, creates navigation menus, wires header/footer parts. |
+| `protoblocks-site-setup` | Prepares the Local site: installs Proto-Blocks and Yoast, forks and activates `proto-blocks-theme` (display name, per-site block category), writes the theme screenshot from the design, applies design tokens, creates navigation menus, wires header/footer parts, and declares the content model when the site needs one. |
 | `protoblocks-design-breakdown` | Normalizes a design (image, PDF, Figma, Penpot, URL), crops its sections, maps each to reuse/extend/new blocks and gets your approval of the plan. |
 | `protoblocks-section-loop` | Builds one section, runs the build gates, dispatches visual QA and fixes until it matches its crop (with an iteration cap). |
 | `protoblocks-motion` | Adds GSAP scroll/entrance motion through the theme's `pb-motion` data-attribute presets, then verifies it. |
@@ -171,7 +174,7 @@ Seven skills, four commands and one agent.
 The builder runs this pipeline:
 
 1. **Preflight**: finds the Local site and checks tools.
-2. **Setup**: plugins, theme fork (display name, a per-site block category, the theme screenshot from the design), tokens, navigation, header/footer parts.
+2. **Setup**: plugins, theme fork (display name, a per-site block category, the theme screenshot from the design), tokens, navigation, header/footer parts, and (when the design has collections or site-wide values, and you agree) post types, field groups and a settings page, checked with `wp proto-blocks validate`.
 3. **Breakdown**: crops the design into sections and proposes a plan. **Nothing is built until you approve the plan.**
 4. **Per section**: build the block, then visual QA, then motion.
 5. **Header/footer**: moves the design's header and footer into the theme parts.
@@ -216,9 +219,11 @@ The integration and e2e tests touch a real Local site, so run them only through 
 
 The `protoblocks` skill is a small always-loaded `SKILL.md` plus `references/*.md` files the agent reads on demand (authoring workflow, recipes, composition, schema, fields, controls, templates, repeaters, styling, interactivity, previews, examples, CLI and hooks, troubleshooting). It covers every field and control type, the full `block.json` schema, template authoring, repeaters, inner blocks, Tailwind, the Interactivity API and WP-CLI.
 
+Content model references (Proto-Blocks 2.15.0+): `content-model.md` (post types and taxonomies from `proto-types/` / `proto-taxonomies/` JSONC or one line of PHP, overrides, template scaffolding), `custom-fields.md` (ACF-shaped field groups, every field type with its stored shape and getter output, conditions, repeaters, `proto_field()` / `proto_rows()` / `$template->field()`, the `proto-blocks/field` Block Bindings source, ACF import, trust rules), `settings-pages.md` (`proto-options/<slug>/page.jsonc`, storage modes, migrating a hand-written page), `admin-and-cli.md` (screens, every `wp proto-blocks type|taxonomy|fields|options` command, REST routes for QA) and `content-model-recipes.md` (end-to-end recipes and a QA checklist).
+
 ## Keeping it in sync
 
-When the Proto-Blocks plugin gains field/control types, schema keys, CLI commands, or features, update the relevant `references/*.md` and `SKILL.md` quick-reference tables. The plugin's `examples/` folder is always the authoritative source for working block code.
+When the Proto-Blocks plugin gains field/control types, schema keys, CLI commands, or features, update the relevant `references/*.md` and `SKILL.md` quick-reference tables. For the content model, the plugin's `schemas/*.json`, `includes/ContentModel/schemas/content-model.schema.json`, `includes/CLI/*Command*.php` and its `docs/` guides are the sources to check against. The plugin's `examples/` folder is always the authoritative source for working block code.
 
 ## License
 
