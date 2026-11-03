@@ -46,6 +46,8 @@ Extend is additive only. The test: the new control or field defaults to the curr
 
 Intra-page merge: if two sections on this page share structure and differ only by content or by one existing/additive control, they are one block used twice (e.g. two media-text bands, one with the image flipped). Do not merge when the structure differs on mobile (a 4-up grid that becomes a carousel on mobile vs a stacked list), or when merging forces optional regions that make the block hard to use.
 
+Content model: a section that lists or shows items of a collection (event cards, team grid, job list) or site-wide values (phone, social links) is still one block, but its data may come from a post type, field group or settings page declared in site setup Step 6 rather than from block fields. Say so in the section's `notes` ("reads event fields: subtitle, start_date, agenda") so Build knows; if no declaration exists yet, raise it with the developer at the plan gate.
+
 Use `library.mjs list` fields, controls and `variants` as the source of truth; a library entry with `error` is a block that exists but cannot be read: do not recreate it, report it.
 
 ## Naming

@@ -1,5 +1,5 @@
 ---
-description: Prepare the current Local site for a Proto-Blocks build (plugins, theme fork, motion, tokens, menus)
+description: Prepare the current Local site for a Proto-Blocks build (plugins, theme fork, motion, tokens, menus, content model)
 argument-hint: "[project name] [design file, Figma/Penpot link or URL] [--site <Local site name>]"
 ---
 Load the `protoblocks-site-builder` skill. Arguments: $ARGUMENTS
@@ -9,4 +9,4 @@ Shell variables do not persist between Bash commands: start every command with t
 1. Run preflight: `node "${CLAUDE_PLUGIN_ROOT}/skills/protoblocks-site-builder/scripts/lib/preflight.mjs"`, adding `--site "<name>"` if one was given above. Follow the skill's loop step 1 for failures.
 2. Find the theme with `node "${CLAUDE_PLUGIN_ROOT}/skills/protoblocks-site-builder/scripts/lib/status.mjs" --root "<report.publicPath>"`, then run `status.mjs` on it.
 3. Perform only the `setup` action, with the `protoblocks-site-setup` skill: plugins, theme fork, motion install. If setup was already started, `why` names the missing steps: do only those. Ask the project name if it was not given, and the theme's display name when it should differ from it (`--theme-name`). Follow the skill's question list; never add `--force`, `--refork` or `--update-plugins` without the developer's explicit OK for that action.
-4. If a design was provided, also intake its frames, write the theme screenshot, apply tokens, navigation and the header/footer parts as the skill's `setup` row says. Otherwise stop after the fork and report the theme path and what is needed next (a design).
+4. If a design was provided, also intake its frames, write the theme screenshot, apply tokens, navigation and the header/footer parts as the skill's `setup` row says, then ask whether the site needs a content model (post types, field groups, a settings page: `protoblocks-site-setup` Step 6). Otherwise stop after the fork and report the theme path and what is needed next (a design).

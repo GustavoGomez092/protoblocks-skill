@@ -36,7 +36,7 @@ Work one section at a time, in plan order (header first, footer last: `reference
 
 Details and checklist: `references/build.md`.
 
-1. Load the `protoblocks` skill (always) for authoring rules.
+1. Load the `protoblocks` skill (always) for authoring rules. A section showing a post's or settings page's data reads declared fields (`$template->field()`, `proto_rows()`, `proto_field('x', 'option:<slug>')`) or binds core blocks to `proto-blocks/field` (`references/build.md`, "Blocks that read custom fields").
 2. By `decision`:
    - `new`: scaffold with `"$WP" proto-blocks create <block> --title="<Title>" --category="<site.theme.category.slug>" --dir=theme` (the slug from state; `build.md`), then write `block.json`, `template.php` and CSS. Never `--dir=plugin` (not a discovery path); never `--force` over an existing block.
    - `extend`: add a control whose default reproduces the current output. Never change what existing instances render.

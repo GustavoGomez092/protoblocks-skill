@@ -32,7 +32,7 @@ Shell variables do not persist between Bash commands. Start every command with `
 
 | `next.action` | Do | Load |
 |---|---|---|
-| `setup` | Ask the project name (and the theme's display name if it differs); get the first design (files or links). Run setup (fork + state, per-site block category, logo + README), install motion, intake the frames (design-breakdown Step 1), the theme screenshot (`node "$PB/lib/theme-screenshot.mjs" "$THEME" <page>`), then tokens from the frames, navigation, header/footer parts. On resume `why` names the missing steps. Header and footer are planned as sections of the first page. | `protoblocks-site-setup`, `protoblocks-design-breakdown` (Step 1) |
+| `setup` | Ask the project name (and the theme's display name if it differs); get the first design (files or links). Run setup (fork + state, per-site block category, logo + README), install motion, intake the frames (design-breakdown Step 1), the theme screenshot (`node "$PB/lib/theme-screenshot.mjs" "$THEME" <page>`), then tokens from the frames, navigation, header/footer parts, content model (setup Step 6). On resume `why` names the missing steps. Header and footer are planned as sections of the first page. | `protoblocks-site-setup`, `protoblocks-design-breakdown` (Step 1) |
 | `breakdown` | Segment, model, match, present the plan. It ends at the plan gate: STOP until the developer approves; `plan.mjs record` then sets the page `building`. | `protoblocks-design-breakdown` |
 | `build-page` | Approved plan, page still `planning`: set it `building` (recipe below). | - |
 | `section-build` | Build section `next.section` (also `planned`, and a reopened section of an `seo`/`done` page). First check the cap on resume. | `protoblocks-section-loop` |
@@ -59,6 +59,7 @@ Exact command sequences, the fields each step writes, every status transition an
 
 - Project name (first run), and the theme's display name when it should differ from it (`--theme-name`, e.g. project "O-Flex", theme "O-Flex Group"); which Local site when preflight lists several; which theme when `status.mjs --root` lists several.
 - The design's CSS width when intake fails `[ESCALE]`.
+- Whether collections (events, team) or site-wide values (phone, footer) become a post type, field group or settings page (setup Step 6).
 - Plan approval at the plan gate (`page.mjs build` refuses with `[ENOPLAN]` without it).
 - Iteration cap (`capReached: true` from `qa-input.mjs record`, also on resume): accept with notes, guidance, or skip.
 - Motion cap (`capReached: true` from `motion.mjs record`): simplify, accept (`--accepted`), or remove.
@@ -80,6 +81,7 @@ When the developer wants no more pages, read `node "$PB/lib/state.mjs" get "$THE
 4. Assets cropped from the design, to replace with originals.
 5. Open warnings: a11y `minor`/`moderate` from page QA, console errors from editor QA, SEO `warn` checks, pending menu links.
 6. Theme fork history: `git -C "$THEME" log --oneline`.
+7. Content model: `"$WP" proto-blocks type list`, `options list`.
 
 ## Iron rules
 

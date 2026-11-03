@@ -33,6 +33,17 @@ Real flags (checked against the plugin's `create` command): `--title`, `--descri
 - Images use the shape `{id, url, alt, caption, size}` (what `media.mjs` prints as `attr`). Use `loading="lazy"`, except the first section's hero image: `fetchpriority="high"` and no lazy.
 - `extend`: the new control's default must reproduce today's output exactly; run `regress.mjs` afterwards.
 
+## Blocks that read custom fields
+
+When the plan's section shows data declared in the content model (an event's date and agenda, a team member's role, the phone from the theme settings page; site setup Step 6), the block reads it instead of storing a copy in block attributes:
+
+- Post data: `$template->field('<name>')` (follows a Query Loop's `postId`; add `"usesContext": ["postId", "postType"]` to `block.json`), rows with `proto_rows('<name>', $post_id)`. Settings data: `proto_field('<name>', 'option:<page-slug>')`. Values come back escaped for their type: echo them as they are.
+- Layout copy of the section (headings, intro, CTA labels) stays in block fields as usual; only the data lives in custom fields. A block with no copy of its own has `"fields": {}`, which the unbound-fields check and editor QA accept.
+- The editor preview has no post (`$block === null`): post fields come back empty there, so render a visible placeholder in that case. Settings-page values do render in the editor.
+- A core paragraph, heading, image or button that only shows one field can be bound instead (`"metadata":{"bindings":{"content":{"source":"proto-blocks/field","args":{"name":"subtitle"}}}}`), e.g. in a scaffolded `single-<slug>.html`.
+- A field the plan needs but nobody declared is a content-model change: ask the developer, then add it as setup Step 6 describes. After any change under `proto-types/`, `proto-fields/` or `proto-options/`, `"$WP" proto-blocks validate` must exit 0 before the gates.
+- Details, the per-type return shapes and the QA list: the `protoblocks` skill's `references/custom-fields.md` and `references/content-model-recipes.md`.
+
 ## Editor check
 
 A block that renders is not finished until it can be edited. Before Verify, run the unbound-fields check from the `protoblocks` skill's `references/authoring-workflow.md` ("Every declared field must be reachable") in the block folder: it lists the `block.json` fields no `data-proto-field` / `data-proto-repeater` / `data-proto-inner-blocks` element binds (repeater subfields included). Fix each one as that section says (bind it, move a consumed value to a control or `itemControls`, or an editor-only region behind `$is_preview`), and seed a placeholder repeater item under `$is_preview` so the editor can learn the subfields. Once the page's sections are done, the orchestrator's `page-editor-qa` step (`editor-qa.mjs`) re-verifies all of this in the real block editor: it opens the page in wp-admin, requests each block's editor preview, and fails the page on any unbound field, a block that does not render there, a missing inspector, or a post that turns dirty on open.
