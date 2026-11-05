@@ -195,9 +195,13 @@ When a core block should show a field (the subtitle under the title on `single-e
 - The editor shows `{subtitle}` (WordPress 6.7+); the value renders on the front end. A field that is empty, `code`, `password` or `"bindings": false` leaves the saved block content.
 - Settings values: add `"context": "option:<slug>"` to `args`. Option fields are bindable by any author: mark private ones `"bindings": false`.
 
-## 5. QA checklist for a content-model change
+## 5. Redirects and scripts
 
-Run after every change to `proto-types/`, `proto-taxonomies/`, `proto-fields/`, `proto-options/` or a template that reads fields.
+See `redirects.md` (migrate from the Redirection plugin, catch a renamed section, role and login landing pages, retire a URL with 410) and `scripts.md` (GTM in head plus noscript after body open, consent script for logged-out visitors, exclude the privacy page). Both end with a check list; run `wp proto-blocks validate` after each change.
+
+## 6. QA checklist for a content-model change
+
+Run after every change to `proto-types/`, `proto-taxonomies/`, `proto-fields/`, `proto-options/`, `proto-redirects/`, `proto-scripts/` or a template that reads fields.
 
 1. `wp proto-blocks validate` exits 0. Read every warning and fix or justify it: `double_declaration` (remove the PHP line or the file), `declared_too_late`, `unknown_type`, `unsupported_location_rule`, `broken_override`, `shared_storage`.
 2. `wp proto-blocks fields validate` (adds `wide_location`). `wp proto-blocks fields list`: every group `active`, none `unrenderable` or `skipped-acf` unless intended.

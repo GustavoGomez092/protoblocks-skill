@@ -13,7 +13,7 @@ Registered under `wp proto-blocks`:
 | `wp proto-blocks cache stats` | — | Show cache statistics. |
 | `wp proto-blocks export <name>` | `--output=<path>` | Export a block to a standalone directory. |
 
-`validate` (without a block name) also checks every content-model declaration. Content-model commands (`type`, `taxonomy`, `fields`, `options`), the admin screens and the REST routes are in `admin-and-cli.md`.
+`validate` (without a block name) also checks every content-model declaration. Content-model commands (`type`, `taxonomy`, `fields`, `options`, `redirect`, `script`), the admin screens and the REST routes are in `admin-and-cli.md`; redirect and script details in `redirects.md` and `scripts.md`.
 
 **`--dir=plugin` gotcha:** it writes to `wp-content/plugins/proto-blocks-custom/`, which is **not** a discovery path (`Discovery::getBlockPaths()` only scans the theme/child-theme `proto-blocks/`, the bundled examples, and `proto_blocks_paths`), so the block never appears. Use `--dir=theme` (the default), or add that directory via the `proto_blocks_paths` filter.
 
@@ -66,8 +66,11 @@ add_filter('proto_blocks_paths', function (array $paths) {
 | `proto_blocks_category_title` | filter | Block category display name (default "Proto Blocks"). |
 | `proto_blocks_category_icon` | filter | Category icon (dashicon or null). |
 | `proto_blocks_category_slug` | filter | Category slug (default `proto-blocks`). |
-| `proto_blocks_modules` | filter | Turn content-model modules off: `['post_types' => bool, 'taxonomies' => bool, 'fields' => bool, 'options_pages' => bool]` (from `functions.php`). |
-| `proto_blocks_schema_paths` | filter | Extra roots searched for `proto-types/`, `proto-taxonomies/`, `proto-fields/`, `proto-options/` (after the parent and child theme; never written to). |
+| `proto_blocks_modules` | filter | Turn content-model modules off: `['post_types' => bool, 'taxonomies' => bool, 'fields' => bool, 'options_pages' => bool, 'redirects' => bool, 'scripts' => bool]` (from `functions.php`). |
+| `proto_blocks_schema_paths` | filter | Extra roots searched for `proto-types/`, `proto-taxonomies/`, `proto-fields/`, `proto-options/`, `proto-redirects/`, `proto-scripts/` (after the parent and child theme; never written to). |
+| `proto_blocks_redirects_excluded` / `_priority` / `_canonical_target` / `_log_404` | filter | Exclude a request, change the `init` priority (10), change the canonical target, veto 404 logging. |
+| `proto_blocks_redirects_nothing` | action | Fires when an `action: nothing` rule matches. |
+| `proto_blocks_scripts_markers` / `_enabled` | filter | Drop the `<!-- proto-blocks: slug -->` markers; veto script output for a request. |
 | `proto_blocks_field_groups` | filter | The resolved list of field groups (`FieldGroup` objects) before they are indexed. |
 | `proto_blocks_declaration_errors` | filter | Add findings to a declaration before it is written: `($errors, $kind, $data, $slug)`, entries `{path, message, level?, code?}`. |
 | `proto_blocks_repeater_max_items` | filter | Row cap for repeaters (block and custom fields; default 500): `($max, $fieldName, $config)` (a custom field passes its settings). |

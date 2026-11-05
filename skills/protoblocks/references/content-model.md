@@ -2,7 +2,7 @@
 
 Proto-Blocks 2.15.0+ registers custom post types and taxonomies from a line of PHP or a JSONC file in the theme, and edits them from **Proto Blocks > Post Types / Taxonomies** by rewriting those same files. Nothing about the content model is stored in the database. Requires WordPress 6.5+ and PHP 8.1.
 
-Plugin docs (Proto-Blocks repo): `docs/post-types.md`, `docs/taxonomies.md`, `docs/content-model-files.md`, `docs/trust-and-security.md`. Fields: `custom-fields.md`. Settings pages: `settings-pages.md`. CLI and admin: `admin-and-cli.md`.
+Plugin docs (Proto-Blocks repo): `docs/post-types.md`, `docs/taxonomies.md`, `docs/content-model-files.md`, `docs/trust-and-security.md`. Fields: `custom-fields.md`. Settings pages: `settings-pages.md`. Redirects: `redirects.md`. Head/body scripts: `scripts.md`. CLI and admin: `admin-and-cli.md`.
 
 ## PHP one-liner or JSONC file?
 
@@ -22,7 +22,9 @@ your-theme/
 ├── proto-types/<slug>/type.jsonc              post type + inline taxonomies + field groups
 ├── proto-taxonomies/<slug>/taxonomy.jsonc     standalone taxonomy for any post types
 ├── proto-fields/<slug>/group.jsonc            standalone field group (custom-fields.md)
-└── proto-options/<slug>/page.jsonc            settings page (settings-pages.md)
+├── proto-options/<slug>/page.jsonc            settings page (settings-pages.md)
+├── proto-redirects/<group>/redirects.jsonc    redirect rules (redirects.md); proto-redirects/settings.jsonc
+└── proto-scripts/<slug>/script.jsonc          head/body snippets + head.html, body-open.html, body-close.html (scripts.md)
 ```
 
 - **The folder name is the slug.** Post type: `^[a-z][a-z0-9_-]{0,19}$` (20 chars max, WordPress's limit). Taxonomy: same pattern, 32 chars. A `slug` key inside the file must equal the folder name (`slug_mismatch` error otherwise). Reserved core slugs are refused.

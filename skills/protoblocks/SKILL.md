@@ -1,6 +1,6 @@
 ---
 name: protoblocks
-description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind. Also the content model: custom post type, taxonomy, custom fields / field group (ACF-style, ACF import), settings page / options page, proto_field(). For turning a whole design into pages or a site, use protoblocks-site-builder.
+description: Use when building, scaffolding, or debugging WordPress Gutenberg blocks with the Proto-Blocks plugin - blocks defined in block.json with a protoBlocks config and rendered by a PHP template.php using data-proto-* attributes, with fields, controls, repeaters, inner blocks, and optional Tailwind. Also the content model: custom post type, taxonomy, custom fields / field group (ACF-style, ACF import), settings page / options page, proto_field(), redirects, head/body scripts. For turning a whole design into pages or a site, use protoblocks-site-builder.
 ---
 
 # Proto-Blocks
@@ -24,7 +24,7 @@ Proto-Blocks is a WordPress plugin for building Gutenberg blocks with **PHP/HTML
 - Adding fields (text, image, video, link, wysiwyg, repeater, inner-blocks) or controls (select, toggle, range, color, image/video picker, etc.), including conditional controls.
 - Debugging: block not appearing, preview not updating, field not editable, repeater issues, Tailwind not applying.
 - Writing `template.php` markup with correct `data-proto-*` bindings and escaping.
-- Declaring post types, taxonomies, field groups or settings pages, or reading their values → "Content model" below.
+- Declaring post types, taxonomies, field groups, settings pages, redirects or head/body scripts → "Content model" below.
 - Building whole pages or a site from a design → use `protoblocks-site-builder`.
 
 **Not for:** classic React/`@wordpress/scripts` block development, or non-Proto-Blocks WordPress work.
@@ -149,7 +149,9 @@ proto-options/<slug>/page.jsonc   settings page
 
 PHP one-liners (functions.php): `proto_post_type('Event')`, `proto_taxonomy('Topic', ['post_types' => ['event']])`, `proto_field_group('event', [...])`, `proto_options_page('Theme Settings', [...])`. Read values escaped per type: `proto_field('subtitle')`, `proto_rows('agenda')`, `proto_field('phone', 'option:theme-settings')`, `$template->field('subtitle')` in `template.php`; core blocks: Block Bindings source `proto-blocks/field`.
 
-Decide: per-instance section copy → block field. Same data wherever a post shows (date, venue, role) → custom field. A collection with its own URLs → post type. Site-wide values (phone, footer, scripts) → settings page.
+Decide: per-instance section copy → block field. Same data wherever a post shows (date, venue, role) → custom field. A collection with its own URLs → post type. Site-wide values (phone, footer) → settings page.
+
+Redirects: `proto-redirects/<group>/redirects.jsonc`, `proto_redirect('/old', '/new')`. Head/body scripts: `proto-scripts/<slug>/script.jsonc` + `head.html`, `body-open.html`, `body-close.html`, `proto_script()`. Read `references/redirects.md` (edge cases first) and `references/scripts.md`.
 
 Rules: prefer files over PHP (file wins, "declared twice" warning); folder = slug; child theme wins; files cannot name PHP callbacks; no `<`/`>` in labels; `code`/`password` values need `unfiltered_html` (CLI seeding: `--user=<admin>`); no read-permission check, never pass visitor input as context; never rename a slug with content by hand. After every change: `wp proto-blocks validate`.
 
@@ -173,23 +175,25 @@ Rules: prefer files over PHP (file wins, "declared twice" warning); folder = slu
 
 Load these as needed — do not read all of them up front.
 
-- `references/authoring-workflow.md` — **start here to build a block.** End-to-end clean workflow: scaffold → schema → template → style → preview → validate, with a quick-start checklist.
-- `references/recipes.md` — "I want to build X" → the fields/controls/pattern for common modules (hero, card grid, FAQ/accordion, stats, pricing, tabs, CTA, nav, logo wall, feature grid).
-- `references/composition.md` — **read before designing a block's fields.** When to use discrete fields vs one wysiwyg vs an inner-blocks slot vs a repeater; avoiding field proliferation.
+- `references/authoring-workflow.md` — **start here to build a block.** Scaffold → schema → template → style → preview → validate.
+- `references/recipes.md` — "I want to build X" → fields/controls/pattern (hero, card grid, FAQ, stats, pricing, tabs, CTA, nav, logo wall).
+- `references/composition.md` — **read before designing fields.** Discrete fields vs wysiwyg vs inner-blocks vs repeater.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, defaults, validation, attribute generation.
-- `references/fields.md` — each field type in depth: config options, value shapes, sanitization, custom field registration.
-- `references/controls.md` — each control type (incl. `video`), options, **conditional rendering & composition** (`conditions.visible`), `affects`.
-- `references/templates.md` — template variables, `data-proto-*`, escaping, preview detection, `data-proto-animate` reveals.
+- `references/fields.md` — each field type: options, value shapes, sanitization, custom fields.
+- `references/controls.md` — each control type, options, **conditional rendering** (`conditions.visible`), `affects`.
+- `references/templates.md` — template variables, `data-proto-*`, escaping, preview detection, reveals.
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
-- `references/styling.md` — vanilla CSS vs Tailwind decision guide, `useTailwind`, scoping to `.proto-blocks-scope`, theme tokens, editor styles.
-- `references/interactivity.md` — `view.js`, ES modules, Interactivity API, and loading JS in the editor for third-party embeds.
-- `references/previews.md` — inserter thumbnails (Preview Capture) or your own `preview.png`.
-- `references/examples.md` — the 9 bundled example blocks, a capability matrix and canonical samples.
-- `references/theme.md` — the proto-blocks-theme starter: builder canvas, Taxi page transitions (wrapper, lifecycle events, script re-run rules), animation globals, token file, required plugins.
-- `references/cli-and-hooks.md` — WP-CLI commands, `proto_blocks_*` hooks, discovery, block category, wizard, debug mode, preview system.
-- `references/troubleshooting.md` — symptom → cause → fix, plus the common-mistakes table.
+- `references/styling.md` — vanilla CSS vs Tailwind, `useTailwind`, `.proto-blocks-scope`, tokens, editor styles.
+- `references/interactivity.md` — `view.js`, ES modules, Interactivity API, JS in the editor.
+- `references/previews.md` — inserter thumbnails (Preview Capture) or `preview.png`.
+- `references/examples.md` — the 9 bundled example blocks, capability matrix.
+- `references/theme.md` — proto-blocks-theme starter: canvas, Taxi, animation globals, tokens.
+- `references/cli-and-hooks.md` — WP-CLI commands, `proto_blocks_*` hooks, discovery, wizard, debug, previews.
+- `references/troubleshooting.md` — symptom → cause → fix, common mistakes.
 - `references/content-model.md` — post types, taxonomies: annotated files, overrides, scaffolding.
-- `references/custom-fields.md` — field groups, field types, conditions, getters, bindings, ACF import, trust.
+- `references/custom-fields.md` — field groups, types, conditions, getters, bindings, ACF, trust.
 - `references/settings-pages.md` — `page.jsonc`, storage modes, reading values, migration.
 - `references/admin-and-cli.md` — admin screens, content-model CLI, REST for QA.
-- `references/content-model-recipes.md` — Event type + card, ACF conversion, header settings, bindings, QA.
+- `references/content-model-recipes.md` — Event type + card, ACF, header settings, bindings, QA.
+- `references/redirects.md` — `redirects.jsonc`, keys, recipes, edge cases.
+- `references/scripts.md` — `script.jsonc`, placement targets, GTM recipes.

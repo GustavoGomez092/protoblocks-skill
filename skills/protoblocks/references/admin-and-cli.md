@@ -11,6 +11,8 @@ Everything the Proto-Blocks admin can change is a file in the theme, so an agent
 | Taxonomies | `proto-blocks-taxonomies` | Same for taxonomies. |
 | Fields | `proto-blocks-fields` | Every field group with origin and status (`active`, `unrenderable`, `skipped-acf`). Visual builder: field rows (drag or keyboard reorder), type settings, location and condition builders, a JSONC pane, Save to file. ACF's own groups are listed read-only. |
 | Options Pages | `proto-blocks-options-pages` | Declared settings pages (plus other plugins' pages, read-only); edits `page.jsonc`; "Create file" for a PHP page; delete keeps saved values. |
+| Redirects | `proto-blocks-redirects` | Tabs: Redirects (rules across groups, hits, Test box), 404s (Add redirect, Ignore), Log, Import / Export (CSV, JSON, Apache, Nginx, `_redirects`, plugin importers), Settings. Writes `redirects.jsonc` and `settings.jsonc`. Paused banner while the Redirection plugin is active. See `redirects.md`. |
+| Scripts | `proto-blocks-scripts` | List with H/B/F location badges, code editors, placement builder. Read-only without `unfiltered_html`. See `scripts.md`. |
 | each settings page | its own slug (`theme-settings`) | The values form (tabs, child pages), saved through REST under the page's capability. |
 | Tailwind Settings / System Status / Preview Capture / Setup Wizard | `proto-blocks-settings` / `-system` / `-previews` / `-wizard` | Unchanged tools. |
 
@@ -57,9 +59,19 @@ wp proto-blocks fields validate [<path>...]             # no path: every group (
 # Settings pages
 wp proto-blocks options list [--format=table|json|csv]  # slug, title, menu, capability, storage, origin
 wp proto-blocks options create "<Title>" [--slug=<slug>] [--menu=<menu>] [--capability=<cap>] [--storage-option=<name>]
+
+# Redirects (redirects.md)
+wp proto-blocks redirect list | add /old /new --code=301 | delete <id> | enable <id> | disable <id>
+wp proto-blocks redirect group list | create "Legacy" | enable|disable|delete <slug>
+wp proto-blocks redirect validate | test /old [--logged-in] | prune | db install|status|drop --yes
+wp proto-blocks redirect import file.csv --dry-run | import-plugin redirection --dry-run | export --format=apache -
+wp proto-blocks redirect log [--404 --limit=20 --clear]
+
+# Scripts (scripts.md)
+wp proto-blocks script list | create "GTM" | validate | enable gtm | disable gtm | delete gtm --confirm=gtm
 ```
 
-Common finding codes: `double_declaration`, `declared_too_late`, `name_required`, `slug_mismatch`, `schema_invalid`, `invalid_jsonc` (with line and column), `both_extensions`, `icon_invalid`, `unknown_type`, `unsupported_location_rule`, `missing_location`, `duplicate_group_key`, `broken_override`, `wide_location`, `shared_storage`, `protected_meta_key`.
+Common finding codes: `double_declaration`, `declared_too_late`, `name_required`, `slug_mismatch`, `schema_invalid`, `invalid_jsonc` (with line and column), `both_extensions`, `icon_invalid`, `unknown_type`, `unsupported_location_rule`, `missing_location`, `duplicate_group_key`, `broken_override`, `wide_location`, `shared_storage`, `protected_meta_key`; redirects: `invalid_regex`, `unanchored_regex`, `invalid_target`, `invalid_code`, `self_redirect`, `redirect_chain`, `duplicate_rule`, `use_when_server`, `invalid_header`, `monitor_unwritable`; scripts: `php_in_snippet`, `invalid_snippet_file`, `snippet_file_missing`, `missing_body_open`.
 
 Checking values from the CLI (the getter escapes, exactly as a template sees it):
 
@@ -82,6 +94,8 @@ wp eval --user=admin 'echo wp_json_encode(rest_do_request(new WP_REST_Request("G
 | Route | Use during QA |
 |---|---|
 | `GET admin/types`, `GET admin/types/<slug>` | Registered types with origin, source, counts, issues. |
+| `GET admin/redirects`, `GET admin/redirects/test?url=` | Groups, rules, hits, issues; which rule fires for a URL (trace). |
+| `GET admin/scripts`, `GET admin/scripts/<slug>` | Scripts with locations, origin, issues; one script with its snippet texts. |
 | `POST admin/types/<slug>/scaffold` body `{"taxonomies": bool}` | Scaffold templates (same as the CLI). |
 | `GET admin/taxonomies`, `GET admin/taxonomies/<slug>` | Taxonomies. |
 | `GET admin/fields` | Every group: `origin`, `status` (`active` / `unrenderable` / `skipped-acf`), `issues`, `editable`, `readOnlyReason`; also `acfActive`, `createTarget`. |

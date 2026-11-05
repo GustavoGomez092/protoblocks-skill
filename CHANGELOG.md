@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0
+
+Redirects and scripts (Proto-Blocks 2.16.0+). Docs only.
+
+- New `protoblocks` references: `redirects.md` (PHP and `redirects.jsonc` syntax, every rule key, conditions, settings file, recipes: migrate from the Redirection plugin, catch a renamed section, role and login landing pages, retire a URL with 410; the edge-case list to check before declaring a redirect: trailing slash, case, query mode, regex anchoring, loops, chains, the 404 condition running only at `template_redirect`, read-only hosts, comments lost on CLI writes) and `scripts.md` (`script.jsonc`, the three `.html` files, placement targets, trust rules, recipes: GTM in head plus noscript after body open, a consent script for logged-out visitors, excluding the privacy page).
+- `SKILL.md`: the description and the "Content model" section now cover redirects and head/body scripts and point to the new references.
+- `content-model.md`, `content-model-recipes.md`, `cli-and-hooks.md` and `admin-and-cli.md`: layout, recipes pointer, `redirects` and `scripts` module keys, the new filters, the Redirects and Scripts screens, the `redirect` and `script` commands and REST routes.
+
 ## 2.4.0
 
 Content model (Proto-Blocks 2.15.0+: post types, taxonomies, custom fields, settings pages). Docs only.
