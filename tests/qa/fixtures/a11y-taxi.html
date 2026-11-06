@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Taxi home</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; color: #111; background: #fff; }
+  header, footer { padding: 16px 24px; background: #f1f5f9; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; }
+  a { color: #1d4ed8; display: inline-block; min-height: 24px; line-height: 24px; }
+  section { padding: 24px; }
+</style></head>
+<body>
+<div data-taxi>
+  <!-- Header and footer persist across swaps, as in the theme: only [data-taxi-view] is replaced. -->
+  <header id="pb-header">
+    <!-- No aria-current here: syncNavState only syncs core navigation links, so a server-rendered one would go stale. -->
+    <a href="/a11y-taxi.html" class="site-logo">Taxi site</a>
+    <nav class="wp-block-navigation" aria-label="Primary"><ul>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi.html" aria-current="page">Home</a></li>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi-about.html">About</a></li>
+    </ul></nav>
+  </header>
+  <div data-taxi-view>
+    <main><section id="pb-s1"><h1>Home</h1><p>Welcome.</p></section></main>
+  </div>
+  <footer id="pb-footer">
+    <nav class="wp-block-navigation" aria-label="Footer"><ul id="footer-menu">
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi.html" aria-current="page">Home</a></li>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi-about.html">About</a></li>
+    </ul></nav>
+    <p><a id="cookie-settings" href="#cookie-settings">Cookie settings</a></p>
+  </footer>
+</div>
+<script>
+  // Fake Taxi: intercepts same-site link clicks, fetches the page, swaps [data-taxi-view], pushes the URL, then (like the
+  // theme's NAVIGATE_IN / NAVIGATE_END) syncs nav state and dispatches proto:page-ready.
+  // ?sync=1      run the theme's syncNavState on the swap; without it aria-current stays on the old page's links.
+  // ?hashbug=1   the cookie-settings hash link sits inside a core navigation, so syncNavState marks it current.
+  // ?noready=1   proto:page-ready is never dispatched.
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var view = document.querySelector('[data-taxi-view]');
+    if (q.has('hashbug')) {
+      var li = document.createElement('li');
+      li.className = 'wp-block-navigation-item';
+      li.appendChild(document.getElementById('cookie-settings'));
+      document.getElementById('footer-menu').appendChild(li);
+    }
+    // The theme's syncNavState (proto-taxi.js), verbatim.
+    function syncNavState(url) {
+      var target = new URL(url, window.location.href);
+      var hereOrigin = target.origin;
+      var here = target.pathname.replace(/\/+$/, '');
+      var links = document.querySelectorAll('.wp-block-navigation a[href]');
+      for (var i = 0; i < links.length; i++) {
+        var link = links[i];
+        var parent = link.parentElement;
+        var there = new URL(link.href, window.location.href);
+        var isCurrent = there.origin === hereOrigin && there.pathname.replace(/\/+$/, '') === here;
+        link.classList.toggle('current-menu-item', isCurrent);
+        if (isCurrent) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+        if (parent && parent.classList.contains('wp-block-navigation-item')) {
+          parent.classList.toggle('current-menu-item', isCurrent);
+          parent.classList.toggle('current_page_item', isCurrent);
+        }
+      }
+    }
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[href]');
+      if (!a || (a.getAttribute('href') || '').charAt(0) === '#' || a.origin !== location.origin) return;
+      e.preventDefault();
+      fetch(a.href).then(function (r) { return r.text(); }).then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        view.innerHTML = doc.querySelector('[data-taxi-view]').innerHTML;
+        document.title = doc.title;
+        history.pushState({}, '', a.href);
+        if (q.has('sync')) syncNavState(location.href);
+        setTimeout(function () {
+          if (!q.has('noready')) document.dispatchEvent(new CustomEvent('proto:page-ready', { detail: { container: view, url: location.href } }));
+        }, 30);
+      });
+    });
+  })();
+</script>
+</body></html>

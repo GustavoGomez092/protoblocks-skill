@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>oflex (before the fixes)</title>
+<!-- The oflex.com client scan, reproduced: every defect below is one the WCAG scan found on the finished site. -->
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; color: #111; background: #fff; }
+  .skip-link { position: absolute; left: -9999px; top: 0; }
+  header, footer { padding: 16px 24px; background: #f1f5f9; }
+  header ul, footer ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; flex-wrap: wrap; }
+  a { color: #1d4ed8; }
+  header a, footer a { display: inline-block; min-height: 24px; line-height: 24px; }
+  [hidden] { display: none !important; }
+  section { padding: 24px; }
+  .logo { display: inline-block; width: 40px; height: 40px; }
+  .dots { display: flex; gap: 4px; }
+  .dots button { width: 8px; height: 8px; min-width: 0; padding: 0; border: 0; border-radius: 50%; background: #334155; }
+  .tabs__buttons { display: flex; gap: 8px; }
+  .tabs__buttons button { padding: 8px 12px; }
+  .footer-cols { display: flex; gap: 32px; flex-wrap: wrap; }
+</style></head>
+<body>
+<a id="wp-skip-link" class="skip-link screen-reader-text" href="#wp--skip-link--target">Skip to content</a>
+<header id="pb-header">
+  <a href="/" class="site-logo" aria-label="oflex home"><svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" fill="#1d4ed8"/></svg></a>
+  <!-- The site-header block wrapped core/navigation in its own nav: nav inside nav, both "Primary". -->
+  <nav aria-label="Primary">
+    <nav class="wp-block-navigation" aria-label="Primary">
+      <ul>
+        <li><a href="/about/">About</a></li>
+        <!-- Dropdown parent rendered as an anchor without href: not focusable, no role. -->
+        <li><a class="wp-block-navigation-submenu__toggle">Services</a>
+          <ul><li><a href="/services/flooring/">Flooring</a></li><li><a href="/services/walls/">Walls</a></li></ul></li>
+        <li><a href="/contact/">Contact</a></li>
+      </ul>
+    </nav>
+  </nav>
+</header>
+<main id="wp--skip-link--target">
+  <section id="pb-s1">
+    <h1>Flexible flooring for every space</h1>
+    <!-- role=img on a wrapper div instead of on the svg. -->
+    <div role="img" aria-label="Floor pattern"><svg width="120" height="40" viewBox="0 0 120 40"><rect width="120" height="40" fill="#94a3b8"/></svg></div>
+  </section>
+  <section id="pb-s2">
+    <!-- Contact location names: h3 straight under the h1. -->
+    <h3>Monterrey</h3>
+    <p>Av. Constitución 100.</p>
+  </section>
+  <section id="pb-s3">
+    <h2>Trusted by</h2>
+    <p>Partner A, Partner B, Partner C</p>
+    <!-- Logo carousel dots: 8px buttons 4px apart, far below the 24px target size. -->
+    <div class="dots"><button type="button" aria-label="Slide 1"></button><button type="button" aria-label="Slide 2"></button><button type="button" aria-label="Slide 3"></button></div>
+  </section>
+  <section id="pb-s4">
+    <h2>Services</h2>
+    <!-- Tabs built with aria-owns: the tab buttons live outside the tablist, the panels inside it. -->
+    <div class="tabs">
+      <div class="tabs__buttons">
+        <button type="button" role="tab" id="tab-1" aria-selected="true" aria-controls="panel-1">Flooring</button>
+        <button type="button" role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2">Walls</button>
+      </div>
+      <div role="tablist" aria-label="Services" aria-owns="tab-1 tab-2">
+        <div role="tabpanel" id="panel-1" aria-labelledby="tab-1"><p>Vinyl and laminate floors.</p></div>
+        <div role="tabpanel" id="panel-2" aria-labelledby="tab-2" hidden><p>Wall panels.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer id="pb-footer">
+  <!-- Three small core/navigation blocks with column titles that skip a level (h4 after the page's h2). -->
+  <div class="footer-cols">
+    <div><h4>Company</h4><nav class="wp-block-navigation"><ul><li><a href="/about/">About</a></li><li><a href="/careers/">Careers</a></li></ul></nav></div>
+    <div><h4>Products</h4><nav class="wp-block-navigation"><ul><li><a href="/floors/">Floors</a></li><li><a href="/walls/">Walls</a></li><li><a href="/ceilings/">Ceilings</a></li></ul></nav></div>
+    <div><h4>Legal</h4><nav class="wp-block-navigation"><ul><li><a href="/privacy/">Privacy</a></li></ul></nav></div>
+  </div>
+  <p>&copy; oflex</p>
+</footer>
+</body></html>
