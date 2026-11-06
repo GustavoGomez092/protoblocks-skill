@@ -11,6 +11,7 @@ Accessibility verification, from a client WCAG scan of a finished build (nested 
 - `protoblocks-site-builder`: `ask-more-pages` runs the site pass before the final report and re-runs it until it passes (failures are fixed like page-QA content failures); the final report lists each page's remaining `other` items and the site pass result; `references/pipeline.md` documents the `a11y` output, the blocking rules, the pattern ids, the post-navigation pass and a fix for each failure kind; the thresholds rule covers `a11yBlocking`.
 - `protoblocks-section-loop`: Verify runs `a11y.mjs check-section` after a passing visual verdict; it must pass before Animate (`references/verify.md`).
 - `protoblocks` `references/templates.md`: "Accessibility conventions" (one landmark per role per region, one footer `<nav>` with inner core navs demoted to `role="group"` by a `render_block_core/navigation` filter, heading levels per region, the ARIA tabs pattern, `role="img"` on the SVG, no href-less anchors, 24px targets, `aria-current` left to the theme's `syncNavState`). `references/recipes.md` Tabs: the ARIA tabs requirement and the pattern checks.
+- `protoblocks-site-setup` `references/navigation.md` and `protoblocks-section-loop` `references/header-footer.md`: a menu with label-only submenu parents is embedded with `"openSubmenusOnClick": true` on the navigation block, so core prints the parents as buttons instead of href-less links.
 
 ## 2.5.0
 
