@@ -181,7 +181,7 @@ Load these as needed — do not read all of them up front.
 - `references/schema.md` — full `block.json` / `protoBlocks` schema, defaults, validation, attribute generation.
 - `references/fields.md` — each field type: options, value shapes, sanitization, custom fields.
 - `references/controls.md` — each control type, options, **conditional rendering** (`conditions.visible`), `affects`.
-- `references/templates.md` — template variables, `data-proto-*`, escaping, preview detection, reveals.
+- `references/templates.md` — template variables, `data-proto-*`, escaping, preview detection, reveals, a11y conventions.
 - `references/repeaters.md` — repeater markup, item ids, min/max, nested fields, editor behavior.
 - `references/styling.md` — vanilla CSS vs Tailwind, `useTailwind`, `.proto-blocks-scope`, tokens, editor styles.
 - `references/interactivity.md` — `view.js`, ES modules, Interactivity API, JS in the editor.
