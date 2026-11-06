@@ -57,13 +57,25 @@ const TAXI_LOCKED = 'transition is currently in progress';
 // When its fetch fails or returns non-2xx, Taxi falls back to window.location.href = url: the page reloads, and any
 // in-flight evaluate/wait dies with one of these.
 const HARD_NAV = /Execution context was destroyed|Target (page, context or browser has been )?closed|navigat|frame was detached/i;
+export const isHardNavigation = (e) => HARD_NAV.test(String(e && e.message));
+
+// proto:page-ready counter, installed once per document: a navigation is over once the count passes the value read
+// before it started. A hard navigation loses the counter (new document), which callers can tell apart by its absence.
+export const countPageReady = (page) => page.evaluate(() => {
+  if (typeof window.__pbReady !== 'number') {
+    window.__pbReady = 0;
+    document.addEventListener('proto:page-ready', () => { window.__pbReady += 1; });
+  }
+  return window.__pbReady;
+});
+export const waitPageReady = (page, after, timeout) => page.waitForFunction((k) => window.__pbReady > k, after, { timeout });
 
 // Run one page call of a Taxi navigation, turning a hard-navigation death into ETAXI.
 async function viaTaxi(target, call) {
   try {
     return await call();
   } catch (e) {
-    if (e.code !== 'ETAXI' && HARD_NAV.test(String(e && e.message))) {
+    if (e.code !== 'ETAXI' && isHardNavigation(e)) {
       throw taxiError(`navigateTo(${target}) fell back to a hard navigation (Taxi sets location.href when its fetch fails or is non-2xx): ${String(e.message).split('\n')[0]}`);
     }
     throw e;
@@ -94,7 +106,7 @@ async function navigate(page, target, taxi) {
       } finally { clearTimeout(timer); }
     }, { t: target, ms: T.taxiReadyTimeoutMs }));
     if (r.ok) {
-      await viaTaxi(target, () => page.waitForFunction((k) => window.__pbReady > k, r.n, { timeout: T.taxiReadyTimeoutMs }).catch((e) => {
+      await viaTaxi(target, () => waitPageReady(page, r.n, T.taxiReadyTimeoutMs).catch((e) => {
         if (e.name !== 'TimeoutError') throw e;
         throw taxiError(`proto:page-ready was not dispatched within ${T.taxiReadyTimeoutMs}ms of navigateTo(${target})`);
       }));
@@ -121,11 +133,8 @@ async function taxiCheck(page, url, sel) {
   awayUrl.searchParams.set('pb-motion-away', '1');
   awayUrl.hash = '';
   const away = awayUrl.href;
-  await page.evaluate(() => {
-    window.__pbReady = 0;
-    document.addEventListener('proto:page-ready', () => { window.__pbReady += 1; });
-    window.scrollTo(0, 0);
-  });
+  await countPageReady(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
   const taxi = { checked: true, away, retries: 0 };
   try {
     const roundTrip = async () => {

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Taxi about</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; color: #111; background: #fff; }
+  header, footer { padding: 16px 24px; background: #f1f5f9; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; }
+  a { color: #1d4ed8; display: inline-block; min-height: 24px; line-height: 24px; }
+  section { padding: 24px; }
+</style></head>
+<body>
+<!-- The page a11y-taxi.html swaps in: only its [data-taxi-view] is used by the fake Taxi. -->
+<div data-taxi>
+  <header id="pb-header">
+    <a href="/a11y-taxi.html" class="site-logo">Taxi site</a>
+    <nav class="wp-block-navigation" aria-label="Primary"><ul>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi.html">Home</a></li>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi-about.html" aria-current="page">About</a></li>
+    </ul></nav>
+  </header>
+  <div data-taxi-view>
+    <main><section id="pb-s1"><h1>About</h1><p>Who we are.</p></section></main>
+  </div>
+  <footer id="pb-footer">
+    <nav class="wp-block-navigation" aria-label="Footer"><ul>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi.html">Home</a></li>
+      <li class="wp-block-navigation-item"><a href="/a11y-taxi-about.html" aria-current="page">About</a></li>
+    </ul></nav>
+    <p><a id="cookie-settings" href="#cookie-settings">Cookie settings</a></p>
+  </footer>
+</div>
+</body></html>
