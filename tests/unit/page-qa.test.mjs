@@ -11,15 +11,18 @@ const SCRIPT = new URL('../../skills/protoblocks-site-builder/scripts/qa/page-qa
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pb-pageqa-unit-'));
 const rejectsCode = (p, code) => assert.rejects(p, (e) => e.code === code);
 
-test('filterViolations keeps page-content nodes and splits by impact', () => {
+test('filterViolations keeps page-content nodes and splits by impact and the moderate blocking list', () => {
   const v = [
     { id: 'color-contrast', impact: 'serious', nodes: [{ target: ['main #pb-s2 p'] }, { target: ['#wpadminbar a'] }] },
     { id: 'region', impact: 'moderate', nodes: [{ target: ['footer .x'] }] },
     { id: 'link-name', impact: 'critical', nodes: [{ target: ['#third-party-widget a'] }] },
+    { id: 'image-redundant-alt', impact: 'minor', nodes: [{ target: ['main img'] }] },
   ];
   const r = filterViolations(v);
-  assert.deepEqual(r.blocking.map((x) => [x.id, x.nodes.length]), [['color-contrast', 1]]);
-  assert.deepEqual(r.other.map((x) => x.id), ['region']);
+  assert.deepEqual(r.blocking.map((x) => [x.id, x.nodes.length]), [['color-contrast', 1], ['region', 1]]);
+  assert.deepEqual(r.other.map((x) => x.id), ['image-redundant-alt']);
+  // An empty override leaves only serious/critical blocking.
+  assert.deepEqual(filterViolations(v, { blockingRules: [] }).other.map((x) => x.id), ['region', 'image-redundant-alt']);
 });
 
 test('filterViolations does not match scope words inside other names (domain, mainnav, footer-widget)', () => {
@@ -157,6 +160,17 @@ test('filterViolations counts document-level nodes (html, body) but not look-ali
   assert.deepEqual(r.other.map((x) => x.id), ['bypass']);
 });
 
+test('buildInputs passes site.qa.a11yBlocking through qa; pageQa rejects a malformed one with EINPUT before a browser', async () => {
+  const dir = stateWith([{ slug: 'home', url: URL_, status: 'building', sections: [], design: { frames: [{ breakpoint: 'desktop', width: 1440, image: '/abs/d.png' }] } }], { url: 'http://a.local', path: '/x', qa: { a11yBlocking: ['heading-order'] } });
+  assert.deepEqual(buildInputs(dir, 'home').qa.a11yBlocking, ['heading-order']);
+  const d = tmp();
+  const png = path.join(d, 'a.png');
+  fs.writeFileSync(png, 'x');
+  const base = { url: 'http://x.local/', frames: [{ breakpoint: 'desktop', width: 1440, image: png }], outDir: path.join(d, 'out') };
+  for (const bad of ['heading-order', [''], [3], {}]) await rejectsCode(pageQa({ ...base, qa: { a11yBlocking: bad } }), 'EINPUT');
+  assert.equal(fs.existsSync(path.join(d, 'out')), false);
+});
+
 test('initState fills site.qa.pageMismatchMax (0.12) and keeps an explicit value', () => {
   const a = tmp();
   assert.equal(initState(a, { url: 'http://a.local', path: '/x' }).site.qa.pageMismatchMax, 0.12);
@@ -228,6 +242,10 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
     // Warnings that mean the comparison itself is not trustworthy: a truncated screenshot, masks not where the content is.
     truncated: { warnings: [`desktop: ${fitScale(20000, 1).warning}`] },
     maskAnchorMissing: { warnings: ['desktop: #pb-s3 is not on the page; its masks are applied at the design position only.'] },
+    // The pattern checks and the post-navigation pass block like axe does, each on its own.
+    a11yPatterns: { a11y: { blocking: [], other: [], patterns: [{ id: 'nested-nav', impact: 'serious', nodes: [] }] } },
+    a11yNavigation: { a11y: { blocking: [], other: [], patterns: [], afterNavigation: { skipped: false, to: 'http://a.local/about/', blocking: [], patterns: [], ariaCurrent: { pass: false, missing: ['header a'], stale: [], hash: [] }, pass: false } } },
+    a11yNavigationError: { a11y: { blocking: [], other: [], patterns: [], afterNavigation: { skipped: false, error: 'proto:page-ready was not dispatched', pass: false } } },
     // A section boxed at 1920 is a block or theme defect, never a design difference.
     boxed: { wide: { name: 'wide', width: 1920, viewport: 1920, sections: [{ anchor: 'pb-s2', width: 1440, delta: -480 }], missing: [], boxed: ['pb-s2'], pass: false } },
   };
@@ -237,6 +255,8 @@ test('recordPageQa --accepted refuses anything but design differences (EACCEPT) 
     assert.deepEqual([loadState(dir).pages[0].status, loadState(dir).pages[0].pageQa], ['building', undefined], name);
   }
   assert.deepEqual(acceptBlockers(designFail(), [{ breakpoint: 'desktop' }]), []);
+  assert.deepEqual(acceptBlockers(designFail({ a11y: { blocking: [], other: [], patterns: [], afterNavigation: { skipped: true, warning: 'theme has no Taxi' } } }), [{ breakpoint: 'desktop' }]), [], 'a skipped post-navigation pass does not block');
+  assert.deepEqual(acceptBlockers(designFail(cases.a11yNavigation), [{ breakpoint: 'desktop' }]), ['aria-current="page" wrong after navigating to http://a.local/about/: missing on header a']);
   assert.deepEqual(acceptBlockers(designFail({ warnings: ['seeded note', 'desktop: section 2 (#pb-s2) has masks but no crop range in state; they are not applied to page QA (re-run intake.mjs crop to record ranges).'] }), [{ breakpoint: 'desktop' }]), [], 'other warnings do not block');
   assert.match(acceptBlockers(designFail({ warnings: [`desktop: ${fitScale(20000, 1).warning}`] }), [{ breakpoint: 'desktop' }]).join(), /truncated/);
   assert.match(acceptBlockers(designFail({ warnings: ['mobile: #pb-s9 is not on the page; its masks are applied at the design position only.'] }), [{ breakpoint: 'desktop' }]).join(), /#pb-s9/);

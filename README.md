@@ -178,9 +178,9 @@ The builder runs this pipeline:
 3. **Breakdown**: crops the design into sections and proposes a plan. **Nothing is built until you approve the plan.**
 4. **Per section**: build the block, then visual QA, then motion.
 5. **Header/footer**: moves the design's header and footer into the theme parts.
-6. **Full-page QA**: whole-page visual check plus accessibility, then the page opened in wp-admin's block editor (every block valid, rendered, editable, the post left clean).
+6. **Full-page QA**: whole-page visual check plus accessibility (axe at every design width, widget pattern checks, a check after a page transition), then the page opened in wp-admin's block editor (every block valid, rendered, editable, the post left clean).
 7. **Yoast SEO**: infers and applies SEO data, audits the rendered page, fixes failures.
-8. **Menu and more pages**: asks whether to add the page to the primary menu and whether you have other landing pages to build.
+8. **Menu and more pages**: asks whether to add the page to the primary menu and whether you have other landing pages to build; when there are none, an accessibility pass over every built page (plus the 404 page) must pass before the final report.
 
 Visual QA (screenshots, diffs, accessibility) needs its own dependencies: sharp, pixelmatch, Playwright with its Chromium build, and axe. Preflight checks them (`qa-deps`) and prints the command to install them, with the absolute path of the installed plugin; the builder shows it and asks once before the breakdown. For a marketplace install it looks like this (the plugin cache folder is versioned):
 

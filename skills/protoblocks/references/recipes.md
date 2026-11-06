@@ -42,6 +42,7 @@ Each entry gives: **fields** (editable content), **controls** (sidebar settings)
 - **Fields:** `tabs` (repeater of `{ label(text), content(wysiwyg or inner-blocks?) }`). Note: inner-blocks is one-per-block, so tab bodies are usually wysiwyg.
 - **Controls:** `orientation` (radio), `defaultTab` (number).
 - **Pattern:** repeater + Interactivity API to switch active tab (mirror `accordion`'s store).
+- **Accessibility (required):** the ARIA tabs pattern on the frontend: a `role="tablist"` holding only the `role="tab"` buttons (`aria-selected`, `aria-controls`, roving `tabindex`, arrow keys), the `role="tabpanel"` elements after it, each `aria-labelledby` its tab; never `aria-owns`, never panels between tabs. Tab+panel rows per item only under `$is_preview` (`templates.md`, "Accessibility conventions"). In the site builder, run the pattern checks: `a11y.mjs check-section <url> <anchor>` must pass (`tab-outside-tablist`, `tabpanel-unlabelled`, `tabpanel-in-tablist`).
 
 ### Call to action (CTA) / banner
 - **Fields:** `title` (text), `description` (text/wysiwyg), `link` (link).

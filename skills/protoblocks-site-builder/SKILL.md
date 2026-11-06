@@ -32,17 +32,17 @@ Shell variables do not persist between Bash commands. Start every command with `
 
 | `next.action` | Do | Load |
 |---|---|---|
-| `setup` | Ask the project name (and the theme's display name if it differs); get the first design (files or links). Run setup (fork + state, per-site block category, logo + README), install motion, intake the frames (design-breakdown Step 1), the theme screenshot (`node "$PB/lib/theme-screenshot.mjs" "$THEME" <page>`), then tokens from the frames, navigation, header/footer parts, content model (setup Step 6). On resume `why` names the missing steps. Header and footer are planned as sections of the first page. | `protoblocks-site-setup`, `protoblocks-design-breakdown` (Step 1) |
+| `setup` | Ask the project name (and the theme's display name if it differs); get the first design (files or links). Run setup (fork, state, block category, logo, README), install motion, intake the frames (design-breakdown Step 1), the theme screenshot, then tokens from the frames, navigation, header/footer parts, content model (setup Step 6). On resume `why` names the missing steps. | `protoblocks-site-setup`, `protoblocks-design-breakdown` (Step 1) |
 | `breakdown` | Segment, model, match, present the plan. It ends at the plan gate: STOP until the developer approves; `plan.mjs record` then sets the page `building`. | `protoblocks-design-breakdown` |
 | `build-page` | Approved plan, page still `planning`: set it `building` (recipe below). | - |
 | `section-build` | Build section `next.section` (also `planned`, and a reopened section of an `seo`/`done` page). First check the cap on resume. | `protoblocks-section-loop` |
 | `section-verify` | Verify it (re-run from `prepare`). | `protoblocks-section-loop` |
 | `section-animate` | Animate it; `motion.mjs record` closes it `done`. | `protoblocks-motion` |
 | `move-parts` | First page: header/footer (`next.sections`) passed as sections; move them into the template parts, then `node "$PB/lib/parts.mjs" adopt "$THEME" <page>`. | `protoblocks-section-loop` (`references/header-footer.md`) |
-| `page-qa` | `node "$PB/qa/page-qa.mjs" run "$THEME" <page>`, fix failures, `node "$PB/qa/page-qa.mjs" record "$THEME" <page> <file>` (a pass sets `seo` once editor QA passed). Design differences the developer accepts: `record ... --accepted "<note>"`. | `references/pipeline.md` |
-| `page-editor-qa` | `node "$PB/qa/editor-qa.mjs" run "$THEME" <page>` opens the page in wp-admin's block editor (as the `pb-editor-qa` admin): fix failures, then `node "$PB/qa/editor-qa.mjs" record "$THEME" <page> <file>`. With page QA passed, a pass sets the page `seo`. | `references/pipeline.md` |
+| `page-qa` | `node "$PB/qa/page-qa.mjs" run "$THEME" <page>`, fix failures, `node "$PB/qa/page-qa.mjs" record "$THEME" <page> <file>` (a pass sets `seo` once editor QA passed). A11y failures (axe, patterns, post-navigation) are never accepted. Design differences the developer accepts: `record ... --accepted "<note>"`. | `references/pipeline.md` |
+| `page-editor-qa` | `node "$PB/qa/editor-qa.mjs" run "$THEME" <page>` (the block editor, as `pb-editor-qa`): fix failures, then `node "$PB/qa/editor-qa.mjs" record "$THEME" <page> <file>`. With page QA passed, a pass sets `seo`. | `references/pipeline.md` |
 | `seo` | Yoast SEO, audit, `seo.mjs record-audit` (a pass sets the page `done`). | `protoblocks-seo` |
-| `ask-more-pages` | `why: "no pages yet"`: setup stopped before intake; intake the first design. Otherwise, for each finished page not in the menu and not declined, ask "Add <page> to the primary menu?" (yes: add `{label, page}` to the spec, `navigation.mjs upsert`; no: record the decline). Then "Any other landing pages to build?" (yes: new design, intake, then `breakdown` comes next; no: final report). | `references/pipeline.md` |
+| `ask-more-pages` | `why: "no pages yet"`: setup stopped before intake; intake the first design. Otherwise, for each finished page not in the menu and not declined, ask "Add <page> to the primary menu?" (yes: add `{label, page}` to the spec, `navigation.mjs upsert`; no: record the decline). Then "Any other landing pages to build?" (yes: new design, intake, `breakdown` next; no: first `node "$PB/qa/site-a11y.mjs" run "$THEME"`, fix failures as in page QA, re-run until it passes, then the final report). | `references/pipeline.md` |
 
 `build-page` recipe (by slug; refuses without an approved plan):
 
@@ -79,7 +79,7 @@ When the developer wants no more pages, read `node "$PB/lib/state.mjs" get "$THE
 2. Per page, a section table: `n`, label, block, status, iterations, and every `notes` entry (accepted by developer: cap, motion, page QA; skipped).
 3. SEO: point to each page's SEO table (`protoblocks-seo` Step 8), plus `organization` (`kept`: what Yoast holds) and `jsonld` outcomes.
 4. Assets cropped from the design, to replace with originals.
-5. Open warnings: a11y `minor`/`moderate` from page QA, console errors from editor QA, SEO `warn` checks, pending menu links.
+5. Open warnings: "site a11y pass: passed", each page's remaining a11y `other` items (`site-a11y.json`), console errors from editor QA, SEO `warn` checks, pending menu links.
 6. Theme fork history: `git -C "$THEME" log --oneline`.
 7. Content model: `"$WP" proto-blocks type list`, `options list`.
 
@@ -90,7 +90,7 @@ When the developer wants no more pages, read `node "$PB/lib/state.mjs" get "$THE
 - Never overwrite a theme fork, a page, menu or SEO value edited in wp-admin, or a template-part DB override without explicit confirmation.
 - Never run write commands against a site other than the one preflight resolved.
 - Never build before the plan is approved; never approve it, or accept differences, for the developer.
-- Never lower QA thresholds (`site.qa`); only the developer may.
+- Never lower QA thresholds (`site.qa`, `a11yBlocking` included); only the developer may.
 - Never run a guarded action on the strength of an instruction given before you showed its refusal or preview: approval must come AFTER you have shown it (see Questions).
 
 ## References

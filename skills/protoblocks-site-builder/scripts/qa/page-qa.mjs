@@ -4,14 +4,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadState, updateState, stateDir } from '../lib/state.mjs';
 import { editorQaPassed } from '../lib/status.mjs';
+import { a11yForPage, a11yBlockers, blockingRulesFrom } from './a11y.mjs';
 
-// Axe nodes count only when they sit in page content: main/header/footer or a section anchor (#pb-s…). Tag names are
-// matched as whole compound-selector heads so ".domain a", "#footer-widget a" and ".site-header a" do not qualify.
-const TAG_SCOPE = /(?:^|[\s>+~(])(?:main|header|footer)(?![\w-])/;
-const ANCHOR_SCOPE = /#pb-s/;
-// Document-level rules (html-has-lang, document-title, meta-viewport...) report the root elements themselves.
-const DOCUMENT_SCOPE = /^(?:html|body)$/;
-const BLOCKING = ['serious', 'critical'];
+// Re-exported: callers imported it from here before the axe code moved to a11y.mjs.
+export { filterViolations } from './a11y.mjs';
+
 // Chromium cannot paint a surface much taller than 16384 device px; stay below it.
 const MAX_SURFACE_PX = 16000;
 const SAFE_NAME = /^[A-Za-z0-9_-]+$/;
@@ -24,14 +21,6 @@ const inputError = (message) => Object.assign(new Error(message), { code: 'EINPU
 const pageError = (message) => Object.assign(new Error(message), { code: 'ENOPAGE' });
 const statusError = (message) => Object.assign(new Error(message), { code: 'ESTATUS' });
 const acceptError = (message) => Object.assign(new Error(message), { code: 'EACCEPT' });
-
-export function filterViolations(violations) {
-  // pageQa resolves each node in the page and sets node.inScope; the selector-string match is the fallback for nodes it
-  // could not resolve (iframe/shadow targets) and for results that were not produced in a page.
-  const inScope = (node) => (typeof node?.inScope === 'boolean' ? node.inScope : [].concat(node?.target ?? []).flat(Infinity).some((t) => DOCUMENT_SCOPE.test(String(t)) || TAG_SCOPE.test(String(t)) || ANCHOR_SCOPE.test(String(t))));
-  const kept = (violations ?? []).map((v) => ({ ...v, nodes: (v.nodes ?? []).filter(inScope) })).filter((v) => v.nodes.length);
-  return { blocking: kept.filter((v) => BLOCKING.includes(v.impact)), other: kept.filter((v) => !BLOCKING.includes(v.impact)) };
-}
 
 // Largest integer scale >= 1 (never above the requested one) whose surface fits; scale 1 is used with a warning when even that is too tall.
 export function fitScale(cssHeight, scale) {
@@ -115,6 +104,7 @@ export function renderMasks(sectionMasks = [], tops = {}, pxPerCss = 1) {
 
 export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings = [], anchors = [], wide = WIDE_CHECK }) {
   validateInput({ url, frames, outDir });
+  const blockingRules = blockingRulesFrom(qa);
   outDir = path.resolve(outDir);
   const pageMismatchMax = qa.pageMismatchMax ?? 0.12;
   const heightDeltaMax = qa.heightDeltaMax ?? 0.03;
@@ -166,27 +156,18 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
       const boxed = w.sections.filter((s) => Math.abs(s.delta) > 1).map((s) => s.anchor);
       result.wide = { name: wide.name, width: wide.width, viewport: w.viewport, sections: w.sections, missing: w.missing, boxed, pass: boxed.length === 0 };
     }
-    try {
-      const { default: AxeBuilder } = await import('@axe-core/playwright');
-      const { page, context, errors } = await openPage(b, { url, width: frames[0].width });
-      try {
-        const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
-        // axe targets are the shortest unique selector (just "img"), so resolve the real DOM position of every node.
-        const flags = await page.evaluate((groups) => groups.map((targets) => targets.map((t) => {
-          if (!Array.isArray(t) || t.length !== 1 || typeof t[0] !== 'string') return null;
-          try { const el = document.querySelector(t[0]); return el ? el === document.documentElement || el === document.body || !!el.closest('main, header, footer, [id^="pb-s"]') : null; } catch { return null; }
-        })), results.violations.map((v) => v.nodes.map((n) => n.target)));
-        results.violations.forEach((v, i) => v.nodes.forEach((n, j) => { if (flags[i][j] !== null) n.inScope = flags[i][j]; }));
-        result.a11y = filterViolations(results.violations);
-        result.pageErrors.push(...errors.page);
-      } finally { await context.close().catch(() => {}); }
-    } catch (e) {
-      result.a11y = { blocking: [], other: [], error: String(e?.message ?? e) };
-      result.pageErrors.push(...(e?.pageErrors ?? []));
-    }
+    // axe at every frame width (mobile exposes the menu, overlays and target sizes), the pattern checks, and the
+    // post-navigation pass; a11yForPage records an axe failure as a11y.error instead of throwing.
+    const seen = new Set();
+    const widths = frames.filter((f) => !seen.has(f.width) && seen.add(f.width)).map((f) => ({ name: f.breakpoint, width: f.width }));
+    const diagnostics = { pageErrors: [] };
+    result.a11y = await a11yForPage({ browser: b, openPage, url, widths, blockingRules, diagnostics });
+    result.pageErrors.push(...diagnostics.pageErrors);
+    if (result.a11y.afterNavigation?.skipped && result.a11y.afterNavigation.warning) result.warnings.push(result.a11y.afterNavigation.warning);
     result.pass = result.breakpoints.length === frames.length && result.breakpoints.every((x) => x.pass)
       && (!wide || result.wide?.pass === true)
-      && result.a11y.error === undefined && result.a11y.blocking.length === 0 && result.pageErrors.length === 0;
+      && result.a11y.error === undefined && result.a11y.blocking.length === 0 && (result.a11y.patterns ?? []).length === 0
+      && result.a11y.afterNavigation?.pass !== false && result.pageErrors.length === 0;
   } catch (e) {
     result.pass = false;
     result.error = String(e?.message ?? e);
@@ -200,14 +181,14 @@ export async function pageQa({ url, frames, qa = {}, outDir, browser, warnings =
 
 /**
  * Why a failing page-QA result cannot be accepted by the developer: only design differences (a breakpoint over the
- * mismatch or height threshold) can be; errors, a11y, broken media, HTTP errors, full masks, missing breakpoints, a
- * truncated screenshot, masks whose anchor is not on the page and a boxed section in the wide pass cannot.
+ * mismatch or height threshold) can be; errors, a11y (axe, pattern checks, the post-navigation pass), broken media,
+ * HTTP errors, full masks, missing breakpoints, a truncated screenshot, masks whose anchor is not on the page and a
+ * boxed section in the wide pass cannot.
  */
 export function acceptBlockers(r, frames = []) {
   const out = [];
   if (r.error !== undefined) out.push(`the run failed: ${r.error}`);
-  if (r.a11y?.error !== undefined) out.push(`axe did not run: ${r.a11y.error}`);
-  if ((r.a11y?.blocking ?? []).length) out.push(`blocking a11y violations: ${r.a11y.blocking.map((v) => v.id).join(', ')}`);
+  out.push(...a11yBlockers(r.a11y));
   if ((r.pageErrors ?? []).length) out.push(`page errors: ${r.pageErrors.length}`);
   for (const w of r.warnings ?? []) {
     if (TRUNCATED_WARNING.test(w)) out.push(`the screenshot may be truncated (${w}): shorten the page or compare it in parts`);
