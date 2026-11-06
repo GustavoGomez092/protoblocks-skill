@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.6.0
+
+Accessibility verification, from a client WCAG scan of a finished build (nested navs, small footer landmarks, heading order, 8px carousel dots, `aria-owns` tabs, href-less dropdown parents, stale `aria-current`, `role="img"` on a wrapper).
+
+- New `scripts/qa/a11y.mjs`: the axe routine shared by page QA and the site pass (tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22a`, `wcag22aa`, `best-practice`; the moderate rules `landmark-unique`, `landmark-no-duplicate-main`, `landmark-main-is-top-level`, `heading-order`, `region` block alongside serious/critical; a `region` node on `#wp-skip-link` is info, never blocking), the pattern checks (`tab-outside-tablist`, `tabpanel-unlabelled`, `tabpanel-in-tablist`, `anchor-without-href`, `role-img-misplaced`, `multiple-main`, `nested-nav`, `nav-too-few-links`, `heading-skip`) and `node a11y.mjs check-section <url> <anchor> [--width N]` (axe and patterns scoped to one section anchor).
+- `page-qa.mjs`: axe runs at every design frame width and merges by rule id + target; the pattern checks and a post-navigation pass (click a header link, wait for `proto:page-ready` or `load`, re-run axe and the patterns, check `aria-current="page"`; skipped with a warning when the theme has no Taxi) block the page. New `a11y.byViewport`, `a11y.patterns`, `a11y.afterNavigation`, `a11y.tagsUsed`; `record --accepted` refuses (`[EACCEPT]`) while any of them blocks.
+- New `scripts/qa/site-a11y.mjs run <themeDir> [--out file]`: the same routine over every built page plus a 404 probe; prints `{pages, pass, file}`, saves `artifacts/site-a11y.json`, exits 1 unless every page passes.
+- State: `site.qa.a11yBlocking` (optional array of axe rule ids) replaces the built-in moderate blocking list; serious/critical always block; only the developer sets it (`references/state-schema.md`).
+- `protoblocks-site-builder`: `ask-more-pages` runs the site pass before the final report and re-runs it until it passes (failures are fixed like page-QA content failures); the final report lists each page's remaining `other` items and the site pass result; `references/pipeline.md` documents the `a11y` output, the blocking rules, the pattern ids, the post-navigation pass and a fix for each failure kind; the thresholds rule covers `a11yBlocking`.
+- `protoblocks-section-loop`: Verify runs `a11y.mjs check-section` after a passing visual verdict; it must pass before Animate (`references/verify.md`).
+- `protoblocks` `references/templates.md`: "Accessibility conventions" (one landmark per role per region, one footer `<nav>` with inner core navs demoted to `role="group"` by a `render_block_core/navigation` filter, heading levels per region, the ARIA tabs pattern, `role="img"` on the SVG, no href-less anchors, 24px targets, `aria-current` left to the theme's `syncNavState`). `references/recipes.md` Tabs: the ARIA tabs requirement and the pattern checks.
+
 ## 2.5.0
 
 Redirects and scripts (Proto-Blocks 2.16.0+). Docs only.

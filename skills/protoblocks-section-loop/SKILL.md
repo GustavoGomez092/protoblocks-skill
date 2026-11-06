@@ -57,12 +57,12 @@ Details and checklist: `references/build.md`.
 
 ## Verify
 
-Procedure, result fields and fix strategies: `references/verify.md`.
+Procedure, fields, fixes: `references/verify.md`.
 
 1. `node "$PB/lib/qa-input.mjs" prepare "$THEME" <page> <n>` prints `{input, iteration}` and sets status `verifying` (refuses `planned`/`skipped`: build first).
-2. Dispatch the `protoblocks-skill:visual-qa` subagent (Agent tool, subagent type `protoblocks-skill:visual-qa`) with the prompt `CheckInput: <input path>`. It needs a Bash timeout of 600000 (set in the agent). Elsewhere: run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the composites with the same rubric.
+2. Dispatch the `protoblocks-skill:visual-qa` subagent (Agent tool, subagent type `protoblocks-skill:visual-qa`) with the prompt `CheckInput: <input path>`. Elsewhere: run `node "$PB/qa/check-section.mjs" <input>` yourself and judge the composites with the same rubric.
 3. `node "$PB/lib/qa-input.mjs" record "$THEME" <page> <n> <iterDir>/verdict.json` prints `{pass, iteration, capReached, status}`.
-4. `pass: true`: status is now `animating` (go to Animate), or `done` again for a section that was `done` before this re-verification (next section).
+4. `pass: true`: status is now `animating`, or `done` again for a re-verified section. Before Animate (or the next section) the a11y check must pass (page `url`, section `anchor`): `node "$PB/qa/a11y.mjs" check-section <url> <anchor>`. Failures are build fixes (`templates.md` "Accessibility conventions" in `protoblocks`); then gates, page build, Verify again.
 5. `pass: false`: apply the verdict's fixes, highest severity first, re-run gates and page build. If you edited a block whose `usedOn` lists other pages, run `node "$PB/lib/regress.mjs" "$THEME" <block>` and fix until it passes, before re-verifying. Then Verify again. An error verdict (`error` set) stays `verifying`, does not count as an iteration, and means fix the environment and re-run.
 6. `capReached: true` (also stored on that iteration's `qa` records, so check it on resume): stop and ask the developer before another iteration, never continue silently (see `references/verify.md`, "Iteration cap"). Their options: accept with notes, give guidance and continue, or skip the section.
 

@@ -155,16 +155,16 @@ node "$PB/qa/editor-qa.mjs" record "$THEME" --parts "$THEME/.protoblocks/artifac
 
 ### `page-qa`
 
-1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, a `wide` pass at 1920px in which every section must span the viewport, axe on `wcag2a, wcag2aa, wcag21a, wcag21aa`):
+1. Run full-page QA (Playwright, reduced motion, each design frame vs a full-page screenshot, a `wide` pass at 1920px in which every section must span the viewport, and the accessibility pass below: axe at every design frame width, the pattern checks, a post-navigation pass):
 
 ```bash
 node "$PB/qa/page-qa.mjs" run "$THEME" <page>
 ```
 
-   Prints `{url, pass, breakpoints: [{name, status, mismatch, heightDelta, fullyMasked, masksApplied, masks, imageErrors, composite, pass}], wide: {width, viewport, sections, boxed, pass}, a11y: {blocking, other}, pageErrors, warnings, file}` and exits 1 unless `pass`. `wide.boxed` lists the sections narrower (or wider) than the 1920px viewport: the page fails. Section masks (`sections[j].masks.<bp>`) are applied at the design position (via the crop range `sections[j].ranges.<bp>`) and at the position the section renders; a section with masks but no range is listed in `warnings` (re-crop it to record the range). The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). Only `serious`/`critical` axe violations inside `main`, `header`, `footer` or a `#pb-s…` section block the page; `minor`/`moderate` go into the final report. `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
+   Prints `{url, pass, breakpoints: [{name, status, mismatch, heightDelta, fullyMasked, masksApplied, masks, imageErrors, composite, pass}], wide: {width, viewport, sections, boxed, pass}, a11y: {blocking, other, byViewport, patterns, afterNavigation, tagsUsed}, pageErrors, warnings, file}` and exits 1 unless `pass`. `wide.boxed` lists the sections narrower (or wider) than the 1920px viewport: the page fails. Section masks (`sections[j].masks.<bp>`) are applied at the design position (via the crop range `sections[j].ranges.<bp>`) and at the position the section renders; a section with masks but no range is listed in `warnings` (re-crop it to record the range). The result is saved to `$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json`. A breakpoint passes at `mismatch <= site.qa.pageMismatchMax` (0.12) and `heightDelta <= site.qa.heightDeltaMax` (0.03). `pass` also requires `a11y.blocking` and `a11y.patterns` empty and `a11y.afterNavigation.pass` not `false` ("Accessibility" below). `[ENOPAGE]` "has no url": the page was never built (`page.mjs build`). `[EINPUT]` "at least one design frame": intake first.
 2. Fix failures:
    - Design difference: open the `composite` images, find the responsible section, fix it with `protoblocks-section-loop` (Build fix, gates, `page.mjs build`), then `qa-input.mjs prepare` for that section. Status now routes to `section-verify`; a pass returns it to `done` and page QA comes up again.
-   - Blocking a11y violation: fix the block markup or colors (tokens), rebuild, re-verify every section whose markup changed.
+   - `a11y.blocking` / `a11y.patterns` / `a11y.afterNavigation`: fix per "Fixing a11y failures" below, rebuild, `qa-input.mjs prepare` every section whose markup changed.
    - `wide.boxed`: those bands do not span the viewport at 1920 (a `max-width` on the band, or a theme rule the fork added; `pb-shell.css` already uncaps `main`): fix the block, rebuild, `qa-input.mjs prepare` that section (its `wide` breakpoint fails the same way).
    - `imageErrors` / `pageErrors`: broken media or console errors; fix them, rebuild.
    - `a11y.error`: axe could not run (QA deps, see Recovery).
@@ -181,7 +181,61 @@ node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/
 node "$PB/qa/page-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifacts/<page>/page-qa/page-qa.json" --accepted "<what they accepted>"
 ```
 
-   Prints `{pass: false, accepted: true, status}` (`seo` once editor QA passed, else `building`); writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, a boxed section in the wide pass, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+   Prints `{pass: false, accepted: true, status}` (`seo` once editor QA passed, else `building`); writes `pageQa: {pass: false, accepted: true, note, by: "developer", file, at}` and `page.notes.pageQa`. A real pass ignores `--accepted`. `[EACCEPT]`: something other than a design difference failed (axe error or blocking violation, a pattern check, the post-navigation pass: its blocking violations, patterns or `ariaCurrent`; page errors, broken images, HTTP error, fully masked or missing breakpoint, a truncated screenshot, masks whose anchor is not on the page, a boxed section in the wide pass, run error): fix it, re-run. `[ESTATUS]`: the page is not `building` or a section is still open. `[EINPUT]`: the file is for another url (re-run `run`), or `--accepted` has no note.
+
+#### Accessibility (`a11y`)
+
+Axe runs with the tags `wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22a, wcag22aa, best-practice` (echoed in `a11y.tagsUsed`) once per design frame width (every `frames[].width` of the page, deduped: desktop and the narrowest mobile frame at least; mobile exposes the responsive menu, overlay dialogs and `target-size`). Results are merged by rule id + first target: a merged violation lists the frames it failed at in `viewports`. Only nodes inside `main`, `header`, `footer` or a `#pb-s…` section count.
+
+What blocks (`a11y.blocking`):
+
+- every `serious` or `critical` violation;
+- these `moderate` rules: `landmark-unique`, `landmark-no-duplicate-main`, `landmark-main-is-top-level`, `heading-order`, `region`. `site.qa.a11yBlocking` (an array of rule ids, set only by the developer) replaces this list; `serious`/`critical` always block;
+- exception: a `region` node on WordPress core's skip link (`#wp-skip-link`) is moved to `other` with `impact: "info"`, never blocking.
+
+Everything else (`minor`, other `moderate`) goes to `a11y.other` and the final report.
+
+```json
+"a11y": {
+  "blocking": [ { "id": "landmark-unique", "impact": "moderate", "help": "…", "helpUrl": "…", "tags": ["best-practice"], "viewports": ["desktop","mobile"], "nodes": [{ "target": ["header nav nav"], "html": "<nav aria-label=\"Primary\">…", "inScope": true }] } ],
+  "other":    [ { "id": "region", "impact": "info", "...": "the #wp-skip-link node only" } ],
+  "byViewport": [ { "name": "desktop", "width": 1440, "blocking": ["landmark-unique"], "other": ["region"] } ],
+  "patterns": [ { "id": "nested-nav", "impact": "serious", "help": "…", "helpUrl": null, "nodes": [{ "target": ["header nav nav"], "html": "…" }] } ],
+  "afterNavigation": { "skipped": false, "from": "http://…/", "to": "http://…/about/", "blocking": [], "other": [], "patterns": [], "ariaCurrent": { "pass": true, "missing": [], "stale": [], "hash": [] }, "pass": true },
+  "tagsUsed": ["wcag2a","wcag2aa","wcag21a","wcag21aa","wcag22a","wcag22aa","best-practice"],
+  "error": "only when axe could not run"
+}
+```
+
+Each violation keeps axe's `id`, `impact`, `help`, `helpUrl` and up to 5 `nodes` (`target`, `html` cut to 120 characters).
+
+`a11y.patterns`: custom widget checks axe misses, run once at the first frame width on the whole document (header and footer parts included, the admin bar excluded). Every item blocks (`impact: "serious"`, `helpUrl: null`):
+
+| `id` | Fails when |
+|---|---|
+| `tab-outside-tablist` | a `[role=tab]` is not inside a `[role=tablist]` (`aria-owns` does not count) |
+| `tabpanel-unlabelled` | a `[role=tabpanel]` has no `aria-labelledby` pointing at an existing `[role=tab]` |
+| `tabpanel-in-tablist` | a `[role=tabpanel]` sits inside the `[role=tablist]` |
+| `anchor-without-href` | an `<a>` has no `href` (allowed only with `role="button"` and `tabindex="0"`) |
+| `role-img-misplaced` | `role="img"` on anything but `svg`/`img`/`canvas`, on an element with child elements, or without an accessible name |
+| `multiple-main` | more than one `<main>` / `[role=main]` |
+| `nested-nav` | a `<nav>` / `[role=navigation]` inside another |
+| `nav-too-few-links` | a navigation landmark with fewer than 2 `<a href>` (links in a `role=group` wrapper inside it count) |
+| `heading-skip` | a heading more than one level deeper than the previous one in document order; `nodes` are the two headings |
+
+`a11y.afterNavigation`: from the page under test (first frame width), it clicks the first `<header>` link that is same-origin, points to another path (trailing slash ignored) and is not hash-only, `mailto:`, `tel:` or a download, waits for the theme's `proto:page-ready` event (Taxi; plain `load` when the document has no `[data-taxi]`), then runs axe, the pattern checks and the `aria-current` check on the new page: every header/footer `<a href>` without a hash whose pathname equals the new location must carry `aria-current="page"` (else `missing`), no other header/footer link may (`stale`), and no link with a hash in its `href` may (`hash`). `pass` = no blocking, no patterns, `ariaCurrent.pass`. With no Taxi in the theme (`[data-taxi]` absent) or no header link to another page it is `{"skipped": true, "warning": "…"}` (also in `warnings`): a skip never fails the page.
+
+#### Fixing a11y failures
+
+Fix the block (the `protoblocks` skill, `references/templates.md` "Accessibility conventions"), never the check:
+
+- `landmark-unique`, `nested-nav`, `nav-too-few-links`, `region`: one landmark per role per region; header/footer blocks use `div` wrappers around core's navigation; footer menus go in one `<nav aria-label="Footer">` with the inner core navs demoted to `role="group"` (the filter in templates.md).
+- `heading-order`, `heading-skip`: heading levels per region (one `h1` in `main`, `h2` section titles, footer column titles `h2` or a styled `<p>`).
+- `target-size`: 24px hit area (a pseudo-element around small dots).
+- `tab-outside-tablist`, `tabpanel-*`: the ARIA tabs pattern (`protoblocks` `references/recipes.md`, Tabs).
+- `anchor-without-href`: link the parent or render a `<button>`. `role-img-misplaced`: `role="img"` and the label on the `<svg>` itself.
+- `multiple-main`, `landmark-no-duplicate-main`, `landmark-main-is-top-level`: a block printed `<main>`; the theme template owns it.
+- `afterNavigation.ariaCurrent`: the theme sets `aria-current` (`proto-taxi.js` `syncNavState`); remove any `aria-current` a template prints, and see templates.md for links outside core navigation.
 
 ### `page-editor-qa`
 
@@ -258,7 +312,16 @@ node "$PB/lib/navigation.mjs" upsert "$THEME" primary "$THEME/.protoblocks/menu-
 ```
 
    `upsert` updates `site.navigation.menus.primary` (`id`, `spec`, `pending`, `contentHash`). `[EEDITED]`: see Recovery. `pending` links are converted by `page.mjs build` or `node "$PB/lib/navigation.mjs" refresh "$THEME"` once the page is published.
-2. Ask "Any other landing pages to build?". Yes: get the design, intake it (`intake.mjs add-frame` with the new slug creates the page in `planning`); status then says `breakdown` for it. The library and the shared header/footer parts are reused (`reuse`, `inPart`). No: write the final report (`SKILL.md`).
+2. Ask "Any other landing pages to build?". Yes: get the design, intake it (`intake.mjs add-frame` with the new slug creates the page in `planning`); status then says `breakdown` for it. The library and the shared header/footer parts are reused (`reuse`, `inPart`). No: run the site accessibility pass (step 3) first, then write the final report (`SKILL.md`).
+3. Site accessibility pass (before the final report, every time the developer says there are no more pages):
+
+```bash
+node "$PB/qa/site-a11y.mjs" run "$THEME"
+```
+
+   It runs the page-QA accessibility routine (axe at every frame width, the pattern checks, the post-navigation pass; "Accessibility" under `page-qa`) on every page in state that has a `url`, plus a 404 probe `<site.url>/__pb-404-probe__` (slug `__404__`, which must answer HTTP 404 and still pass). Widths: the union of every page's design frame widths (1440 and 390 when there are none); `site.qa.a11yBlocking` applies. Prints `{pages: [{slug, url, status, blocking, other, patterns, afterNavigation, pass}], pass, file}` (`status` is the HTTP status), saves it to `$THEME/.protoblocks/artifacts/site-a11y.json` (or `--out <file>`) and exits 1 unless `pass` (every page passes). `[ENOTHEME]` / `[EINPUT]`: as for the other scripts.
+
+   A failing page is fixed exactly like a page-QA content failure: "Fixing a11y failures" under `page-qa` names the fix; make it through the section loop for the section that renders the node (Build fix, gates, `page.mjs build`, `qa-input.mjs prepare`), and status routes that page through `section-verify` again. A failure in the header or footer is fixed in the block and its part (`protoblocks-section-loop` `references/header-footer.md`, step 7) and holds for every page; on the 404 probe it is usually the header, footer or the theme's `404` template. Then re-run the site pass until `pass: true`. Only then write the final report; it says the site pass passed and lists each page's remaining `other` items.
 
 ## Recovery
 
@@ -287,7 +350,7 @@ Preflight fails the `site` check ("Start the site in Local") or WP-CLI reports `
 
 ### QA dependencies missing
 
-Preflight warns on `playwright`, or a QA script fails to import `playwright` / `@axe-core/playwright` / `sharp` / `pixelmatch` (page QA then reports `a11y.error`). Install them once:
+Preflight warns on `playwright`, or a QA script fails to import `playwright` / `@axe-core/playwright` / `sharp` / `pixelmatch` (page QA then reports `a11y.error`; `a11y.mjs check-section` and `site-a11y.mjs run` need the same packages). Install them once:
 
 ```bash
 cd "$PB/qa" && npm install && npx playwright install chromium
