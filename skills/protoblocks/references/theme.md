@@ -46,14 +46,20 @@ Same-origin links swap `<main>` in place; header, footer, Lenis and the intro ov
 ```
 Template parts stay outside. Plugin-supplied templates (e.g. WooCommerce product pages) lack the wrapper: override them or add the URLs to `proto_taxi_ignore_urls`.
 
-**Block scripts:**
-- `view.js` enqueued with a handle starting `proto-blocks-` is stamped `data-taxi-reload` and **re-runs automatically** on every navigation. Plain IIFE blocks need no changes.
+**Scripts after a swap** (theme 1.6.0+, `docs/script-reloading.md` upstream): nothing in the fetched page runs unless its tag carries `data-taxi-reload`. The theme's loader (`scripts/proto-taxi.js` `reloadScripts()`, Taxi's own loader is off) re-runs the marked tags in document order: files fetched in parallel (preload hints the moment the HTML arrives, prefetch on hover) and executed in order, an inline script after every file printed before it; the new view stays `inert` and hidden until they settled (4 s cap). Two modes:
+- `data-taxi-reload` = **rerun** on every navigation: a block's `view.js` (handle `proto-blocks-{name}`, stamped by default; plain IIFEs need no change but must be idempotent: bind `document` listeners once behind a flag, clean up on `proto:page-leave`). Inline tags (localized data, a nonce, per-form init) always re-run.
+- `data-taxi-reload="once"` = **once**: loaded when the document does not hold it yet, then kept (jQuery, a form plugin's runtime). Matched by the `{handle}-js` id; the same id with another `src` (a deploy changed the file) loads the page in full.
+- Opt a plugin in with `proto_taxi_reload_rules` (handle or prefix, `mode`, `deps` walks the dependency chain; conflicts resolve to once; `jquery*`/`wp-polyfill` are never rerun). Raw inline tags a plugin prints go through the plugin's own output filter, a comparison with its source in `wp_inline_script_attributes`, or (last resort) `proto_taxi_reload_inline_patterns`; shortcode output through `do_shortcode_tag`. Only first-party/functional scripts get rules: clones are marked `data-cookieconsent="ignore"` unless the tag they replace was consent-blocked, which stays blocked.
+- Gravity Forms works out of the box (`inc/proto-gravity-forms.php`: `gform_` once with deps, its own filters stamp the per-form scripts, a `gform.domLoaded` shim, namespaced `gform_post_render` handlers). Use it as the template for another plugin.
 - `viewScriptModule` / Interactivity API modules do **NOT** re-run (ES modules evaluate once per URL; core Interactivity blocks like the image lightbox also go inert after a swap). Use the events below, or add the route to `proto_taxi_ignore_urls`.
 
-**Events** (dispatched on `document`):
+**Events** (dispatched on `document`, both with `{ container, url }`):
 ```js
+document.addEventListener('proto:scripts-ready', (e) => {
+  // the new page's marked scripts have executed (not on initial load)
+});
 document.addEventListener('proto:page-ready', (e) => {
-  // fires on initial load AND after every navigation
+  // fires on initial load AND after every navigation, after scripts-ready
   init(e.detail.container); // the [data-taxi-view] element; e.detail.url = new page URL
 });
 document.addEventListener('proto:page-leave', (e) => {
@@ -71,8 +77,11 @@ The theme itself kills ScrollTriggers whose trigger lived inside the leaving con
 | Filter | Purpose |
 |---|---|
 | `proto_taxi_enabled` | Master switch (always false in wp-admin and JSON requests). |
-| `proto_taxi_reload_handles` | Extra script handles (beyond `proto-blocks-` prefix) to mark `data-taxi-reload`. |
-| `proto_taxi_denied_handles` | Handles never re-run (theme runtime scripts by default); wins over the prefix. |
+| `proto_taxi_reload_rules` | Script reload rules: `['prefix' => 'gform_', 'mode' => 'once', 'deps' => true]` or `['handle' => …]`; mode `rerun` (default) or `once`. |
+| `proto_taxi_reload_handles` | Legacy: extra handles re-run every navigation (a `rerun` rule without deps). |
+| `proto_taxi_reload_inline_patterns` | Substrings marking inline scripts printed via `wp_get_inline_script_tag` for re-run (last resort). |
+| `proto_taxi_once_only_handles` | Never rerun whatever rule reaches them (`jquery`, `jquery-core`, `jquery-migrate`, `wp-polyfill`). |
+| `proto_taxi_denied_handles` | Handles never re-run (theme runtime scripts by default); wins over every rule. |
 | `proto_taxi_ignore_urls` | URLs whose links get `data-taxi-ignore` (WooCommerce cart/checkout/account/shop by default). |
 
 Known behaviour: Back/Forward pressed during the ~0.9s fade is dropped (stock Taxi, `allowInterruption: false`). Do not enable `allowInterruption`.
