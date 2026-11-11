@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.6.1
+
+Scripts after a Taxi swap (proto-blocks-theme 1.6.0). Docs only.
+
+- `protoblocks` `references/theme.md`: the theme's script reloading contract replaces "Taxi's default `reloadJsFilter`": tags carry `data-taxi-reload` (rerun every navigation: block `view.js`, inline data and init) or `data-taxi-reload="once"` (libraries such as jQuery or a form runtime, matched by `{handle}-js` id, a changed version loads the page in full); the loader runs them in document order (files in parallel, executed in order, inline after the files before it), keeps the new view `inert` and hidden until they settled, and fires `proto:scripts-ready` before `proto:page-ready`. New filters `proto_taxi_reload_rules` (handle or prefix, `mode`, `deps`; conflicts resolve to once), `proto_taxi_reload_inline_patterns` (last resort), `proto_taxi_once_only_handles`. How to opt a plugin in (its own output filter, a comparison with its source in `wp_inline_script_attributes`, `do_shortcode_tag` for shortcode output), the consent policy (only first-party scripts get rules; a consent-blocked tag stays blocked), and Gravity Forms as the shipped example (`inc/proto-gravity-forms.php`). Block `view.js` must be idempotent (bind `document` listeners once, clean up on `proto:page-leave`).
+
 ## 2.6.0
 
 Accessibility verification, from a client WCAG scan of a finished build (nested navs, small footer landmarks, heading order, 8px carousel dots, `aria-owns` tabs, href-less dropdown parents, stale `aria-current`, `role="img"` on a wrapper).
