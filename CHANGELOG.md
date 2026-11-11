@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0
+
+The custom 404 page is a mandatory step of every build.
+
+- `protoblocks-site-builder`: new action `not-found`, routed by `status.mjs` once the first page in state (the one carrying the header and footer) is `seo` or `done` with no open section and `site.notFound.check.pass` is not recorded, so the 404 page is built right after the first page's design and QA steps and before its SEO. Old builds without a 404 page get it on resume.
+- New `scripts/lib/not-found.mjs`: `write <themeDir> <content.html> [--force]` wraps block markup in the theme's page shell (header part, Taxi wrapper, full-width `<main>`, footer part) as `templates/404.html` and records `site.notFound` (`[EEDITED]` for a template it did not write); `check <themeDir> [--out file]` loads `<site.url>/__pb-404-probe__` at the site's widths, screenshots each viewport to `artifacts/404/` and verifies HTTP 404, `body.error404`, the Taxi view, one `<main>`, an `h1`, a link back to Home, no page errors or broken images; `record <themeDir> <check.json> --approved` stores the check only after the developer approved the screenshots (`[EAPPROVAL]`, `[ECHECK]`, `[ESTALE]`, `[ESTATUS]`).
+- `references/pipeline.md`: the `not-found` section (what the page must hold, the commands, errors), the status row and the `site.notFound` transitions; `references/state-schema.md`: `site.notFound`; `SKILL.md`: the action row, the approval question, the iron rule and the final report line.
+
 ## 2.6.1
 
 Scripts after a Taxi swap (proto-blocks-theme 1.6.0). Docs only.

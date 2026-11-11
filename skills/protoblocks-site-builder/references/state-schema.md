@@ -27,7 +27,8 @@ Required: `schemaVersion` (1), `site.url`, `site.path`, `library`, `pages`; each
     "motionProfile": { "name": "subtle", "duration": 0.7, "ease": "power2.out", "stagger": 0.08 },
     "qa": { "mismatchMax": 0.08, "pageMismatchMax": 0.12, "heightDeltaMax": 0.03, "maxIterations": 5, "motionMaxAttempts": 3 },
     "navigation": { "menus": { "primary": { "id": 123, "spec": { "title": "Primary", "items": […] }, "pending": [{ "label": "Pricing", "page": "pricing" }], "contentHash": "<sha256>" } } },
-    "parts": { "header": { "block": "site-header", "writtenAt": "<ISO>" }, "footer": { … } }
+    "parts": { "header": { "block": "site-header", "writtenAt": "<ISO>" }, "footer": { … } },
+    "notFound": { "template": "templates/404.html", "block": "not-found", "contentHash": "<sha256>", "writtenAt": "<ISO>", "check": { "pass": true, "file": "…/artifacts/404/check.json", "at": "<ISO>", "approvedBy": "developer" } }
   },
   "library": {
     "media-text": { "purpose": "…", "fields": […], "controls": […], "variants": ["imagePosition"], "usedOn": ["home", "about"], "baseline": "artifacts/…png" }
@@ -78,6 +79,10 @@ A design without navigation records `site.navigation = { "menus": {}, "none": tr
 ## `site.parts.<slug>`
 
 Written by `parts.mjs write` every time it writes `$THEME/parts/<slug>.html`: `{ "block": "<outermost block, without the proto-blocks/ namespace>", "writtenAt": "<ISO timestamp>" }` (`block` is left out when the markup has no block). `status.mjs` treats setup as unfinished until `site.theme.screenshot`, `site.tokens`, a menu in `site.navigation.menus` (or `site.navigation.none: true`) and `site.parts.header` exist; the header also counts once a page's `pb-header` section is `inPart`.
+
+## `site.notFound`
+
+The custom 404 page (`not-found.mjs`, the `not-found` action). Written by `write`: `template` (`templates/404.html`), `block` (the outermost block of the content, without the `proto-blocks/` namespace; absent when the markup has no block), `contentHash` (sha256 of the template file as written; `write` refuses with `[EEDITED]` when the file on disk no longer matches, unless `--force`) and `writtenAt`. `check` is written by `record --approved` from a passing `check` result made after `writtenAt`: `{ pass: true, file, at, approvedBy: "developer" }`; `write` removes it. `status.mjs` routes `not-found` once the first page is `seo`/`done` with no open section until `check.pass` is `true`, and `summarize` reports `site.notFound` as `missing`, `written` or `verified`.
 
 `site.url` must equal the URL of the site the tools run against; otherwise setup and the tokens/navigation/parts CLIs refuse with `[EWRONGSITE]` (the state belongs to another site).
 

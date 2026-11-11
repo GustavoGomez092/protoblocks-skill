@@ -13,7 +13,7 @@ node "$PB/lib/status.mjs" "$THEME"
 
 `--root` scans `<publicPath>/wp-content/themes/*/.protoblocks/build.json`: one match prints `themeDir` (use it as `THEME`) plus the summary; none prints `{"themeDir": null, "next": {"action": "setup"}}`; several print `{"themes": [{themeDir, url, pages}], "next": null}`: ask the developer which one. With a theme folder it prints `{themeDir, site, pages: [{slug, status, sections: [{n, label, block, status, iterations, lastPass}]}], next: {action, page, section, sections, why}}`; without a `build.json` only `next` (`setup`). `[ENOTHEME]`: not a directory (wrong path, or setup never ran). `[EPARSE]` / `[EINVALID]`: see Recovery.
 
-`nextAction` takes the first page whose status is not `done`, or that has a reopened section, in state order. A section reopened on an `seo` or `done` page goes back through Verify (and Animate) only; page QA is not re-run (the page stays `seo` or `done`). "Open" sections are `building`, `verifying` or `animating`; `skipped` never blocks page QA or SEO. Only actions in `ACTIONS` are ever returned.
+`nextAction` first routes `not-found` once the first page in state (the one that carries the header and footer) is `seo` or `done` with no open section and `site.notFound.check.pass` is not recorded: the custom 404 page is built before that page's SEO and before any other page. Then it takes the first page whose status is not `done`, or that has a reopened section, in state order. A section reopened on an `seo` or `done` page goes back through Verify (and Animate) only; page QA is not re-run (the page stays `seo` or `done`). "Open" sections are `building`, `verifying` or `animating`; `skipped` never blocks page QA or SEO. Only actions in `ACTIONS` are ever returned.
 
 | State | `next.action` |
 |---|---|
@@ -30,6 +30,7 @@ node "$PB/lib/status.mjs" "$THEME"
 | `building`, every section `done`/`skipped`, a header/footer section `done` and not `inPart` (no other page has it in a part) | `move-parts` (`next.sections`: their `n`s) |
 | `building`, every section `done`/`skipped`, no passed or accepted `pageQa` | `page-qa` |
 | `building`, `pageQa.pass` / `pageQa.accepted`, no `editorQa.pass` | `page-editor-qa` |
+| the first page in state `seo` or `done` with no open section, and no `site.notFound.check.pass` | `not-found` (`next.page`: the first page) |
 | `seo`, or `pageQa.pass` / `pageQa.accepted` with `editorQa.pass` | `seo` |
 
 ## Status transitions
@@ -43,6 +44,13 @@ Page (`planning` -> `building` -> `seo` -> `done`):
 | `building` -> `seo` | the second of the two page checks to pass: `page-qa.mjs record` with a passing result, or `--accepted "<note>"` on design-only differences (a plain failure keeps `building` and stores `pageQa.pass: false`, clearing any earlier acceptance), and `editor-qa.mjs record` with a passing result (`editorQa.pass`; never accepted). Either alone keeps `building` |
 | `seo` -> `done` | `seo.mjs record-audit` with a passing audit (`[ESTATUS]` on any other page status, or while a section is open) |
 | `done` -> `seo` | `seo.mjs apply` on a finished page (the old audit no longer applies) |
+
+Site (`site.notFound`, the custom 404 page; `references/state-schema.md`):
+
+| From -> to | Written by |
+|---|---|
+| (none) -> written (`template`, `block`, `contentHash`, `writtenAt`) | `not-found.mjs write` (`[EEDITED]` when `templates/404.html` exists and is not the one it last wrote; a rewrite drops `check`) |
+| written -> verified (`check: {pass: true, file, at, approvedBy}`) | `not-found.mjs record --approved` with a passing, current check (`[ECHECK]`, `[ESTALE]`, `[EAPPROVAL]` otherwise) |
 
 Section (`planned` -> `building` -> `verifying` -> `animating` -> `done`):
 
@@ -266,6 +274,35 @@ node "$PB/qa/editor-qa.mjs" record "$THEME" <page> "$THEME/.protoblocks/artifact
 
 The `pb-editor-qa` user stays on the site (an administrator with an unknown password). Remove it when the build is delivered: `"$WP" user delete pb-editor-qa --yes`.
 
+### `not-found`
+
+The first page passed page QA and editor QA (status `seo`, or `done` on an older build) and the site has no verified custom 404 page. This step is mandatory on every site: without `templates/404.html` a missing URL renders the starter's `index.html` (an empty `<main>` between the header and the footer, with a 404 status), and a Taxi swap to a missing URL lands on it too. Build it before the first page's SEO.
+
+1. Compose the main content as block markup in a file, from the library's blocks (`library.mjs list`; a hero, intro or CTA block usually fits; a new block only when none does, built and gated like any other block). It must hold: an `h1` (a short, on-brand message, not just "404"), one line of copy, a link back to Home, and links to the main routes (the primary menu's pages, Contact). No form, no search box the site does not have. Keep it on-brand: the site's own photo, tokens and tone; the 404 code can appear as a detail. Use site-relative URLs (`/`, `/contact/`) and the media library's own paths (never a `.local` host, the template ships to every host).
+2. Write the template and record it:
+
+```bash
+node "$PB/lib/not-found.mjs" write "$THEME" "$THEME/.protoblocks/not-found.html"
+```
+
+   It wraps the content in the theme's page shell (header part, `[data-taxi] > [data-taxi-view]`, a full-width `<main>` group with no block gap, footer part) as `$THEME/templates/404.html` and writes `site.notFound: {template, block, contentHash, writtenAt}`; an earlier `check` is dropped. `[EINPUT]`: the content is not block markup, or already holds a template part, the Taxi wrapper or a `<main>`. `[EEDITED]`: a `templates/404.html` exists that the tool did not write (hand-made, or from before this step): keep it by moving its markup into the content file, or with the developer's OK `--force`.
+3. Check it (Playwright, reduced motion, the site's design-frame widths or desktop 1440 / mobile 390):
+
+```bash
+node "$PB/lib/not-found.mjs" check "$THEME"
+```
+
+   It loads `<site.url>/__pb-404-probe__` (the same probe `site-a11y.mjs` uses), screenshots each viewport (full page) to `$THEME/.protoblocks/artifacts/404/<name>.png`, and prints `{url, home, template, viewports: [{name, width, status, error404, taxi, main, h1, links, homeLink, title, screenshot, pageErrors, consoleErrors, imageErrors, stalled, failed, pass}], screenshots, pass, at, file}` (saved to `artifacts/404/check.json`, or `--out <file>`), exit 1 unless `pass`. A viewport passes when the response is HTTP 404, `body.error404` is set, the Taxi view is present, there is exactly one `<main>`, it holds an `h1` with text and a link to the home URL, and there are no page errors or broken images. `failed` names what is missing. `[ELOADTIMEOUT]` in a viewport's `error`: as in page QA (a stalled stylesheet or font).
+4. Open the screenshots and show them to the developer; fix what they want changed (edit the content file, `write` again, `check` again). Then, only after they approve the page:
+
+```bash
+node "$PB/lib/not-found.mjs" record "$THEME" "$THEME/.protoblocks/artifacts/404/check.json" --approved
+```
+
+   Writes `site.notFound.check: {pass: true, file, at, approvedBy: "developer"}`; status moves on to `seo`. `[ECHECK]`: the check failed. `[ESTALE]`: the check predates the last `write`. `[EINPUT]`: the check is for another site's probe. `[ESTATUS]`: the template was never written through `write`. `[EAPPROVAL]`: `--approved` missing; never pass it before the developer has seen the screenshots.
+
+The page also goes through the site accessibility pass at the end (`ask-more-pages`, the `__404__` probe row). Rebuilding the 404 later (a new photo, new routes): edit the content file, `write`, `check`, `record --approved` again; status routes `not-found` until the new check is recorded.
+
 ### `seo`
 
 Load `protoblocks-seo` for `next.page`: `seo.mjs get`, infer, OG image, schema, `seo.mjs apply`, `seo-audit.mjs`, up to 3 fix rounds, then:
@@ -321,7 +358,7 @@ node "$PB/qa/site-a11y.mjs" run "$THEME"
 
    It runs the page-QA accessibility routine (axe at every frame width, the pattern checks, the post-navigation pass; "Accessibility" under `page-qa`) on every page in state that has a `url`, plus a 404 probe `<site.url>/__pb-404-probe__` (slug `__404__`, which must answer HTTP 404 and still pass). Widths: the union of every page's design frame widths, widest first (`desktop` 1440 and `mobile` 390 when there are none); `site.qa.a11yBlocking` applies. A page row passes when its a11y passes and its status is below 400; a row has `error` only when axe could not run on it. Prints `{pages: [{slug, url, status, blocking, other, patterns, afterNavigation, pass}], pass, file}` (`status` is the HTTP status), saves it to `$THEME/.protoblocks/artifacts/site-a11y.json` (or `--out <file>`) and exits 1 unless `pass` (every page passes). `[ENOTHEME]` / `[EINPUT]`: as for the other scripts.
 
-   A failing page is fixed exactly like a page-QA content failure: "Fixing a11y failures" under `page-qa` names the fix; make it through the section loop for the section that renders the node (Build fix, gates, `page.mjs build`, `qa-input.mjs prepare`), and status routes that page through `section-verify` again. A failure in the header or footer is fixed in the block and its part (`protoblocks-section-loop` `references/header-footer.md`, step 7) and holds for every page; on the 404 probe it is usually the header, footer or the theme's `404` template. Then re-run the site pass until `pass: true`. Only then write the final report; it says the site pass passed and lists each page's remaining `other` items.
+   A failing page is fixed exactly like a page-QA content failure: "Fixing a11y failures" under `page-qa` names the fix; make it through the section loop for the section that renders the node (Build fix, gates, `page.mjs build`, `qa-input.mjs prepare`), and status routes that page through `section-verify` again. A failure in the header or footer is fixed in the block and its part (`protoblocks-section-loop` `references/header-footer.md`, step 7) and holds for every page; on the 404 probe it is the header, the footer or the 404 page's own block (fix it, then `not-found.mjs write`, `check` and `record --approved` again, see `not-found`). Then re-run the site pass until `pass: true`. Only then write the final report; it says the site pass passed and lists each page's remaining `other` items.
 
 ## Recovery
 

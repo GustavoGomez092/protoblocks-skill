@@ -10,7 +10,9 @@ import { initState } from '../../skills/protoblocks-site-builder/scripts/lib/sta
 const SCRIPT = new URL('../../skills/protoblocks-site-builder/scripts/lib/status.mjs', import.meta.url).pathname;
 // A finished setup: the theme screenshot, tokens, menus and the header part are recorded.
 const SCREENSHOT = { page: 'home', source: 'frame', writtenAt: 'x' };
-const SETUP = { tokens: {}, navigation: { menus: { primary: { id: 1 } } }, parts: { header: { writtenAt: 'x' } } };
+// `notFound` verified: the 404 page comes before the first page's SEO (its own tests below drop it).
+const SETUP = { tokens: {}, navigation: { menus: { primary: { id: 1 } } }, parts: { header: { writtenAt: 'x' } }, notFound: { template: 'templates/404.html', contentHash: 'x', writtenAt: 'x', check: { pass: true, file: 'x', at: 'x', approvedBy: 'developer' } } };
+const without404 = (state) => { delete state.site.notFound; return state; };
 const base = (pages) => ({ schemaVersion: 1, site: { url: 'http://a.local', path: '/x', theme: { slug: 'acme', screenshot: SCREENSHOT }, ...SETUP }, library: {}, pages });
 const sec = (n, status, extra = {}) => ({ n, anchor: `pb-s${n}`, status, ...extra });
 
@@ -34,6 +36,27 @@ test('skipped sections do not block page QA; page QA pass → seo', () => {
   assert.equal(nextAction(base([pg])).action, 'page-qa');
   assert.equal(nextAction(base([{ ...pg, status: 'seo', pageQa: { pass: true } }])).action, 'seo');
   assert.equal(nextAction(base([{ ...pg, pageQa: { pass: true }, editorQa: { pass: true } }])).action, 'seo');
+});
+
+test('the first page past its QA steps without a verified 404 page → not-found, before its SEO and before other pages', () => {
+  const done = (slug, status) => ({ slug, status, plan: { approvedAt: 'x' }, sections: [sec(1, 'done')], pageQa: { pass: true }, editorQa: { pass: true } });
+  const nf = nextAction(without404(base([done('home', 'seo')])));
+  assert.deepEqual([nf.action, nf.page, typeof nf.why], ['not-found', 'home', 'string']);
+  assert.equal(nextAction(without404(base([done('home', 'done'), { slug: 'about', status: 'planning', sections: [] }]))).action, 'not-found');
+  // Written but not checked, or checked but failing: still not-found.
+  for (const notFound of [{ template: 'templates/404.html', contentHash: 'x', writtenAt: 'x' }, { template: 'templates/404.html', contentHash: 'x', writtenAt: 'x', check: { pass: false } }]) {
+    const st = base([done('home', 'seo')]); st.site.notFound = notFound;
+    assert.equal(nextAction(st).action, 'not-found');
+  }
+  // Verified: SEO as before. A first page still building, or with a reopened section, is not past its QA steps.
+  assert.equal(nextAction(base([done('home', 'seo')])).action, 'seo');
+  assert.equal(nextAction(without404(base([{ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(1, 'done')] }]))).action, 'page-qa');
+  const reopened = nextAction(without404(base([{ ...done('home', 'seo'), sections: [sec(1, 'verifying')] }])));
+  assert.deepEqual([reopened.action, reopened.section], ['section-verify', 1]);
+  // Only the first page triggers it: a later page past QA with the first still building routes as before.
+  assert.equal(nextAction(without404(base([{ slug: 'home', status: 'building', plan: { approvedAt: 'x' }, sections: [sec(1, 'building')] }, done('about', 'seo')]))).action, 'section-build');
+  assert.equal(summarize(without404(base([done('home', 'seo')]))).site.notFound, 'missing');
+  assert.equal(summarize(base([done('home', 'seo')])).site.notFound, 'verified');
 });
 
 test('multi-page: next page breakdown, then ask-more-pages', () => {
@@ -122,7 +145,7 @@ test('summarize: no qa entries gives 0 iterations and null lastPass; last pass t
   const [a, b] = summarize(s).pages[0].sections;
   assert.deepEqual([a.iterations, a.lastPass, a.label, a.block], [0, null, null, null]);
   assert.deepEqual([b.iterations, b.lastPass], [2, true]);
-  assert.deepEqual(summarize(s).site, { url: 'http://a.local', theme: 'acme' });
+  assert.deepEqual(summarize(s).site, { url: 'http://a.local', theme: 'acme', notFound: 'verified' });
 });
 
 test('CLI: missing state file prints setup', () => {
@@ -192,6 +215,7 @@ test('ACTIONS lists exactly the actions nextAction returns', () => {
     base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' } })]),
     base([pg('building', [sec(1, 'done')], { plan: { approvedAt: 'x' }, pageQa: { pass: true } })]),
     base([pg('seo', [sec(1, 'done')], { pageQa: { pass: true } })]),
+    without404(base([pg('seo', [sec(1, 'done')], { pageQa: { pass: true } })])),
     base([pg('building', [sec(1, 'done', { anchor: 'pb-header' })], { plan: { approvedAt: 'x' } })]),
   ];
   assert.deepEqual([...new Set(states.map((s) => nextAction(s).action))].sort(), [...ACTIONS].sort());

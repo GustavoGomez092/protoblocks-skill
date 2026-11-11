@@ -11,7 +11,7 @@ export const OPEN = new Set(['building', 'verifying', 'animating']);
 const PART_ANCHOR_SET = new Set(Object.values(PART_ANCHORS));
 // Every action nextAction can return (enforced at runtime). The orchestrator SKILL.md has one action-table row per
 // entry and references/pipeline.md one section per entry (tested).
-export const ACTIONS = Object.freeze(['setup', 'breakdown', 'build-page', 'section-build', 'section-verify', 'section-animate', 'move-parts', 'page-qa', 'page-editor-qa', 'seo', 'ask-more-pages']);
+export const ACTIONS = Object.freeze(['setup', 'breakdown', 'build-page', 'section-build', 'section-verify', 'section-animate', 'move-parts', 'page-qa', 'page-editor-qa', 'not-found', 'seo', 'ask-more-pages']);
 
 const byN = (a, b) => a.n - b.n;
 
@@ -52,6 +52,12 @@ export const pageQaPassed = (page) => page.pageQa?.pass === true || page.pageQa?
 /** Editor QA (the page opened in the block editor, `editor-qa.mjs`) only counts as a real pass; nothing is accepted. */
 export const editorQaPassed = (page) => page.editorQa?.pass === true;
 
+/** The custom 404 page is verified once `not-found.mjs record` stored a passing, developer-approved check. */
+export const notFoundVerified = (state) => state.site?.notFound?.check?.pass === true;
+
+/** A page past its design and QA steps: `seo` or `done` (page QA and editor QA recorded) with no reopened section. */
+const pastQa = (page) => (page.status === 'seo' || page.status === 'done') && openSections(page).length === 0;
+
 const pageQaWhy = (page) => (page.pageQa?.pass !== true && page.pageQa?.accepted === true ? 'page QA differences accepted by the developer' : 'page QA passed');
 
 function sectionAction(page, s, why) {
@@ -63,6 +69,13 @@ function decide(state) {
   if (!state) return { action: 'setup', why: 'no build state yet' };
   const gaps = setupGaps(state);
   if (gaps.length) return { action: 'setup', why: `setup incomplete: missing ${gaps.join(', ')}` };
+  // Every site gets a custom 404 page once its first page (the one that carries the header and footer) finished its
+  // design and QA steps, before that page's SEO and before any other page: a missing URL must never show the index
+  // template's empty <main>.
+  const first = state.pages[0];
+  if (first && pastQa(first) && !notFoundVerified(state)) {
+    return { action: 'not-found', page: first.slug, why: `the first page (${first.slug}) finished its design and QA steps and the site has no verified 404 page yet (site.notFound.check)` };
+  }
   // A finished page with a reopened section (re-verification after a shared-block edit, a page-QA fix) comes first.
   const page = state.pages.find((p) => p.status !== 'done' || openSections(p).length);
   if (!page) return { action: 'ask-more-pages', why: state.pages.length ? 'every page is done' : 'no pages yet' };
@@ -100,7 +113,7 @@ export const nextAction = (state) => assertAction(decide(state));
 
 export function summarize(state) {
   return {
-    site: { url: state.site.url, theme: state.site.theme?.slug ?? null },
+    site: { url: state.site.url, theme: state.site.theme?.slug ?? null, notFound: notFoundVerified(state) ? 'verified' : state.site.notFound?.template ? 'written' : 'missing' },
     pages: state.pages.map((p) => ({
       slug: p.slug,
       status: p.status,
