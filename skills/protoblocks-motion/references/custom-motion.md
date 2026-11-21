@@ -12,7 +12,7 @@ Write bespoke motion only when no preset can express the intent: SVG path drawin
 6. End state equals the reduced-motion state: clear inline styles you set (`clearProps`).
 7. Use theme globals, never your own copies: `window.gsap`, `window.ScrollTrigger` (registered by `proto-init`), `window.SplitText`, `window.lottie`, `window.protoLenis` (exists only when `proto-init` is enqueued; guard it), `window.protoTaxi` and `window.pbMotion`.
 
-The Proto-Blocks plugin watchdog (`reveal-runtime.js`) forces `done` 1.5 s after a `manual` element scrolls into view (and 2 s after load for elements already in view). It is a safety net, not a timing: a tween that is still running then snaps to its end. Keep bespoke timelines under about 1.2 s after the trigger.
+The Proto-Blocks plugin watchdog (`reveal-runtime.js`) forces `done` 1.5 s after a `manual` element scrolls into view (from plugin 2.16.2, 1.5 s after window load if that is later; and 2 s after load for elements already in view). It is a safety net, not a timing: a tween that is still running then snaps to its end. Keep bespoke timelines under about 1.2 s after the trigger.
 
 ## Script lifetime
 

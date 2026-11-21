@@ -36,15 +36,17 @@ add_action('wp_head', function () {
         'stagger'  => (float) $profile['stagger'],
         'distance' => (float) $profile['distance'],
     ];
-    // Anti-flash: reveal elements start hidden, only when motion is wanted. Failsafe: if the runtime has not started
-    // (no html.pb-motion-on) 4 s after the element is styled, e.g. a JS-delaying optimizer holds it or it failed to
-    // load, a one-frame animation pins opacity 1. pb-motion.js adds the class first thing when it runs.
+    // Anti-flash: reveal elements start hidden, only when motion is wanted and JS runs. html.pb-motion-js is added
+    // here, in <head>, before anything is painted; with JS off it never is, so nothing is hidden (this replaces a
+    // <noscript> fallback, whose contents Taxi parses as live elements on a page swap). <html> survives swaps, so
+    // a swapped-in section is hidden the instant it exists. Failsafe: if the runtime has not started (no
+    // html.pb-motion-on) 4 s after the element is styled, e.g. a JS-delaying optimizer holds it or it failed to
+    // load, a one-frame animation pins opacity 1. pb-motion.js adds pb-motion-on first thing when it runs.
+    echo "<script>document.documentElement.classList.add('pb-motion-js');</script>\n";
     echo '<style id="pb-motion-css">@media (prefers-reduced-motion: no-preference){'
-        . '[data-pb-motion][data-proto-animate="manual"]{opacity:0}'
-        . 'html:not(.pb-motion-on) [data-pb-motion][data-proto-animate="manual"]{animation:pb-motion-failsafe 0s linear 4s forwards}'
+        . 'html.pb-motion-js [data-pb-motion][data-proto-animate="manual"]{opacity:0}'
+        . 'html.pb-motion-js:not(.pb-motion-on) [data-pb-motion][data-proto-animate="manual"]{animation:pb-motion-failsafe 0s linear 4s forwards}'
         . '}@keyframes pb-motion-failsafe{to{opacity:1}}</style>' . "\n";
-    // Without JS (and without the Proto-Blocks plugin's own fallback) nothing would ever reveal the content.
-    echo '<noscript><style>[data-pb-motion][data-proto-animate]{opacity:1!important}</style></noscript>' . "\n";
     echo '<script id="pb-motion-profile">window.pbMotionProfile='
         . wp_json_encode($profile, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
         . ';</script>' . "\n";

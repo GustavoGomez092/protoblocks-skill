@@ -68,6 +68,8 @@ document.addEventListener('proto:page-leave', (e) => {
 ```
 The theme itself kills ScrollTriggers whose trigger lived inside the leaving container; do not duplicate that.
 
+**Entrance animations and swaps:** never hide a section's content from a script, including an inline `<script>` inside the section. After a swap it runs too late, so the finished section shows for a frame before it animates in. Keep the hidden state in CSS keyed to `html.proto-js` (Proto-Blocks 2.16.2+; `references/templates.md`, "When your own `view.js` drives it").
+
 **Custom transition:** `window.protoTaxi.addTransition('slide', class extends window.protoTaxi.Transition { onLeave({from, done}){...done()} onEnter({to, done}){...done()} })`, then `<a href="/about" data-transition="slide">`. `window.protoTaxi` also exposes `core` (`navigateTo`, `preload`, `addRoute`).
 
 **Links not intercepted:** admin bar, wp-admin/wp-login, `mailto:`/`tel:`, `[download]`, hash-only, `[target]`, `[data-taxi-ignore]`, WooCommerce add-to-cart. Forms always do a full page load.

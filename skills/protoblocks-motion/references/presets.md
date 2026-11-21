@@ -33,7 +33,7 @@ Options (all optional, numbers except `start`):
 | `data-pb-distance` | px travelled; default from the profile | `fade-up`, `stagger-children`; half of it for `split-chars` |
 | `data-pb-speed` | factor, default 1 | `parallax` (drift), `marquee` (loop takes 20 s / speed) |
 
-The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view, snapping an unfinished tween to its end. Budget: `data-pb-delay` + duration (`data-pb-duration`, else the profile's) + stagger x (n - 1) must stay under about 1.4 s (a counter without `data-pb-duration` runs twice the profile duration, between 1 s and 1.2 s). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
+The plugin watchdog forces `done` 1.5 s after a `manual` element scrolls into view (from plugin 2.16.2, after window load if that is later), snapping an unfinished tween to its end. Budget: `data-pb-delay` + duration (`data-pb-duration`, else the profile's) + stagger x (n - 1) must stay under about 1.4 s (a counter without `data-pb-duration` runs twice the profile duration, between 1 s and 1.2 s). Keep delays small and put large `stagger-children` grids on `subtle`, or lower `data-pb-stagger`.
 
 ## Choosing per pattern
 

@@ -58,38 +58,52 @@ flashes: a view script runs in the footer, so the browser has already painted
 the section at full size and full opacity before the script can touch it. The
 reader sees the finished layout, it vanishes, then it animates in.
 
-So keep the hidden state in CSS, scoped so it stops applying the moment your
-script owns the element, and set the attribute in the same tick you start the
-animation:
+Key the hidden state to `html.proto-js`. Proto-Blocks 2.16.2+ adds that class
+to `<html>` from `<head>`, before anything is painted; with JS off it is never
+set, so nothing is hidden. `<html>` survives Taxi swaps, so the rule applies the
+instant a swapped-in section exists. Set `done` in the same tick you write the
+animation's start states:
 
 ```css
-.my-block[data-proto-animate="manual"] [data-my-reveal] { opacity: 0; visibility: hidden; }
+html.proto-js .my-block[data-proto-animate="manual"] [data-my-reveal] { opacity: 0; visibility: hidden; }
 ```
 ```js
-gsap.fromTo(els, { autoAlpha: 0 }, { autoAlpha: 1, stagger: 0.08 });
-section.setAttribute('data-proto-animate', 'done');   // same tick
+gsap.set(els, { autoAlpha: 0, y: 24 });                // start states inline first
+section.setAttribute('data-proto-animate', 'done');    // lifts the CSS, same tick
+gsap.to(els, { autoAlpha: 1, y: 0, stagger: 0.08 });
 ```
 
 `visibility` alongside `opacity` because `autoAlpha` sets both, and opacity
 alone leaves the text selectable and reachable by find-in-page while invisible.
+Set `data-proto-animate` only on the frontend (`$is_preview` false), so nothing
+is hidden in the editor.
 
-Two traps, both of which have shipped:
+Traps, all of which have shipped:
 
-- **Do not key the hidden state on an attribute you do not exclusively own.**
-  `data-proto-animate` has two authors: the plugin's reveal runtime force-reveals
-  a `"manual"` section 1500ms after it enters view, whatever your script is
-  doing. A rule keyed on it lifts early on a slow load, shows the content, and
-  only then does your script hide it to animate. Scope to your own block's class
-  as above, or to a marker only your script writes.
-- **The plugin's no-JS fallback can leak into the live document.** It is printed
-  inside `<noscript>`, which Taxi parses as real elements (it parses with
-  scripting disabled), so a page merge can promote it into the DOM where its
-  `!important` overrides everything. `proto-blocks-theme` ships a guard for this;
-  on a theme without one, strip any loose `<style>` matching
-  `[data-proto-animate]:not([data-proto-animate="done"])`.
+- **Never hide from a script, including an inline `<script>` inside the
+  section** that adds a pending class while it is parsed
+  (`document.currentScript.parentNode`). It works on a full load. A Taxi swap
+  imports the view with its scripts inert and runs them after the markup is in
+  the document; proto-blocks-theme 1.6.0+ holds the view hidden until they
+  settle but caps the hold on a slow network, and older forks have no hold. The
+  finished section shows for a frame, vanishes and animates in. Symptom: right
+  on reload, flashes when arriving by a link.
+- **Plugin before 2.16.2: the `manual` watchdog fires early.** It
+  force-revealed a `manual` section 1500ms after it entered view, so on a slow
+  load a rule keyed on `manual` lifted before the block's script had arrived.
+  2.16.2 starts the 1500ms after window load (capped at 10s). On an older
+  plugin, key the hidden state to a marker only your script sets instead, and
+  add a CSS failsafe animation (`animation: x 0s linear 10s forwards`, keyframes
+  to `opacity:1; visibility:visible`) in place of the watchdog.
+- **Plugin before 2.16.2: there is no `proto-js`, and the no-JS fallback is a
+  `<noscript>`.** Taxi parses fetched pages with scripting disabled, so a merge
+  can promote that `<style>` (with its `!important`) into the live document;
+  `proto-blocks-theme` ships a guard. On such a site, add your own class from
+  `<head>` (`add_action('wp_head', ..., 0)` echoing
+  `document.documentElement.classList.add('mytheme-js')`) and key to it.
 
-Reproduce both by **navigating** rather than reloading, with the cache disabled.
-A warm reload hides them.
+Reproduce all of these by **navigating** rather than reloading, with the cache
+disabled. A warm reload hides them.
 
 ## The `data-proto-*` system
 

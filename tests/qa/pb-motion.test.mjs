@@ -391,6 +391,7 @@ foreach ($hooks as [$h, $cb, $p]) { if ($h === 'wp_head' && $p === 2) $cb(); }
   assert.ok(!head.includes('</script><script>alert'), 'ease escaped');
   assert.match(head, /"duration":1\.2,/);
   assert.ok(!head.includes('evil'));
+  assert.ok(!head.includes('<noscript'), 'no <noscript> fallback: Taxi parses it as live elements on a swap');
   const html = `<!doctype html><html><head>${head}</head><body><h1 id="n" data-pb-motion="fade-up" data-proto-animate="manual">Hi</h1></body></html>`;
   const browser = await launchBrowser();
   try {

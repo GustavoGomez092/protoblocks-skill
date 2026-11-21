@@ -74,7 +74,7 @@ Only when presets cannot express the intent (SVG drawing, Lottie, cursor effects
 ## Iron rules
 
 - No motion in the editor preview: attributes only when `$is_preview` is false.
-- Never hide content without `data-proto-animate="manual"`; the plugin watchdog is the safety net, not the timing (it forces `done` 1.5 s after the element enters view).
+- Never hide content without `data-proto-animate="manual"`; the plugin watchdog is the safety net, not the timing (it forces `done` 1.5 s after the element enters view, or after window load if later from plugin 2.16.2).
 - Transform, opacity and clip-path only. Respect reduced motion (the runtime does; bespoke code must).
 - Never edit `pb-motion.js` or `pb-motion.php` (managed, overwritten on install).
 - Never record without a passing check unless the developer accepted that exact section.
