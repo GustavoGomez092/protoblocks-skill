@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.1
+
+Entrance animations that flash after a page transition (Proto-Blocks 2.16.2, proto-blocks-theme reveal guard).
+
+- `pb-motion.php` (managed theme asset): the hide CSS is keyed to `html.pb-motion-js`, a class it adds to `<html>` from `<head>`, and the `<noscript>` fallback is gone. With JS off the class is never set, so nothing is hidden; a `<noscript>` style could be promoted into the live page by a Taxi merge (Taxi parses fetched pages with scripting disabled). Sites pick it up on the next `motion.mjs install`. `tests/qa/pb-motion.test.mjs` asserts no `<noscript>` is printed.
+- `protoblocks` `references/templates.md`, "When your own `view.js` drives it": key the hidden state to `html.proto-js` (Proto-Blocks 2.16.2+); never hide from a script, including an inline `<script>` inside the section, which runs after a swap has put the section on screen; the watchdog and `<noscript>` traps are stated as pre-2.16.2 behaviour with the workaround for older plugins. `references/theme.md`: a pointer from the Taxi section. `references/interactivity.md`: the no-JS fallback is keyed to `html:not(.proto-js)`.
+- `protoblocks-motion` (`SKILL.md`, `references/presets.md`, `references/custom-motion.md`): from plugin 2.16.2 the watchdog's 1.5 s start at window load when that is later than the element entering view.
+
 ## 2.7.0
 
 The custom 404 page is a mandatory step of every build.
